@@ -1,29 +1,40 @@
-
-
 using UnityEngine;
 
 namespace FinalStateMachine
 {
     public class FSM_StateMovePlayer : FSM_State
     {
-        protected CharacterController _characterController;
+        protected Entity _entity;
 
-        public FSM_StateMovePlayer(Fsm fsm, CharacterController characterController) : base(fsm)
+        public FSM_StateMovePlayer(Fsm fsm, Entity entity) : base(fsm)
         {
-            _characterController = characterController;
+            _entity = entity;
         }
 
         public override void Enter()
         {
-            base.Enter();
+            _entity.Moved = true;
         }
         public override void Update()
         {
-            base.Update();
+            if (CheckMove()) { return; }
+
+            Vector2 move = _entity.MoveDirection * _entity._speed.CurrentValue * Time.deltaTime;
         }
         public override void Exit()
         {
-            base.Exit();
+            _entity.Moved = false;
+        }
+
+        bool CheckMove()
+        {
+            if (_entity.MoveDirection == Vector2.zero)
+            {
+                Fsm.SetState<FSM_StateStandPlayer>();
+                return true;
+            }
+
+            return false;
         }
     }
 }
