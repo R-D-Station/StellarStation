@@ -67,9 +67,6 @@ jobs:
         with:
           unityVersion: 6000.3.11f1
           targetPlatform: ${{ matrix.targetPlatform }}
-          modules: |
-            adaptiveperformance
-            vectorgraphics
 
       - name: Set build status label on PR
         if: github.event_name == 'pull_request' && always()
