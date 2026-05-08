@@ -1,4 +1,4 @@
-name: Unity Build (Buildalon)
+name: Unity Build Check (Buildalon)
 
 on:
   push:
@@ -8,29 +8,62 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.build-target }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build-target: StandaloneLinux64
+          - os: windows-latest
+            build-target: StandaloneWindows64
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
         with:
           lfs: true
 
-      - uses: buildalon/unity-setup@v2
+      - name: Setup Unity Editor
+        uses: buildalon/unity-setup@v2
         with:
-          build-targets: 'StandaloneLinux64'
+          build-targets: '${{ matrix.build-target }}'
 
-      - uses: buildalon/activate-unity-license@v2
+      - name: Activate Unity Personal License
+        uses: buildalon/activate-unity-license@v2
         with:
           license: 'Personal'
           username: '${{ secrets.UNITY_USERNAME }}'
           password: '${{ secrets.UNITY_PASSWORD }}'
 
-      - name: Install Buildalon Package
+      - name: Install Buildalon Build Pipeline Package
         run: |
           npm install -g openupm-cli
           openupm add com.virtualmaker.buildalon
 
-      - uses: buildalon/unity-action@v3
-        name: '${{ matrix.build-target }}-Build'
+      - name: Build Unity Project (${{ matrix.build-target }})
+        uses: buildalon/unity-action@v3
         with:
-          build-target: '${{ matrix.build-target }}'
-          args: '-quit -batchmode -nographics -buildTarget ${{ matrix.build-target }} -executeMethod UnityEditor.BuildPipeline.BuildPlayer'
+          build-target: ${{ matrix.build-target }}
+          args: '-quit -batchmode -executeMethod Buildalon.Editor.BuildPipeline.UnityPlayerBuildTools.StartCommandLineBuild'
+
+      - name: Set build status label on PR
+        if: github.event_name == 'pull_request' && always()
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" = "failure" ]; then
+            echo "Build failed. Adding 'Do not merge' label..."
+            gh pr edit $PR_NUMBER --add-label "Do not merge"
+          elif [ "$JOB_STATUS" = "success" ]; then
+            echo "Build succeeded. Removing 'Do not merge' label..."
+            gh pr edit $PR_NUMBER --remove-label "Do not merge" || true
+          fi
