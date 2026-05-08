@@ -1,4 +1,4 @@
-name: Unity Build Check (Windows & Ubuntu)
+name: Unity Build (Buildalon)
 
 on:
   push:
@@ -8,91 +8,29 @@ on:
 
 jobs:
   build:
-    name: Build ${{ matrix.targetPlatform }} on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: read
-      pull-requests: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            targetPlatform: StandaloneWindows64
-          - os: ubuntu-latest
-            targetPlatform: StandaloneLinux64
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           lfs: true
 
-      - name: Cache Unity Library
-        uses: actions/cache@v4
+      - uses: buildalon/unity-setup@v2
         with:
-          path: Library
-          key: Library-${{ runner.os }}-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
-          restore-keys: |
-            Library-${{ runner.os }}-
-            Library-
+          build-targets: 'StandaloneLinux64'
 
-      - name: Debug - Check secrets exist
-        shell: bash
-        run: |
-          echo "=== SECRETS CHECK ==="
-          if [ -z "${{ secrets.UNITY_EMAIL }}" ]; then
-            echo "ERROR: UNITY_EMAIL is empty or not set!"
-          else
-            echo "OK: UNITY_EMAIL is set (length: $(echo -n '${{ secrets.UNITY_EMAIL }}' | wc -c))"
-          fi
-
-          if [ -z "${{ secrets.UNITY_PASSWORD }}" ]; then
-            echo "ERROR: UNITY_PASSWORD is empty or not set!"
-          else
-            echo "OK: UNITY_PASSWORD is set (length: $(echo -n '${{ secrets.UNITY_PASSWORD }}' | wc -c))"
-          fi
-
-          if [ -z "${{ secrets.UNITY_LICENSE }}" ]; then
-            echo "ERROR: UNITY_LICENSE is empty or not set!"
-          else
-            echo "OK: UNITY_LICENSE is set (length: $(echo -n '${{ secrets.UNITY_LICENSE }}' | wc -c))"
-          fi
-
-      - name: Build Unity Project
-        uses: game-ci/unity-builder@v4
-        env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_SERIAL: ""
+      - uses: buildalon/activate-unity-license@v2
         with:
-          unityVersion: 6000.3.11f1
-          targetPlatform: ${{ matrix.targetPlatform }}
-          manualExit: true
-          preBuildSteps: |
-            echo "=== Manual License Activation ==="
-            # Сохраняем файл лицензии из секрета в стандартную директорию Unity
-            mkdir -p /root/.config/unity3d/Unity
-            echo "$UNITY_LICENSE" > /root/.config/unity3d/Unity/Unity_lic.ulf
-            # Активируем лицензию вручную, используя email и пароль
-            unity-editor -batchmode -quit -nographics -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /dev/stdout
-            echo "=== Manual License Activation Complete ==="
+          license: 'Personal'
+          username: '${{ secrets.UNITY_USERNAME }}'
+          password: '${{ secrets.UNITY_PASSWORD }}'
 
-      - name: Set build status label on PR
-        if: github.event_name == 'pull_request' && always()
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-          JOB_STATUS: ${{ job.status }}
+      - name: Install Buildalon Package
         run: |
-          if [ "$JOB_STATUS" = "failure" ]; then
-            echo "Build failed. Adding 'Do not merge' label..."
-            gh pr edit $PR_NUMBER --add-label "Do not merge"
-          elif [ "$JOB_STATUS" = "success" ]; then
-            echo "Build succeeded. Removing 'Do not merge' label..."
-            gh pr edit $PR_NUMBER --remove-label "Do not merge" || true
-          else
-            echo "Build status is '$JOB_STATUS'. No label changes."
-          fi
+          npm install -g openupm-cli
+          openupm add com.virtualmaker.buildalon
+
+      - uses: buildalon/unity-action@v3
+        name: Build Linux
+        with:
+          build-target: 'StandaloneLinux64'
+          args: '-quit -batchmode -executeMethod Buildalon.Editor.BuildPipeline.UnityPlayerBuildTools.StartCommandLineBuild'
