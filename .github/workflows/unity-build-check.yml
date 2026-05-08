@@ -64,3 +64,21 @@ jobs:
           targetPlatform: ${{ matrix.targetPlatform }}
       - name: Log build result
         run: echo "Unity build for ${{ matrix.targetPlatform }} finished."
+
+      - name: Set build status label on PR
+        if: github.event_name == 'pull_request' && always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" == "failure" ]; then
+            echo "Build failed. Adding 'Do not merge' label..."
+            gh pr edit $PR_NUMBER --add-label "Do not merge"
+          elif [ "$JOB_STATUS" == "success" ]; then
+            echo "Build succeeded. Removing 'Do not merge' label..."
+            gh pr edit $PR_NUMBER --remove-label "Do not merge" || true
+          else
+            echo "Build status is '$JOB_STATUS'. No label changes."
+          fi
