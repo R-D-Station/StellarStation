@@ -23,18 +23,16 @@ jobs:
             targetPlatform: StandaloneLinux64
     steps:
       - name: Log start info
+        shell: bash
         run: |
           echo "Starting build process..."
           echo "Runner OS: ${{ matrix.os }}"
           echo "Target platform: ${{ matrix.targetPlatform }}"
-          echo "Unity version: 6000.3.11f1"
 
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           lfs: true
-      - name: Log checkout success
-        run: echo "Repository code checked out successfully."
 
       - name: Cache Unity Library
         uses: actions/cache@v4
@@ -44,8 +42,15 @@ jobs:
           restore-keys: |
             Library-${{ runner.os }}-
             Library-
-      - name: Log cache status
-        run: echo "Library cache check completed."
+
+      - name: Debug secrets
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.UNITY_LICENSE }}" ]; then
+            echo "ERROR: UNITY_LICENSE secret is empty!"
+          else
+            echo "UNITY_LICENSE length: $(echo '${{ secrets.UNITY_LICENSE }}' | wc -c)"
+          fi
 
       - name: Build Unity Project
         uses: game-ci/unity-builder@v4
@@ -55,21 +60,19 @@ jobs:
           unityVersion: 6000.3.11f1
           targetPlatform: ${{ matrix.targetPlatform }}
 
-      - name: Log build result
-        run: echo "Unity build for ${{ matrix.targetPlatform }} finished."
-
       - name: Set build status label on PR
         if: github.event_name == 'pull_request' && always()
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
           JOB_STATUS: ${{ job.status }}
         run: |
-          if [ "$JOB_STATUS" == "failure" ]; then
+          if [ "$JOB_STATUS" = "failure" ]; then
             echo "Build failed. Adding 'Do not merge' label..."
             gh pr edit $PR_NUMBER --add-label "Do not merge"
-          elif [ "$JOB_STATUS" == "success" ]; then
+          elif [ "$JOB_STATUS" = "success" ]; then
             echo "Build succeeded. Removing 'Do not merge' label..."
             gh pr edit $PR_NUMBER --remove-label "Do not merge" || true
           else
