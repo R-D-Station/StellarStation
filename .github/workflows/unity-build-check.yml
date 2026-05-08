@@ -1,4 +1,4 @@
-name: Проверка сборки Unity
+name: Unity Build Check (Windows & Ubuntu)
 
 on:
   push:
