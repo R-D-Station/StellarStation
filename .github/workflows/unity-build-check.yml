@@ -4,15 +4,15 @@ on:
   push:
     branches: [ main ]
   pull_request:
+    branches: [ main ]
 
 jobs:
   build:
-    name: Build project on ${{ matrix.targetPlatform }}
-    runs-on: ubuntu-latest
+    name: Build ${{ matrix.targetPlatform }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
         include:
           - os: windows-latest
             targetPlatform: StandaloneWindows64
@@ -26,7 +26,7 @@ jobs:
           echo "Target platform: ${{ matrix.targetPlatform }}"
           echo "Unity version: 6000.3.11f1"
 
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           lfs: true
@@ -44,24 +44,39 @@ jobs:
       - name: Log cache status
         run: echo "Library cache check completed."
 
-      - name: Setup Unity Editor
-        uses: game-ci/unity-setup@v3
-        with:
-          unityVersion: 6000.3.11f1
-      - name: Log Unity setup
-        run: echo "Unity Editor version ${{ env.UNITY_VERSION }} is set up."
+      - name: Install Unity Editor (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Устанавливаем Unity Hub
+          $hubUrl = "https://public-cdn.cloud.unity3d.com/hub/prod/UnityHubSetup.exe"
+          Invoke-WebRequest -Uri $hubUrl -OutFile "UnityHubSetup.exe"
+          Start-Process -FilePath "UnityHubSetup.exe" -ArgumentList "/S" -Wait
 
-      - name: Activate Unity License
-        uses: game-ci/unity-activate@v2
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-      - name: Log license activation
-        run: echo "Unity license activation process completed."
+          # Устанавливаем Unity Editor через командную строку Unity Hub
+          $unityVersion = "6000.3.11f1"
+          & "C:\Program Files\Unity Hub\Unity Hub.exe" -- --headless install --version $unityVersion --module windows-il2cpp
+        continue-on-error: true
+
+      - name: Install Unity Editor (Ubuntu)
+        if: runner.os == 'Linux'
+        run: |
+          # Для Ubuntu используем GameCI builder напрямую
+          echo "Using GameCI builder for Linux..."
+          # Устанавливаем зависимости
+          sudo apt-get update
+          sudo apt-get install -y libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libgl1 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 zlib1g
 
       - name: Build Unity Project
         uses: game-ci/unity-builder@v4
         with:
+          unityVersion: 6000.3.11f1
           targetPlatform: ${{ matrix.targetPlatform }}
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
       - name: Log build result
         run: echo "Unity build for ${{ matrix.targetPlatform }} finished."
 
