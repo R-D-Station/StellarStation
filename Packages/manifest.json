@@ -24,7 +24,7 @@
     "com.unity.ugui": "2.0.0",
     "com.unity.visualscripting": "1.9.10",
     "com.unity.adaptiveperformance": "5.1.1",
-    "com.unity.vectorgraphics": "3.0.0-pre.7",
+    "com.unity.vectorgraphics": "file:com.unity.vectorgraphics",
     "com.unity.modules.accessibility": "1.0.0",
     "com.unity.modules.ai": "1.0.0",
     "com.unity.modules.androidjni": "1.0.0",
