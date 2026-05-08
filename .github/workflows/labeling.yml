@@ -22,6 +22,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }} 
 
       - name: Calculate diff size and assign label
         env:
@@ -57,6 +58,9 @@ jobs:
     permissions:
       pull-requests: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Add "Needs Review" label to PR
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -64,7 +68,6 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           gh pr edit $PR_NUMBER --add-label "Needs Review"
-
           echo "Added 'Needs Review' label to PR #$PR_NUMBER"
 
   # ----- Задача 3: Ярлык "Do not merge" при провале сборки -----
