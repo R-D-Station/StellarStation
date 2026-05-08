@@ -1,14 +1,18 @@
+using PlayerControls;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace FinalStateMachine
 {
     public class FSM_StateMovePlayer : FSM_State
     {
-        protected Entity _entity;
+        protected Player _entity;
 
         public FSM_StateMovePlayer(Fsm fsm, Entity entity) : base(fsm)
         {
-            _entity = entity;
+            _entity = entity.GetComponent<Player>();
+            PlayerControl inputActions = _entity.GetPlayerControl();
+            inputActions.Player.Move.canceled += StopMove; 
         }
 
         public override void Enter()
@@ -17,24 +21,19 @@ namespace FinalStateMachine
         }
         public override void Update()
         {
-            if (CheckMove()) { return; }
-
             Vector2 move = _entity.MoveDirection * _entity._speed.CurrentValue * Time.deltaTime;
+
+            _entity._rigidbody2D.linearVelocity = move;
         }
         public override void Exit()
         {
+            _entity._rigidbody2D.linearVelocity = Vector2.zero;
             _entity.Moved = false;
         }
 
-        bool CheckMove()
+        public void StopMove(InputAction.CallbackContext context)
         {
-            if (_entity.MoveDirection == Vector2.zero)
-            {
-                Fsm.SetState<FSM_StateStandPlayer>();
-                return true;
-            }
-
-            return false;
+            Fsm.SetState<FSM_StateStandPlayer>();
         }
     }
 }

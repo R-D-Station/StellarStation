@@ -398,7 +398,7 @@ MonoBehaviour:
   DisableMovement: 0
   IgnoreCollision: 0
   CanBeDragCarried: 1
-  _characterController: {fileID: 0}
+  _rigidbody2D: {fileID: 1051472578}
   _speed:
     BaseValue: 1
     ScaleBaseValue: 1

@@ -17,11 +17,22 @@ namespace FinalStateMachine
         }
         public override void Update()
         {
-            base.Update();
+            if (CheckMove()) { return; }
         }
         public override void Exit()
         {
             base.Exit();
+        }
+
+        bool CheckMove()
+        {
+            if (_entity.MoveDirection != Vector2.zero)
+            {
+                Fsm.SetState<FSM_StateMovePlayer>();
+                return true;
+            }
+
+            return false;
         }
     }
 }
