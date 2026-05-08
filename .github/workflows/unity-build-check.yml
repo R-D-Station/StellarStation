@@ -1,0 +1,64 @@
+name: Проверка сборки Unity
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  build:
+    name: Build project on ${{ matrix.targetPlatform }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+          - os: windows-latest
+            targetPlatform: StandaloneWindows64
+          - os: ubuntu-latest
+            targetPlatform: StandaloneLinux64
+    steps:
+      - name: Log start info
+        run: |
+          echo "Starting build process..."
+          echo "Runner OS: ${{ matrix.os }}"
+          echo "Target platform: ${{ matrix.targetPlatform }}"
+          echo "Unity version: 6000.3.11f1"
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+      - name: Log checkout success
+        run: echo "Repository code checked out successfully."
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-${{ runner.os }}-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-${{ runner.os }}-
+            Library-
+      - name: Log cache status
+        run: echo "Library cache check completed."
+
+      - name: Setup Unity Editor
+        uses: game-ci/unity-setup@v3
+        with:
+          unityVersion: 6000.3.11f1
+      - name: Log Unity setup
+        run: echo "Unity Editor version ${{ env.UNITY_VERSION }} is set up."
+
+      - name: Activate Unity License
+        uses: game-ci/unity-activate@v2
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+      - name: Log license activation
+        run: echo "Unity license activation process completed."
+
+      - name: Build Unity Project
+        uses: game-ci/unity-builder@v4
+        with:
+          targetPlatform: ${{ matrix.targetPlatform }}
+      - name: Log build result
+        run: echo "Unity build for ${{ matrix.targetPlatform }} finished."
