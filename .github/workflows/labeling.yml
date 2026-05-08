@@ -1,0 +1,103 @@
+name: Pull Request Labeling and Checks
+
+# Запускаем при открытии, переоткрытии и синхронизации (новые коммиты) PR,
+# а также при завершении сборки (для простановки статусных ярлыков)
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  workflow_run:
+    workflows: ["Unity Build Check (Windows & Ubuntu)"]
+    types:
+      - completed
+
+jobs:
+  # ----- Задача 1: Оценка размера изменений -----
+  size-label:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate diff size and assign label
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          TOTAL_CHANGES=$(git diff origin/${{ github.base_ref }}...origin/${{ github.head_ref }} | wc -l)
+          echo "Total lines changed: $TOTAL_CHANGES"
+
+          if [ "$TOTAL_CHANGES" -lt 100 ]; then
+            SIZE_LABEL="size/S"
+          elif [ "$TOTAL_CHANGES" -lt 500 ]; then
+            SIZE_LABEL="size/M"
+          elif [ "$TOTAL_CHANGES" -lt 1000 ]; then
+            SIZE_LABEL="size/L"
+          else
+            SIZE_LABEL="size/XL"
+          fi
+
+          echo "Assigned size label: $SIZE_LABEL"
+
+          gh pr edit $PR_NUMBER --remove-label "size/S,size/M,size/L,size/XL" || true
+
+          gh pr edit $PR_NUMBER --add-label "$SIZE_LABEL"
+
+          echo "Successfully set label to $SIZE_LABEL for PR #$PR_NUMBER"
+
+  # ----- Задача 2: Установка ярлыка "Needs Review" -----
+  review-label:
+    if: github.event_name == 'pull_request' && (github.event.action == 'opened' || github.event.action == 'reopened')
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Add "Needs Review" label to PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh pr edit $PR_NUMBER --add-label "Needs Review"
+
+          echo "Added 'Needs Review' label to PR #$PR_NUMBER"
+
+  # ----- Задача 3: Ярлык "Do not merge" при провале сборки -----
+  build-status-label:
+    if: github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Find associated PR and set build status label
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          BUILD_STATUS=$(gh api repos/$REPO/actions/runs/$WORKFLOW_RUN_ID --jq '.conclusion')
+          echo "Build workflow conclusion: $BUILD_STATUS"
+
+          PR_NUMBER=$(gh api repos/$REPO/actions/runs/$WORKFLOW_RUN_ID --jq '.pull_requests[0].number // empty')
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "No PR associated with this build run. Exiting."
+            exit 0
+          fi
+
+          echo "Associated PR number: $PR_NUMBER"
+
+          if [ "$BUILD_STATUS" == "failure" ]; then
+            gh pr edit $PR_NUMBER --add-label "Do not merge"
+            echo "Build failed. Added 'Do not merge' label to PR #$PR_NUMBER."
+          elif [ "$BUILD_STATUS" == "success" ]; then
+            gh pr edit $PR_NUMBER --remove-label "Do not merge" || true
+            echo "Build succeeded. Removed 'Do not merge' label from PR #$PR_NUMBER (if present)."
+          else
+            echo "Build job completed with status '$BUILD_STATUS'. No label changes made."
+          fi
