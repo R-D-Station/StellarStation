@@ -30,7 +30,7 @@ jobs:
           openupm add com.virtualmaker.buildalon
 
       - uses: buildalon/unity-action@v3
-        name: Build Linux
+        name: '${{ matrix.build-target }}-Build'
         with:
-          build-target: 'StandaloneLinux64'
-          args: '-quit -batchmode -executeMethod Buildalon.Editor.BuildPipeline.UnityPlayerBuildTools.StartCommandLineBuild'
+          build-target: '${{ matrix.build-target }}'
+          args: '-quit -batchmode -nographics -buildTarget ${{ matrix.build-target }} -executeMethod UnityEditor.BuildPipeline.BuildPlayer'
