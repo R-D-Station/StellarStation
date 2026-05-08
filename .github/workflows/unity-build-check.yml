@@ -67,6 +67,7 @@ jobs:
         with:
           unityVersion: 6000.3.11f1
           targetPlatform: ${{ matrix.targetPlatform }}
+          manualExit: true
 
       - name: Set build status label on PR
         if: github.event_name == 'pull_request' && always()
