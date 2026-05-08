@@ -10,6 +10,9 @@ jobs:
   build:
     name: Build ${{ matrix.targetPlatform }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -24,7 +27,7 @@ jobs:
           echo "Starting build process..."
           echo "Runner OS: ${{ matrix.os }}"
           echo "Target platform: ${{ matrix.targetPlatform }}"
-          echo "Unity version: 6000.0.48f1"
+          echo "Unity version: 6000.3.11f1"
 
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -47,10 +50,9 @@ jobs:
       - name: Build Unity Project
         uses: game-ci/unity-builder@v4
         env:
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
-          unityVersion: 6000.0.48f1
+          unityVersion: 6000.3.11f1
           targetPlatform: ${{ matrix.targetPlatform }}
 
       - name: Log build result
