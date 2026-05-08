@@ -68,6 +68,14 @@ jobs:
           unityVersion: 6000.3.11f1
           targetPlatform: ${{ matrix.targetPlatform }}
           manualExit: true
+          preBuildSteps: |
+            echo "=== Manual License Activation ==="
+            # Сохраняем файл лицензии из секрета в стандартную директорию Unity
+            mkdir -p /root/.config/unity3d/Unity
+            echo "$UNITY_LICENSE" > /root/.config/unity3d/Unity/Unity_lic.ulf
+            # Активируем лицензию вручную, используя email и пароль
+            unity-editor -batchmode -quit -nographics -username "$UNITY_EMAIL" -password "$UNITY_PASSWORD" -logFile /dev/stdout
+            echo "=== Manual License Activation Complete ==="
 
       - name: Set build status label on PR
         if: github.event_name == 'pull_request' && always()
