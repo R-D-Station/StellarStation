@@ -22,13 +22,6 @@ jobs:
           - os: ubuntu-latest
             targetPlatform: StandaloneLinux64
     steps:
-      - name: Log start info
-        shell: bash
-        run: |
-          echo "Starting build process..."
-          echo "Runner OS: ${{ matrix.os }}"
-          echo "Target platform: ${{ matrix.targetPlatform }}"
-
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -43,21 +36,36 @@ jobs:
             Library-${{ runner.os }}-
             Library-
 
-      - name: Debug secrets
+      - name: Debug - Check secrets exist
         shell: bash
         run: |
-          if [ -z "${{ secrets.UNITY_LICENSE }}" ]; then
-            echo "ERROR: UNITY_LICENSE secret is empty!"
+          echo "=== SECRETS CHECK ==="
+          if [ -z "${{ secrets.UNITY_EMAIL }}" ]; then
+            echo "ERROR: UNITY_EMAIL is empty or not set!"
           else
-            echo "UNITY_LICENSE length: $(echo '${{ secrets.UNITY_LICENSE }}' | wc -c)"
+            echo "OK: UNITY_EMAIL is set (length: $(echo -n '${{ secrets.UNITY_EMAIL }}' | wc -c))"
+          fi
+
+          if [ -z "${{ secrets.UNITY_PASSWORD }}" ]; then
+            echo "ERROR: UNITY_PASSWORD is empty or not set!"
+          else
+            echo "OK: UNITY_PASSWORD is set (length: $(echo -n '${{ secrets.UNITY_PASSWORD }}' | wc -c))"
+          fi
+
+          if [ -z "${{ secrets.UNITY_LICENSE }}" ]; then
+            echo "ERROR: UNITY_LICENSE is empty or not set!"
+          else
+            echo "OK: UNITY_LICENSE is set (length: $(echo -n '${{ secrets.UNITY_LICENSE }}' | wc -c))"
           fi
 
       - name: Build Unity Project
         uses: game-ci/unity-builder@v4
         env:
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
-          unityVersion: 6000.3.11f1
+          unityVersion: 6000.0.48f1
           targetPlatform: ${{ matrix.targetPlatform }}
 
       - name: Set build status label on PR
