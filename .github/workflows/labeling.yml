@@ -77,6 +77,9 @@ jobs:
     permissions:
       pull-requests: write
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
       - name: Find associated PR and set build status label
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
