@@ -1,0 +1,69 @@
+name: Unity Build Check (Buildalon)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: Build ${{ matrix.build-target }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build-target: StandaloneLinux64
+          - os: windows-latest
+            build-target: StandaloneWindows64
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Unity Editor
+        uses: buildalon/unity-setup@v2
+        with:
+          build-targets: '${{ matrix.build-target }}'
+
+      - name: Activate Unity Personal License
+        uses: buildalon/activate-unity-license@v2
+        with:
+          license: 'Personal'
+          username: '${{ secrets.UNITY_USERNAME }}'
+          password: '${{ secrets.UNITY_PASSWORD }}'
+
+      - name: Install Buildalon Build Pipeline Package
+        run: |
+          npm install -g openupm-cli
+          openupm add com.virtualmaker.buildalon
+
+      - name: Build Unity Project (${{ matrix.build-target }})
+        uses: buildalon/unity-action@v3
+        with:
+          build-target: ${{ matrix.build-target }}
+          args: '-quit -batchmode -executeMethod Buildalon.Editor.BuildPipeline.UnityPlayerBuildTools.StartCommandLineBuild'
+
+      - name: Set build status label on PR
+        if: github.event_name == 'pull_request' && always()
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [ "$JOB_STATUS" = "failure" ]; then
+            echo "Build failed. Adding 'Do not merge' label..."
+            gh pr edit $PR_NUMBER --add-label "Do not merge"
+          elif [ "$JOB_STATUS" = "success" ]; then
+            echo "Build succeeded. Removing 'Do not merge' label..."
+            gh pr edit $PR_NUMBER --remove-label "Do not merge" || true
+          fi
