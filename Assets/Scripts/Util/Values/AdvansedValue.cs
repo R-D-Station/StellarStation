@@ -313,7 +313,7 @@ namespace ValuesEye
             UpdateValue();
         }
     }
-
+#if UNITY_EDITOR
     [CustomEditor(typeof(AdvansedValue))]
     public class AdvansedValueEditor : Editor
     {
@@ -334,4 +334,6 @@ namespace ValuesEye
             }
         }
     }
+    #endif
 }
+
