@@ -28,4 +28,10 @@ public class LoginRequestMessage
 
         return fullMessage;
     }
+
+    public static LoginRequestMessage Deserialize(byte[] data)
+    {
+        string json = Encoding.UTF8.GetString(data);
+        return JsonUtility.FromJson<LoginRequestMessage>(json);
+    }
 }

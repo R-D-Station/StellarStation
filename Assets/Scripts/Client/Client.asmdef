@@ -4,7 +4,7 @@
 	"references": [
 		"Shared",
 		"Unity.InputSystem",
-		"Assembly-CSharp"
+		"Unity.TextMeshPro"
 	],
 	"includePlatforms": [],
 	"excludePlatforms": [],

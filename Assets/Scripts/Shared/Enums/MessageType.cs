@@ -7,5 +7,7 @@ public enum MessageType : byte
     PlayerJoined = 3,
     PlayerLeft = 4,
     PlayerPosition = 5,
-    GameStart = 6
+    GameStart = 6,
+    LobbyState = 7,
+    ChatMessage = 8
 }
