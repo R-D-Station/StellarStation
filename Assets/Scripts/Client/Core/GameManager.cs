@@ -4,6 +4,7 @@ using Client.Network;
 using Client.Gameplay.Entities;
 using Shared.Messages;
 using Shared.Enums;
+using Client.UI;
 
 namespace Client.Core
 {
@@ -14,6 +15,7 @@ namespace Client.Core
         [Header("UI")]
         [SerializeField] private GameObject _loginPanel;
         [SerializeField] private UI.LoginUI _loginUI;
+        private Client.UI.LobbyUI _lobbyUI;
 
         [Header("Player")]
         [SerializeField] private Player _player;
@@ -22,7 +24,7 @@ namespace Client.Core
         private int _localPlayerId = -1;
         private string _playerName;
 
-        public enum State { Login, Connecting, InGame }
+        public enum State { Login, Connecting, Lobby, InGame }
         private State _currentState;
 
         void Awake()
@@ -42,6 +44,12 @@ namespace Client.Core
 
             if (_player != null)
                 _player.enabled = false;
+
+            _lobbyUI = GetComponent<Client.UI.LobbyUI>();
+            if (_lobbyUI == null)
+                _lobbyUI = gameObject.AddComponent<Client.UI.LobbyUI>();
+
+            gameObject.AddComponent<Client.UI.LobbyUICreator>();
 
             _gameClient = new GameClient();
             _gameClient.OnConnected += OnConnected;
@@ -71,32 +79,24 @@ namespace Client.Core
         {
             try
             {
-                // Читаем длину заголовка из первых 4 байт
                 int headerLength = BitConverter.ToInt32(data, 0);
 
-                // Проверяем, что данных достаточно
                 if (data.Length < 4 + headerLength)
                 {
                     Debug.LogError($"[GameManager] Message too short: {data.Length} bytes, header says {headerLength}");
                     return;
                 }
 
-                // Извлекаем заголовок
                 byte[] headerData = new byte[4 + headerLength];
                 Array.Copy(data, 0, headerData, 0, 4 + headerLength);
                 MessageHeader header = MessageHeader.Deserialize(headerData);
 
-                // Вычисляем размер данных заголовка (4 байта длины + сам JSON)
                 int headerSize = 4 + headerLength;
-
-                // тело сообщения
                 int bodySize = data.Length - headerSize;
                 byte[] body = new byte[bodySize];
 
                 if (bodySize > 0)
-                {
                     Array.Copy(data, headerSize, body, 0, bodySize);
-                }
 
                 Debug.Log($"[GameManager] Received message type: {header.messageType}");
 
@@ -104,6 +104,22 @@ namespace Client.Core
                 {
                     case MessageType.LoginResponse:
                         HandleLoginResponse(body);
+                        break;
+
+                    case MessageType.LobbyState:
+                        HandleLobbyState(body);
+                        break;
+
+                    case MessageType.ChatMessage:
+                        HandleChatMessage(body);
+                        break;
+
+                    case MessageType.PlayerJoined:
+                        HandlePlayerJoined(body);
+                        break;
+
+                    case MessageType.PlayerLeft:
+                        HandlePlayerLeft(body);
                         break;
 
                     case MessageType.GameStart:
@@ -138,6 +154,33 @@ namespace Client.Core
             }
         }
 
+        void HandleLobbyState(byte[] data)
+        {
+            var lobby = LobbyStateMessage.Deserialize(data);
+            Debug.Log($"[GameManager] Lobby players: {string.Join(", ", lobby.players)}");
+            _lobbyUI?.UpdatePlayerList(lobby.players);
+            SetState(State.Lobby);
+        }
+
+        void HandleChatMessage(byte[] data)
+        {
+            var chat = ChatMessage.Deserialize(data);
+            Debug.Log($"[GameManager] Chat received: {chat.playerName}: {chat.message}");
+            _lobbyUI?.AddChatMessage(chat.playerName, chat.message);
+        }
+
+        void HandlePlayerJoined(byte[] data)
+        {
+            var msg = PlayerJoinedMessage.Deserialize(data);
+            _lobbyUI?.AddChatMessage("", $"{msg.playerName} присоединился");
+        }
+
+        void HandlePlayerLeft(byte[] data)
+        {
+            var msg = PlayerLeftMessage.Deserialize(data);
+            _lobbyUI?.AddChatMessage("", $"{msg.playerName} вышел");
+        }
+
         void HandleGameStart(byte[] data)
         {
             var gameStart = GameStartMessage.Deserialize(data);
@@ -159,11 +202,23 @@ namespace Client.Core
             _loginUI?.ShowError($"Ошибка: {error}");
         }
 
+        public void SendChatMessage(string message)
+        {
+            Debug.Log($"[GameManager] Sending chat: {message}");
+            var chatMsg = new ChatMessage
+            {
+                playerId = _localPlayerId,
+                playerName = _playerName,
+                message = message
+            };
+            _gameClient.SendMessage(chatMsg.Serialize());
+        }
+
         void SetState(State state)
         {
             _currentState = state;
 
-            // Прячем/показываем панель логина
+            // Поиск панели логина
             if (_loginPanel == null)
             {
                 GameObject canvas = GameObject.Find("Canvas");
@@ -177,6 +232,27 @@ namespace Client.Core
 
             if (_loginPanel != null)
                 _loginPanel.SetActive(state == State.Login || state == State.Connecting);
+
+            // Управление лобби
+            if (_lobbyUI == null)
+            {
+                _lobbyUI = GetComponent<Client.UI.LobbyUI>();
+                if (_lobbyUI == null)
+                    _lobbyUI = gameObject.AddComponent<Client.UI.LobbyUI>();
+            }
+
+            // Всегда инициализируем перед показом
+            _lobbyUI.Initialize();
+
+            switch (state)
+            {
+                case State.Lobby:
+                    _lobbyUI.Show();
+                    break;
+                default:
+                    _lobbyUI.Hide();
+                    break;
+            }
 
             if (_player != null)
                 _player.enabled = (state == State.InGame);

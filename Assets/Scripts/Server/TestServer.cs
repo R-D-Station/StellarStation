@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -6,6 +7,10 @@ using System.Threading;
 
 class Program
 {
+    static List<TcpClient> _clients = new List<TcpClient>();
+    static List<string> _playerNames = new List<string>();
+    static object _lock = new object();
+
     static void Main()
     {
         TcpListener listener = new TcpListener(IPAddress.Any, 7777);
@@ -16,7 +21,14 @@ class Program
         while (true)
         {
             TcpClient client = listener.AcceptTcpClient();
-            Console.WriteLine("Client connected!");
+
+            lock (_lock)
+            {
+                _clients.Add(client);
+                _playerNames.Add($"Player{_clients.Count}");
+            }
+
+            Console.WriteLine($"Client connected! Total: {_clients.Count}");
             ThreadPool.QueueUserWorkItem(HandleClient, client);
         }
     }
@@ -25,12 +37,26 @@ class Program
     {
         TcpClient client = (TcpClient)obj;
         NetworkStream stream = client.GetStream();
+        int playerId;
+        string playerName;
+
+        lock (_lock)
+        {
+            playerId = _clients.IndexOf(client) + 1;
+            playerName = _playerNames[playerId - 1];
+        }
 
         try
         {
-            // Читаем сообщение логина
+            // Читаем логин
             byte[] lengthBuffer = new byte[4];
-            stream.Read(lengthBuffer, 0, 4);
+            int read = stream.Read(lengthBuffer, 0, 4);
+            if (read < 4)
+            {
+                client.Close();
+                return;
+            }
+
             int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
 
             byte[] messageData = new byte[messageLength];
@@ -42,43 +68,123 @@ class Program
                 totalRead += r;
             }
 
-            Console.WriteLine($"Received: {Encoding.UTF8.GetString(messageData)}");
+            // Извлекаем имя
+            string received = Encoding.UTF8.GetString(messageData);
+            Console.WriteLine($"Received login: {received}");
 
-            // Отправляем LoginResponse
-            SendMessage(stream, "{\"messageType\":2,\"playerId\":0}", "{\"success\":true,\"playerId\":1}");
-            Console.WriteLine("Sent LoginResponse");
-
-            Thread.Sleep(1000);
-
-            // Отправляем GameStart
-            SendMessage(stream, "{\"messageType\":6,\"playerId\":0}", "{\"playerIds\":[1]}");
-            Console.WriteLine("Sent GameStart");
-
-            // Держим соединение, пока клиент не отключится
-            while (client.Connected)
+            if (received.Contains("\"username\":\""))
             {
-                // Проверяем, не отключился ли клиент
-                if (client.Client.Poll(0, SelectMode.SelectRead))
-                {
-                    byte[] buff = new byte[1];
-                    if (client.Client.Receive(buff, SocketFlags.Peek) == 0)
-                        break;
-                }
-                Thread.Sleep(1000);
+                int start = received.IndexOf("\"username\":\"") + 12;
+                int end = received.IndexOf("\"", start);
+                if (end > start)
+                    playerName = received.Substring(start, end - start);
             }
 
-            Console.WriteLine("Client disconnected gracefully");
+            lock (_lock)
+            {
+                _playerNames[playerId - 1] = playerName;
+            }
+
+            // LoginResponse
+            string loginBody = $"{{\"success\":true,\"playerId\":{playerId}}}";
+            SendMessage(stream, $"{{\"messageType\":2,\"playerId\":0}}", loginBody);
+            Console.WriteLine($"Sent LoginResponse to {playerName}");
+
+            Thread.Sleep(300);
+
+            // PlayerJoined всем
+            string joinedBody = $"{{\"playerId\":{playerId},\"playerName\":\"{playerName}\"}}";
+            BroadcastMessage($"{{\"messageType\":3,\"playerId\":0}}", joinedBody, client);
+            Console.WriteLine($"Broadcasted PlayerJoined: {playerName}");
+
+            Thread.Sleep(200);
+
+            // LobbyState всем
+            string[] allNames;
+            lock (_lock) { allNames = _playerNames.ToArray(); }
+            string namesJson = string.Join("\",\"", allNames);
+            string lobbyBody = $"{{\"players\":[\"{namesJson}\"]}}";
+            BroadcastMessage($"{{\"messageType\":7,\"playerId\":0}}", lobbyBody, null);
+            Console.WriteLine("Sent LobbyState to all");
+
+            // Цикл приёма чата
+            byte[] buffer = new byte[4096];
+            while (true)
+            {
+                try
+                {
+                    int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                    if (bytesRead == 0) break;
+
+                    // Копируем полученные данные
+                    byte[] receivedData = new byte[bytesRead];
+                    Array.Copy(buffer, receivedData, bytesRead);
+
+                    string msgStr = Encoding.UTF8.GetString(receivedData);
+                    Console.WriteLine($"RAW received: {msgStr}");
+
+                    // Ищем ChatMessage (messageType:8)
+                    if (msgStr.Contains("\"messageType\":8"))
+                    {
+                        string chatText = "";
+                        int msgStart = msgStr.IndexOf("\"message\":\"");
+                        if (msgStart >= 0)
+                        {
+                            msgStart += 11;
+                            int msgEnd = msgStr.IndexOf("\"}", msgStart);
+                            if (msgEnd < 0) msgEnd = msgStr.IndexOf("\"}", msgStart);
+                            if (msgEnd < 0) msgEnd = msgStr.LastIndexOf("\"");
+                            if (msgEnd > msgStart)
+                                chatText = msgStr.Substring(msgStart, msgEnd - msgStart);
+                        }
+
+                        if (!string.IsNullOrEmpty(chatText))
+                        {
+                            Console.WriteLine($"Chat from {playerName}: {chatText}");
+                            string chatBody = $"{{\"playerId\":{playerId},\"playerName\":\"{playerName}\",\"message\":\"{chatText}\"}}";
+                            BroadcastMessage($"{{\"messageType\":8,\"playerId\":{playerId}}}", chatBody, null);
+                        }
+                    }
+                }
+                catch (IOException)
+                {
+                    break;
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine($"Error in receive loop: {e.Message}");
+                    break;
+                }
+            }
         }
         catch (Exception e)
         {
-            Console.WriteLine($"Error: {e.Message}");
+            Console.WriteLine($"Error with {playerName}: {e.Message}");
         }
         finally
         {
+            lock (_lock)
+            {
+                _clients.Remove(client);
+                _playerNames.RemoveAt(playerId - 1);
+            }
+
             client.Close();
-            Console.WriteLine("Connection closed");
+            Console.WriteLine($"{playerName} disconnected. Total: {_clients.Count}");
+
+            // PlayerLeft всем
+            string leftBody = $"{{\"playerId\":{playerId},\"playerName\":\"{playerName}\"}}";
+            BroadcastMessage($"{{\"messageType\":4,\"playerId\":0}}", leftBody, null);
+
+            // Обновлённый LobbyState всем
+            string[] names;
+            lock (_lock) { names = _playerNames.ToArray(); }
+            string nJson = string.Join("\",\"", names);
+            string lbBody = $"{{\"players\":[\"{nJson}\"]}}";
+            BroadcastMessage($"{{\"messageType\":7,\"playerId\":0}}", lbBody, null);
         }
     }
+
 
     static void SendMessage(NetworkStream stream, string headerJson, string bodyJson)
     {
@@ -96,5 +202,23 @@ class Program
         byte[] lengthPrefix = BitConverter.GetBytes(fullMessage.Length);
         stream.Write(lengthPrefix, 0, 4);
         stream.Write(fullMessage, 0, fullMessage.Length);
+    }
+
+    static void BroadcastMessage(string headerJson, string bodyJson, TcpClient excludeClient)
+    {
+        TcpClient[] clients;
+        lock (_lock) { clients = _clients.ToArray(); }
+
+        foreach (var client in clients)
+        {
+            if (client == excludeClient) continue;
+            if (!client.Connected) continue;
+
+            try
+            {
+                SendMessage(client.GetStream(), headerJson, bodyJson);
+            }
+            catch { }
+        }
     }
 }
