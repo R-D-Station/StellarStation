@@ -1,7 +1,6 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
-using PlayerControls;
 using Client.Gameplay.AdvansedValues;
 using Client.Gameplay.Fsm;
 
@@ -11,7 +10,7 @@ namespace Client.Gameplay.Entities
     public class Player : Entity
     {
         [SerializeField]
-        private PlayerControl _playerControls;
+        private InputSystem_Actions _inputActions;
 
         private void Start()
         {
@@ -20,19 +19,19 @@ namespace Client.Gameplay.Entities
 
         private void OnEnable()
         {
-            if (_playerControls == null)
+            if (_inputActions == null)
             {
-                _playerControls = new PlayerControl();
+                _inputActions = new InputSystem_Actions();
 
-                _playerControls.Player.Move.performed += OnMovementPerformed;
-                _playerControls.Player.Move.canceled += OnMovementCanceled;
+                _inputActions.Player.Move.performed += OnMovementPerformed;
+                _inputActions.Player.Move.canceled += OnMovementCanceled;
             }
-            _playerControls.Enable();
+            _inputActions.Enable();
         }
 
         private void OnDisable()
         {
-            _playerControls.Disable();
+            _inputActions.Disable();
         }
 
         protected override void CreateFSM()
@@ -50,9 +49,9 @@ namespace Client.Gameplay.Entities
             Fsm.Update();
         }
 
-        public PlayerControl GetPlayerControl()
+        public InputSystem_Actions GetPlayerControl()
         {
-            return _playerControls;
+            return _inputActions;
         }
 
         private void OnMovementPerformed(InputAction.CallbackContext context)
