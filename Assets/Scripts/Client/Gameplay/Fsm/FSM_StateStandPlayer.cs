@@ -1,39 +1,32 @@
 using UnityEngine;
 using Client.Gameplay.Entities;
 
-namespace Client.Gameplay.Fsm;
-
-public class FSM_StateStandPlayer : FSM_State
+namespace Client.Gameplay.Fsm
 {
-    public Player Entity;
+    public class FSM_StateStandPlayer : FSM_State
+    {
+        protected Player entity;
 
-    public FSM_StateStandPlayer(FSM fsm, Entity entity) : base(fsm)
-    {
-        this.Entity = entity.GetComponent<Player>();
-    }
-
-    public override void Enter()
-    {
-        base.Enter();
-    }
-    public override void Update()
-    {
-        if (CheckMove()) { return; }
-    }
-    public override void Exit()
-    {
-        base.Exit();
-    }
-
-    bool CheckMove()
-    {
-        if (Entity.MoveDirection != Vector2.zero)
+        public FSM_StateStandPlayer(FSM fsm, Entity entity) : base(fsm)
         {
-            fsm.SetState<FSM_StateMovePlayer>();
-            return true;
+            this.entity = entity.GetComponent<Player>();
         }
 
-        return false;
+        public override void Enter()
+        {
+            entity.Rigidbody.linearVelocity = Vector3.zero;
+        }
+
+        public override void Update()
+        {
+            if (entity.DisableMovement) return;
+
+            if (entity.MoveDirection != Vector3.zero)
+            {
+                fsm.SetState<FSM_StateMovePlayer>();
+            }
+        }
+
+        public override void Exit() { }
     }
 }
-
