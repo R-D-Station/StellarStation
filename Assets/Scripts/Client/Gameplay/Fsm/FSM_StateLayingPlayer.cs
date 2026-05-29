@@ -36,11 +36,14 @@ namespace Client.Gameplay.Fsm
             // Ползание
             if (entity.MoveDirection != Vector3.zero)
             {
-                Vector2 move = entity.MoveDirection * entity.Speed.CurrentValue * Time.deltaTime;
+                entity.Moved = true;
+                Vector3 move = entity.MoveDirection * entity.Speed.CurrentValue * Time.deltaTime;
+                move.y = entity.Rigidbody.linearVelocity.y;
                 entity.Rigidbody.linearVelocity = move;
             }
             else
             {
+                entity.Moved = false;
                 entity.Rigidbody.linearVelocity = Vector3.zero;
             }
 

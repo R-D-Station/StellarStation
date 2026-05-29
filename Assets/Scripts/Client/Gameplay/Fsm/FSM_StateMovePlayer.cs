@@ -33,6 +33,7 @@ namespace Client.Gameplay.Fsm
             }
 
             Vector3 move = entity.MoveDirection * entity.Speed.CurrentValue * Time.deltaTime;
+            move.y = entity.Rigidbody.linearVelocity.y;
             entity.Rigidbody.linearVelocity = move;
         }
 
