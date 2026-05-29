@@ -1,43 +1,57 @@
 using System;
 using UnityEngine;
-using Client.Gameplay.AdvansedValues;
+using Client.Gameplay.Util.AdvancedValues;
 using Client.Gameplay.Fsm;
 
-namespace Client.Gameplay.Entities;
-
-public class Entity : MonoBehaviour
+namespace Client.Gameplay.Entities
 {
-	[SerializeField] 
-	public bool DisableMovement;
-
-	[SerializeField] 
-	public bool IgnoreCollision;
-
-	[SerializeField] 
-	public bool CanBeDragCarried = true;
-
-	[SerializeField] 
-	public Rigidbody2D Rigidbody2D;
-
-	protected Vector2 currentTile;
-	protected string playerName = "";
-
-	[Header("BaseValue")]
-    public AdvansedValue Speed = new AdvansedValue(100.0f);
-	public Vector2 MoveDirection;
-	public bool Moved = false;
-
-    public FSM Fsm;
-
-    private void Awake()
+    public class Entity : MonoBehaviour
     {
-        // Автоматически получаем Rigidbody2D, если не назначен в инспекторе
-        if (Rigidbody2D == null)
-            Rigidbody2D = GetComponent<Rigidbody2D>();
-    }
+        [SerializeField] public bool DisableMovement;
+        [SerializeField] public bool IgnoreCollision;
+        [SerializeField] public bool IsSprintHeld;
 
-    protected virtual void CreateFSM()
-	{
-		Fsm = new FSM();
-	}
+        [SerializeField] public bool CanBeDragCarried = true;
+
+        [SerializeField] public Rigidbody Rigidbody;
+
+        protected Vector2 _currentTile;
+        protected string _playerName = "";
+
+        // В будущем изменить на безопасный класс
+        [Header("Status")]
+        public float StunDuration = 0f;
+        public float KnockdownDuration = 0f;
+
+        public enum LayingReason
+        {
+            None,
+            Voluntary,    // сам лёг по F
+            KnockedDown,  // сбили с ног
+            Unconscious,  // потерял сознание
+        }
+
+        public LayingReason CurrentLayingReason = LayingReason.None;
+
+        [Header("BaseValue")]
+        public AdvancedValue Speed;
+
+        public Vector3 MoveDirection;
+        public bool Moved = false;
+        public enum Direction
+        {
+            North,  // +Z
+            South,  // -Z
+            East,   // +X
+            West    // -X
+        }
+        public Direction Facing = Direction.South;
+
+        public FSM Fsm;
+
+        protected virtual void CreateFSM()
+        {
+            Fsm = new FSM();
+        }
+    }
 }

@@ -6,10 +6,10 @@ namespace Client.UI
 {
     public class LoginUI : MonoBehaviour
     {
-        private InputField _ipInputField;
-        private InputField _loginInputField;
-        private Button _connectButton;
-        private Text _errorText;
+        [SerializeField] private InputField _ipInputField;
+        [SerializeField] private InputField _loginInputField;
+        [SerializeField] private Button _connectButton;
+        [SerializeField] private Text _errorText;
 
         private void Awake()
         {
