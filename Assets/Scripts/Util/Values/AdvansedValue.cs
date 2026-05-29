@@ -9,7 +9,7 @@ namespace ValuesEye
     /// Класс для удобной работы с множителями к различным параметрам
     /// </summary>
     [System.Serializable]
-    public class AdvansedValue
+    public class AdvancedValue
     {
         /// <summary>
         /// Все вычисления происходят над эти значение, оно остаётся не изменным
@@ -79,7 +79,7 @@ namespace ValuesEye
         /// <param name="scaleCurrentValue"></param>
         /// <param name="minValue"></param>
         /// <param name="canOver"></param>
-        public AdvansedValue(float baseValue, float scaleBaseValue = 1, float scaleCurrentValue = 1, float minValue = 0.1f, bool canOver = true)
+        public AdvancedValue(float baseValue, float scaleBaseValue = 1, float scaleCurrentValue = 1, float minValue = 0.1f, bool canOver = true)
         {
             BaseValue = baseValue;
             ScaleBaseValue = scaleBaseValue;
@@ -98,7 +98,7 @@ namespace ValuesEye
         /// <param name="scaleCurrentValue"></param>
         /// <param name="minValue"></param>
         /// /// <param name="canOver"></param>
-        public AdvansedValue(float baseValue, float maxValue, float scaleBaseValue = 1, float scaleCurrentValue = 1, float minValue = 0.1f, bool canOver = true)
+        public AdvancedValue(float baseValue, float maxValue, float scaleBaseValue = 1, float scaleCurrentValue = 1, float minValue = 0.1f, bool canOver = true)
         {
             BaseValue = baseValue;
             ScaleBaseValue = scaleBaseValue;
@@ -110,41 +110,41 @@ namespace ValuesEye
         }
 
 
-        public static float operator +(AdvansedValue a, float b)
+        public static float operator +(AdvancedValue a, float b)
         {
             return a.CurrentValue + b;
         }
-        public static float operator -(AdvansedValue a, float b)
+        public static float operator -(AdvancedValue a, float b)
         {
             return a.CurrentValue - b;
         }
-        public static float operator *(AdvansedValue a, float b)
+        public static float operator *(AdvancedValue a, float b)
         {
             return a.CurrentValue * b;
         }
-        public static float operator /(AdvansedValue a, float b)
+        public static float operator /(AdvancedValue a, float b)
         {
             return a.CurrentValue / b;
         }
 
-        public static float operator +(float b, AdvansedValue a)
+        public static float operator +(float b, AdvancedValue a)
         {
             return a.CurrentValue + b;
         }
-        public static float operator -(float b, AdvansedValue a)
+        public static float operator -(float b, AdvancedValue a)
         {
             return a.CurrentValue - b;
         }
-        public static float operator *(float b, AdvansedValue a)
+        public static float operator *(float b, AdvancedValue a)
         {
             return a.CurrentValue * b;
         }
-        public static float operator /(float b, AdvansedValue a)
+        public static float operator /(float b, AdvancedValue a)
         {
             return a.CurrentValue / b;
         }
 
-        public static Vector3 operator *(Vector3 a, AdvansedValue b)
+        public static Vector3 operator *(Vector3 a, AdvancedValue b)
         {
             return a * b.CurrentValue;
         }
@@ -313,8 +313,9 @@ namespace ValuesEye
             UpdateValue();
         }
     }
+
 #if UNITY_EDITOR
-    [CustomEditor(typeof(AdvansedValue))]
+    [CustomEditor(typeof(AdvancedValue))]
     public class AdvansedValueEditor : Editor
     {
         protected SerializedProperty m_BaseValue;

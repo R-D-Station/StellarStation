@@ -13,27 +13,19 @@ namespace FinalStateMachine
 
         public override void Enter()
         {
-            base.Enter();
+            _entity.Rigidbody.linearVelocity = Vector3.zero;
         }
+
         public override void Update()
         {
-            if (CheckMove()) { return; }
-        }
-        public override void Exit()
-        {
-            base.Exit();
-        }
+            if (_entity.DisableMovement) return;
 
-        bool CheckMove()
-        {
-            if (_entity.MoveDirection != Vector2.zero)
+            if (_entity.MoveDirection != Vector3.zero)
             {
                 Fsm.SetState<FSM_StateMovePlayer>();
-                return true;
             }
-
-            return false;
         }
+
+        public override void Exit() { }
     }
 }
-

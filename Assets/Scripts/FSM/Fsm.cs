@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using UnityEditor;
+using ValuesEye;
 
 
 namespace FinalStateMachine
 {
+    [Serializable]
     public class Fsm
     {
         public FSM_State StateCurrent { get; private set; }
@@ -40,5 +43,28 @@ namespace FinalStateMachine
             StateCurrent?.Update();
         }
     }
+
+#if UNITY_EDITOR
+    [CustomEditor(typeof(Fsm))]
+    public class FsmEditor : Editor
+    {
+        protected SerializedProperty m_StateCurrent;
+
+        private void OnEnable()
+        {
+            m_StateCurrent = serializedObject.FindProperty("StateCurrent");
+        }
+
+        public override void OnInspectorGUI()
+        {
+            EditorGUILayout.PropertyField(m_StateCurrent);
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                serializedObject.ApplyModifiedProperties();
+            }
+        }
+    }
+#endif
 }
 
