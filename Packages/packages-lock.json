@@ -26,6 +26,14 @@
       },
       "url": "https://packages.unity.com"
     },
+    "com.unity.adaptiveperformance": {
+      "version": "6.0.0",
+      "depth": 0,
+      "source": "builtin",
+      "dependencies": {
+        "com.unity.modules.adaptiveperformance": "1.0.0"
+      }
+    },
     "com.unity.ai.navigation": {
       "version": "2.0.11",
       "depth": 0,
@@ -209,6 +217,22 @@
         "com.unity.modules.imgui": "1.0.0"
       }
     },
+    "com.unity.vectorgraphics": {
+      "version": "file:com.unity.vectorgraphics",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.2d.sprite": "1.0.0",
+        "com.unity.ugui": "2.0.0",
+        "com.unity.modules.animation": "1.0.0",
+        "com.unity.modules.imageconversion": "1.0.0",
+        "com.unity.modules.physics": "1.0.0",
+        "com.unity.modules.physics2d": "1.0.0",
+        "com.unity.modules.ui": "1.0.0",
+        "com.unity.modules.uielements": "1.0.0",
+        "com.unity.modules.vectorgraphics": "1.0.0"
+      }
+    },
     "com.unity.visualscripting": {
       "version": "1.9.10",
       "depth": 0,
@@ -227,7 +251,7 @@
     },
     "com.unity.modules.adaptiveperformance": {
       "version": "1.0.0",
-      "depth": 0,
+      "depth": 1,
       "source": "builtin",
       "dependencies": {
         "com.unity.modules.subsystems": "1.0.0"
@@ -442,7 +466,7 @@
     },
     "com.unity.modules.vectorgraphics": {
       "version": "1.0.0",
-      "depth": 0,
+      "depth": 1,
       "source": "builtin",
       "dependencies": {
         "com.unity.modules.uielements": "1.0.0",
