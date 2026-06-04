@@ -23,7 +23,13 @@
 Если вы хотите собрать билд локально:
 1.  Клонируйте репозиторий: `git clone https://github.com/R-D-Station/StellarStation/tree/main`
 2.  Откройте папку проекта в Unity Hub (версия `6000.3.1f11`).
-3.  Дождитесь импорта ассетов и запустите сцену `TestMap` в папке `Assets/Scenes/`.
+3.  Запустите сервер (откройте терминал в удобном для Вас месте и выполните команды):
+    * `dotnet new console -n TestGameServer`
+    * `cd TestGameServer`
+    * `notepad Program.cs`
+    * Скопируйте содержимое `Assets/Scripts/Server/TestServer.cs` в `Program.cs`
+    * Запустите сервер командой `dotnet run`
+4.  Дождитесь импорта ассетов и запустите сцену `TestMap` в папке `Assets/Scenes/`.
 
 ---
 
