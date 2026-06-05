@@ -32,6 +32,7 @@ jobs:
         uses: buildalon/unity-setup@v2
         with:
           build-targets: '${{ matrix.build-target }}'
+          project-path: 'Client'
 
       - name: Activate Unity Personal License
         uses: buildalon/activate-unity-license@v2
@@ -49,6 +50,7 @@ jobs:
         uses: buildalon/unity-action@v3
         with:
           build-target: ${{ matrix.build-target }}
+          project-path: 'Client'
           args: '-quit -batchmode -executeMethod Buildalon.Editor.BuildPipeline.UnityPlayerBuildTools.StartCommandLineBuild'
 
       - name: Set build status label on PR
