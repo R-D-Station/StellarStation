@@ -1,4 +1,4 @@
-name: Unity Client Build Check (Buildalon)
+name: Unity Build Check (Buildalon)
 
 on:
   push:
@@ -28,13 +28,18 @@ jobs:
         with:
           lfs: true
 
-      - name: Setup Unity project symlinks
+      - name: Setup Unity project structure
         shell: bash
         run: |
-          ln -sf Client/Assets Assets
-          ln -sf Client/Packages Packages
-          ln -sf Client/ProjectSettings ProjectSettings
-          ln -sf Client/UserSettings UserSettings || true
+          # Проверяем, что папка Client существует
+          ls -la
+          # Создаём временные папки и копируем содержимое
+          mkdir -p Assets Packages ProjectSettings UserSettings
+          cp -r Client/Assets/* Assets/ 2>/dev/null || true
+          cp -r Client/Packages/* Packages/ 2>/dev/null || true
+          cp -r Client/ProjectSettings/* ProjectSettings/ 2>/dev/null || true
+          cp -r Client/UserSettings/* UserSettings/ 2>/dev/null || true
+          # Проверяем результат
           ls -la ProjectSettings/ProjectVersion.txt
 
       - name: Setup Unity Editor
@@ -59,12 +64,6 @@ jobs:
         with:
           build-target: ${{ matrix.build-target }}
           args: '-quit -batchmode -executeMethod Buildalon.Editor.BuildPipeline.UnityPlayerBuildTools.StartCommandLineBuild'
-
-      - name: Cleanup symlinks
-        if: always()
-        shell: bash
-        run: |
-          rm -f Assets Packages ProjectSettings UserSettings
 
       - name: Set build status label on PR
         if: github.event_name == 'pull_request' && always()
