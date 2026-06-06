@@ -31,15 +31,12 @@ jobs:
       - name: Setup Unity project structure
         shell: bash
         run: |
-          # Проверяем, что папка Client существует
           ls -la
-          # Создаём временные папки и копируем содержимое
           mkdir -p Assets Packages ProjectSettings UserSettings
           cp -r Client/Assets/* Assets/ 2>/dev/null || true
           cp -r Client/Packages/* Packages/ 2>/dev/null || true
           cp -r Client/ProjectSettings/* ProjectSettings/ 2>/dev/null || true
           cp -r Client/UserSettings/* UserSettings/ 2>/dev/null || true
-          # Проверяем результат
           ls -la ProjectSettings/ProjectVersion.txt
 
       - name: Setup Unity Editor
