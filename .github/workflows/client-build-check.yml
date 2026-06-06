@@ -1,10 +1,16 @@
-name: Unity Build Check (Buildalon)
+name: Client Build Check
 
 on:
   push:
     branches: [ main ]
+    paths:
+      - 'Client/**'
+      - '.github/workflows/client-build-check.yml'
   pull_request:
     branches: [ main ]
+    paths:
+      - 'Client/**'
+      - '.github/workflows/client-build-check.yml'
 
 jobs:
   build:
