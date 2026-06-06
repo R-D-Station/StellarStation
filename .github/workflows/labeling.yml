@@ -1,7 +1,5 @@
 name: Pull Request Labeling and Checks
 
-# Запускаем при открытии, переоткрытии и синхронизации (новые коммиты) PR,
-# а также при завершении сборки (для простановки статусных ярлыков)
 on:
   pull_request:
     types: [opened, reopened, synchronize]
@@ -11,7 +9,6 @@ on:
       - completed
 
 jobs:
-  # ----- Задача 1: Оценка размера изменений -----
   size-label:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
