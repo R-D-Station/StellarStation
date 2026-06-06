@@ -24,10 +24,10 @@ jobs:
         include:
           - os: ubuntu-latest
             runtime: linux-x64
-            executable: StellarStation.Server
+            executable: Server
           - os: windows-latest
             runtime: win-x64
-            executable: StellarStation.Server.exe
+            executable: Server.exe
 
     steps:
       - name: Checkout repository
