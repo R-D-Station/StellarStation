@@ -1,0 +1,7 @@
+{
+  "ip": "192.168.0.101",
+  "port": 8921,
+  "maxPlayers": 70,
+  "tickRate": 40,
+  "connectionKey": "VGVzdF9zZXJ2ZXIx"
+}

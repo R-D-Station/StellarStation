@@ -69,3 +69,12 @@ desktop.ini
 # Резервные копии
 *.backup
 *.old
+
+# ====================
+# Тесты
+# ====================
+
+ServerTests/bin/
+ServerTests/obj/
+ServerTests/TestResults/
+ServerTests/coveragereport/
