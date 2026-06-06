@@ -78,3 +78,5 @@ ServerTests/bin/
 ServerTests/obj/
 ServerTests/TestResults/
 ServerTests/coveragereport/
+
+!ServerTests/ServerTests.csproj
