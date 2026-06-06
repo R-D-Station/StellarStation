@@ -5,13 +5,13 @@ on:
     branches: [ main ]
     paths:
       - 'Server/**'
-      - 'Client/Shared/**'
+      - 'Client/Assets/Scripts/Shared/**'
       - '.github/workflows/server-build-check.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'Server/**'
-      - 'Client/Shared/**'
+      - 'Client/Assets/Scripts/Shared/**'
       - '.github/workflows/server-build-check.yml'
 
 jobs:
