@@ -1,0 +1,70 @@
+name: Server Build Check
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'Server/**'
+      - 'Client/Shared/**'
+      - '.github/workflows/server-build-check.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Server/**'
+      - 'Client/Shared/**'
+      - '.github/workflows/server-build-check.yml'
+
+jobs:
+  build-server:
+    name: Build Server on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            runtime: linux-x64
+            executable: Server
+          - os: windows-latest
+            runtime: win-x64
+            executable: Server.exe
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore Server/Server.csproj
+
+      - name: Build Server
+        run: dotnet build Server/Server.csproj -c Release --no-restore
+
+      - name: Run Tests (if any)
+        run: dotnet test Server/Server.csproj -c Release --no-build || true
+        continue-on-error: true
+
+      - name: Publish Server
+        run: dotnet publish Server/Server.csproj -c Release -o publish -r ${{ matrix.runtime }} --self-contained false
+
+      - name: Upload server artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.os }}
+          path: publish/
+          retention-days: 7
+
+      - name: Verify executable exists
+        shell: bash
+        run: |
+          if [ -f "publish/${{ matrix.executable }}" ]; then
+            echo "Server executable found: publish/${{ matrix.executable }}"
+          else
+            echo "Server executable not found!"
+            ls -la publish/
+            exit 1
+          fi
