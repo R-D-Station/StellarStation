@@ -13,6 +13,9 @@ namespace Shared.Messages.Core
 
         public MessageType Type => MessageType.WorldSnapshot;
 
+        /// <summary>
+        /// —ериализует данные EntitySnapshot в компактный байтовый массив дл€ передачи по сети.
+        /// </summary>
         public byte[] Serialize()
         {
             using var ms = new MemoryStream();
@@ -32,25 +35,60 @@ namespace Shared.Messages.Core
             return ms.ToArray();
         }
 
+        /// <summary>
+        /// Ѕезопасна€ реализаци€ десериализации, котора€ провер€ет размер данных, 
+        /// обрабатывает исключени€ и гарантирует целостность данных.
+        /// </summary>
         public void Deserialize(byte[] data)
         {
-            using var ms = new MemoryStream(data);
-            using var reader = new BinaryReader(ms);
+            if (data == null)
+                throw new ArgumentNullException(nameof(data));
 
-            ServerTick = reader.ReadUInt32();
-            LastProcessedInput = reader.ReadUInt32();
+            if (data.Length < 12)
+                throw new InvalidOperationException($"Data too short: {data.Length} bytes (minimum 12)");
 
-            int count = reader.ReadInt32();
-            Entities = new EntitySnapshot[count];
-
-            for (int i = 0; i < count; i++)
+            try
             {
-                int entitySize = reader.ReadInt32();
-                byte[] entityData = reader.ReadBytes(entitySize);
+                using var ms = new MemoryStream(data);
+                using var reader = new BinaryReader(ms);
 
-                var entity = new EntitySnapshot();
-                entity.Deserialize(entityData);
-                Entities[i] = entity;
+                ServerTick = reader.ReadUInt32();
+                LastProcessedInput = reader.ReadUInt32();
+
+                int count = reader.ReadInt32();
+
+                if (count < 0 || count > 10000)
+                    throw new InvalidOperationException($"Invalid entity count: {count}");
+
+                Entities = new EntitySnapshot[count];
+
+                for (int i = 0; i < count; i++)
+                {
+                    if (ms.Position + 4 > ms.Length)
+                        throw new InvalidOperationException($"Unexpected end of data while reading entity {i}");
+
+                    int entitySize = reader.ReadInt32();
+
+                    if (entitySize < 0 || entitySize > 1024 * 1024)
+                        throw new InvalidOperationException($"Invalid entity size: {entitySize}");
+
+                    if (ms.Position + entitySize > ms.Length)
+                        throw new InvalidOperationException($"Entity {i} data exceeds available data");
+
+                    byte[] entityData = reader.ReadBytes(entitySize);
+
+                    var entity = new EntitySnapshot();
+                    entity.Deserialize(entityData);
+                    Entities[i] = entity;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to deserialize WorldSnapshot: {ex.Message}", ex);
             }
         }
     }
