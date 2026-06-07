@@ -17,7 +17,7 @@ public class GameServer
     private int _nextConnectionId = 1;
     private uint _currentTick;
 
-    // Кеш для списка подключённых пиров (чтобы не создавать каждый раз)
+    // Кеш для списка подключённых пиров
     private readonly List<NetPeer> _connectedPeersCache = new();
 
     public event Action<ClientConnection>? OnClientConnected;
@@ -59,7 +59,6 @@ public class GameServer
 
     private void OnConnectionRequest(ConnectionRequest request)
     {
-        // Исправление: получаем количество подключённых через GetConnectedPeers
         _connectedPeersCache.Clear();
         _server?.GetConnectedPeers(_connectedPeersCache);
 
@@ -90,6 +89,10 @@ public class GameServer
         _mainThreadActions.Enqueue(() => OnClientConnected?.Invoke(client));
     }
 
+    /// <summary>
+    /// Обработчик отключения клиента. Он удаляет клиента из словаря, 
+    /// выводит сообщение в консоль и вызывает событие OnClientDisconnected на главном потоке.
+    /// </summary>
     private void OnPeerDisconnected(NetPeer peer, DisconnectInfo disconnectInfo)
     {
         if (_clients.TryGetValue(peer, out var client))
@@ -101,27 +104,41 @@ public class GameServer
         }
     }
 
+    /// <summary>
+    /// Обработчик входящих сообщений от клиентов. 
+    /// Сначала он пытается найти соответствующего клиента по пиру, чтобы обновить 
+    /// его время активности, затем читает тип сообщения и данные.
+    /// </summary>
     private void OnNetworkReceive(NetPeer peer, NetDataReader reader, byte channel, DeliveryMethod method)
     {
-        if (!_clients.TryGetValue(peer, out var client))
-            return;
-
-        client.LastActivity = DateTime.UtcNow;
-
-        MessageType type = (MessageType)reader.GetUShort();
-        byte[] data = reader.GetBytesWithLength();
-
-        switch (type)
+        try
         {
-            case MessageType.MoveIntent:
-                var intent = new MoveIntent();
-                intent.Deserialize(data);
-                _mainThreadActions.Enqueue(() => OnMoveIntentReceived?.Invoke(client, intent));
-                break;
+            if (!_clients.TryGetValue(peer, out var client))
+                return;
 
-            default:
-                Console.WriteLine($"[Server] Unknown message type from #{client.ConnectionId}: {type}");
-                break;
+            client.LastActivity = DateTime.UtcNow;
+
+            MessageType type = (MessageType)reader.GetUShort();
+            byte[] data = reader.GetBytesWithLength();
+
+            switch (type)
+            {
+                case MessageType.MoveIntent:
+                    var intent = new MoveIntent();
+                    intent.Deserialize(data);
+                    _mainThreadActions.Enqueue(() => OnMoveIntentReceived?.Invoke(client, intent));
+                    break;
+
+                default:
+                    Console.WriteLine($"[Server] Unknown message type from #{client.ConnectionId}: {type}");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Server] Error processing message from #{peer.Address}: {ex.Message}");
+
+            // TODO: возможно, стоит отключать клиента, если он шлёт битые пакеты
         }
     }
 
@@ -151,6 +168,11 @@ public class GameServer
         }
     }
 
+    /// <summary>
+    /// Метод для создания и отправки снимка мира всем подключённым клиентам. 
+    /// Снимок содержит текущий тик сервера, список всех сущностей (игроков) с их позициями и направлениями. 
+    /// Клиенты будут использовать эти данные для синхронизации своего состояния с сервером.
+    /// </summary>
     private void BroadcastWorldSnapshot()
     {
         if (_clients.Count == 0)
@@ -172,7 +194,6 @@ public class GameServer
 
         byte[] snapshotData = snapshot.Serialize();
 
-        // Отправляем всем подключённым клиентам
         foreach (var client in _clients.Values)
         {
             var writer = new NetDataWriter();
@@ -182,6 +203,9 @@ public class GameServer
         }
     }
 
+    /// <summary>
+    /// Метод для обновления позиции игрока на сервере.
+    /// </summary>
     public void UpdatePlayerPosition(ClientConnection client, float x, float y, int z, byte facing)
     {
         client.X = x;
@@ -190,6 +214,9 @@ public class GameServer
         client.Facing = facing;
     }
 
+    /// <summary>
+    /// Метод для отправки сообщения конкретному клиенту.
+    /// </summary>
     public void SendToClient<T>(ClientConnection client, T message) where T : struct, INetMessage
     {
         var writer = new NetDataWriter();
@@ -198,6 +225,9 @@ public class GameServer
         client.Peer.Send(writer, DeliveryMethod.ReliableOrdered);
     }
 
+    /// <summary>
+    /// Метод для широковещательной отправки сообщения всем клиентам, с возможностью фильтрации по предикату.
+    /// </summary>
     public void BroadcastToAll<T>(T message, Func<ClientConnection, bool>? predicate = null) where T : struct, INetMessage
     {
         var writer = new NetDataWriter();
