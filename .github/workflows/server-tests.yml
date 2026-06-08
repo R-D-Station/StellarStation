@@ -1,0 +1,52 @@
+name: Server Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'Server/**'
+      - 'ServerTests/**'
+      - 'Client/Assets/Scripts/Shared/**'
+      - '.github/workflows/server-tests.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'Server/**'
+      - 'ServerTests/**'
+      - 'Client/Assets/Scripts/Shared/**'
+      - '.github/workflows/server-tests.yml'
+
+jobs:
+  test:
+    name: Run Server Tests on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore ServerTests/ServerTests.csproj
+
+      - name: Build solution
+        run: dotnet build ServerTests/ServerTests.csproj -c Release --no-restore
+
+      - name: Run tests
+        run: dotnet test ServerTests/ServerTests.csproj -c Release --no-build --verbosity normal
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}-${{ github.run_id }}
+          path: ServerTests/TestResults/
+          retention-days: 7

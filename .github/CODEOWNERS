@@ -5,3 +5,11 @@
 
 # Ping for all PRs
 * @BeatusCrow
+
+# Client side
+/Client/** @Playstal1
+
+# Server side
+/Server/** @BeatusCrow
+/ServerTests/** @BeatusCrow
+/Client/Assets/Scripts/Shared/**
