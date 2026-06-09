@@ -1,23 +1,25 @@
 using Shared.Messages.Core;
+using Shared.Messages.Player;
 using System;
-using UnityEngine.UIElements;
 
 namespace Client.Net
 {
     /// <summary>
-    /// Клиентский фасад над транспортом. Единственное место в клиенте, которое
-    /// знает про ITransport. Остальной клиентский код общается с NetClient,
-    /// а не с транспортом напрямую.
-    ///
-    /// Не зависит от того, заглушка под ним или реальная сеть.
+    /// Фасад над транспортом для клиента. Единственное место в клиенте, кроме
+    /// самого транспорта, которое работает с ITransport. Остальной код общается
+    /// с NetClient, а не с конкретной реализацией транспорта.
     /// </summary>
     public class NetClient
     {
         private readonly ITransport _transport;
         private uint _inputSequence;
 
-        /// <summary>Пришёл снапшот мира — клиентский визуал/предсказание реагирует на это.</summary>
+        /// <summary>Пришёл снапшот мира — отдаём его подписчикам.</summary>
         public event Action<WorldSnapshot> OnWorldSnapshot;
+
+        /// <summary>Пришёл наш NetId от сервера при подключении.</summary>
+        public event Action<LoginResponse> OnLoginResponse;
+
         public event Action OnConnected;
         public event Action OnDisconnected;
 
@@ -29,6 +31,7 @@ namespace Client.Net
             _transport.OnConnected += () => OnConnected?.Invoke();
             _transport.OnDisconnected += () => OnDisconnected?.Invoke();
             _transport.OnWorldSnapshot += snap => OnWorldSnapshot?.Invoke(snap);
+            _transport.OnLoginResponse += login => OnLoginResponse?.Invoke(login);
         }
 
         public void Connect(string address, int port) => _transport.Connect(address, port);
@@ -38,10 +41,11 @@ namespace Client.Net
         public void Poll() => _transport.Poll();
 
         /// <summary>
-        /// Отправить намерение движения. Sequence проставляется здесь
-        /// автоматически и понадобится для reconciliation на этапе 2.
+        /// Отправить намерение движения. Возвращает проставленный Sequence —
+        /// он нужен предсказанию, чтобы привязать локальный шаг к серверному
+        /// подтверждению (reconciliation).
         /// </summary>
-        public void SendMove(IntentDirection direction, bool sprint)
+        public uint SendMove(IntentDirection direction, bool sprint)
         {
             var intent = new MoveIntent
             {
@@ -50,6 +54,7 @@ namespace Client.Net
                 Sequence = ++_inputSequence
             };
             _transport.Send(intent);
+            return intent.Sequence;
         }
     }
 }
