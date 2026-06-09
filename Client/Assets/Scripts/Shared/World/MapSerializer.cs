@@ -27,6 +27,8 @@ namespace Shared.World
         private const byte FlagSupport = 1 << 0;
         private const byte FlagHorizBlock = 1 << 1;
         private const byte FlagVertBlock = 1 << 2;
+        private const byte FlagSealHoriz = 1 << 3;
+        private const byte FlagSealVert = 1 << 4;
 
         public static void Write(Stream stream, GridMap map)
         {
@@ -91,6 +93,8 @@ namespace Shared.World
             if (t.Support) flags |= FlagSupport;
             if (t.BlocksHorizontalSight) flags |= FlagHorizBlock;
             if (t.BlocksVerticalSight) flags |= FlagVertBlock;
+            if (t.SealsHorizontal) flags |= FlagSealHoriz;
+            if (t.SealsVertical) flags |= FlagSealVert;
             w.Write(flags);
         }
 
@@ -105,6 +109,8 @@ namespace Shared.World
             t.Support = (flags & FlagSupport) != 0;
             t.BlocksHorizontalSight = (flags & FlagHorizBlock) != 0;
             t.BlocksVerticalSight = (flags & FlagVertBlock) != 0;
+            t.SealsHorizontal = (flags & FlagSealHoriz) != 0;
+            t.SealsVertical = (flags & FlagSealVert) != 0;
             return t;
         }
 

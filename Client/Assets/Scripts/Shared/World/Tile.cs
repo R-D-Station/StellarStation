@@ -38,6 +38,22 @@ namespace Shared.World
         /// </summary>
         public bool BlocksVerticalSight;
 
+        /// <summary>
+        /// Герметичен ли тайл по горизонтали (не пропускает газ в плоскости этажа).
+        /// Отдельно от обзора: стекло пропускает взгляд, но держит газ. Стена —
+        /// и взгляд, и газ. Потребитель — атмос (этап 5); сейчас флаг заложен
+        /// заранее, чтобы не версионировать формат карт позже.
+        /// </summary>
+        public bool SealsHorizontal;
+
+        /// <summary>
+        /// Герметичен ли тайл по вертикали (не пропускает газ между этажами).
+        /// Стеклянный пол: BlocksVerticalSight=false, SealsVertical=true (видно
+        /// вниз, газ не идёт). Решётка: оба false (видно и газ проходит).
+        /// Сплошной пол: оба true. Потребитель — атмос (этап 5).
+        /// </summary>
+        public bool SealsVertical;
+
         /// <summary>Можно ли войти и встать. Вычисляемое, не хранится в файле.</summary>
         public readonly bool Walkable => WallType == 0 && Support;
 
@@ -47,24 +63,28 @@ namespace Shared.World
         /// </summary>
         public readonly bool IsFall => WallType == 0 && !Support;
 
-        /// <summary>Пустой тайл — открытый космос: ни пола, ни стены, ни опоры.</summary>
+        /// <summary>Пустой тайл — открытый космос: ни пола, ни стены, ни опоры, ничего не держит.</summary>
         public static Tile Space => new Tile
         {
             FloorType = 0,
             WallType = 0,
             Support = false,
             BlocksHorizontalSight = false,
-            BlocksVerticalSight = false
+            BlocksVerticalSight = false,
+            SealsHorizontal = false,
+            SealsVertical = false
         };
 
-        /// <summary>Сплошной пол заданного типа: стоишь, взгляд по Z не проходит.</summary>
+        /// <summary>Сплошной пол: стоишь, взгляд по Z не проходит, газ снизу/сверху не проходит.</summary>
         public static Tile Floor(byte floorType = 1) => new Tile
         {
             FloorType = floorType,
             WallType = 0,
             Support = true,
             BlocksHorizontalSight = false,
-            BlocksVerticalSight = true
+            BlocksVerticalSight = true,
+            SealsHorizontal = false,
+            SealsVertical = true
         };
     }
 }
