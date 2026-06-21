@@ -1,6 +1,7 @@
-using System;
-using Shared.Messages.Core;
 using Shared.Messages;
+using Shared.Messages.Core;
+using Shared.Messages.Player;
+using System;
 
 namespace Client.Net
 {
@@ -23,6 +24,11 @@ namespace Client.Net
         /// Получен снапшот от сервера
         /// </summary>
         event Action<WorldSnapshot> OnWorldSnapshot;
+
+        /// <summary>
+        /// Пришёл ответ на подключение — содержит наш NetId
+        /// </summary>
+        event Action<LoginResponse> OnLoginResponse;
 
         bool IsConnected { get; }
 

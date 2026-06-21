@@ -4,6 +4,7 @@ using LiteNetLib.Utils;
 using Shared.Configs;
 using Shared.Messages;
 using Shared.Messages.Core;
+using Shared.Simulation;
 
 namespace Server.Network;
 
@@ -126,7 +127,9 @@ public class GameServer
                 case MessageType.MoveIntent:
                     var intent = new MoveIntent();
                     intent.Deserialize(data);
-                    _mainThreadActions.Enqueue(() => OnMoveIntentReceived?.Invoke(client, intent));
+                    // Не двигаем сразу: складываем в очередь, обработаем в тик-лупе
+                    // (один intent за тик) для детерминизма с клиентским предсказанием.
+                    client.IntentQueue.Enqueue(intent);
                     break;
 
                 default:
@@ -144,12 +147,13 @@ public class GameServer
 
     private async Task GameLoop()
     {
-        int tickMs = 1000 / _config.TickRate;
+        double tickMs = 1000.0 / _config.TickRate;
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        double nextTick = sw.Elapsed.TotalMilliseconds; // целевое время следующего тика
 
         while (_isRunning)
         {
-            var startTime = DateTime.UtcNow;
-
             _server?.PollEvents();
 
             while (_mainThreadActions.TryDequeue(out var action))
@@ -157,14 +161,70 @@ public class GameServer
                 action();
             }
 
+            ProcessIntents();
+
             _currentTick++;
             BroadcastWorldSnapshot();
 
-            var elapsed = DateTime.UtcNow - startTime;
-            int sleepMs = tickMs - (int)elapsed.TotalMilliseconds;
+            // Следующий тик планируем от фиксированной сетки, а не от "сейчас".
+            // Так накопленная погрешность сна не уводит реальную частоту от целевой.
+            nextTick += tickMs;
 
-            if (sleepMs > 0)
-                await Task.Delay(sleepMs);
+            double now = sw.Elapsed.TotalMilliseconds;
+            double wait = nextTick - now;
+
+            if (wait > 4)
+            {
+                // Грубый сон до почти-цели (Task.Delay неточен, оставляем запас).
+                await Task.Delay((int)(wait - 2));
+            }
+            else if (wait < -tickMs)
+            {
+                // Сильно отстали (фриз/брейкпоинт) — не пытаемся догонять пачкой
+                // тиков, сбрасываем сетку на текущий момент.
+                nextTick = sw.Elapsed.TotalMilliseconds;
+                continue;
+            }
+
+            // Доспиновываем оставшиеся ~миллисекунды для точного попадания в сетку.
+            while (sw.Elapsed.TotalMilliseconds < nextTick)
+            {
+                System.Threading.Thread.SpinWait(50);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Обработка накопленных intent'ов: ровно один шаг на клиента за тик.
+    /// Это держит серверное движение в одном темпе с клиентским предсказанием
+    /// (клиент шлёт intent раз в тик). Если в очереди скопилось больше одного
+    /// (джиттер сети), лишние старые отбрасываются, чтобы не копить задержку.
+    /// </summary>
+    private void ProcessIntents()
+    {
+        const int maxQueued = 4; // потолок: не даём очереди распухать
+
+        foreach (var client in _clients.Values)
+        {
+            // Сбрасываем переполнение, оставляя только свежие intent'ы.
+            while (client.IntentQueue.Count > maxQueued && client.IntentQueue.TryDequeue(out _)) { }
+
+            if (client.IntentQueue.TryDequeue(out var intent))
+            {
+                float x = client.X;
+                float y = client.Y;
+
+                MovementLogic.Apply(ref x, ref y, intent.Direction, intent.Sprint);
+
+                // Границы (простая заглушка, как было)
+                x = Math.Clamp(x, -20f, 20f);
+                y = Math.Clamp(y, -20f, 20f);
+
+                client.X = x;
+                client.Y = y;
+                client.Facing = MovementLogic.ToFacing(intent.Direction, client.Facing);
+                client.LastProcessedSequence = intent.Sequence;
+            }
         }
     }
 
@@ -178,24 +238,31 @@ public class GameServer
         if (_clients.Count == 0)
             return;
 
-        var snapshot = new WorldSnapshot
+        // Список сущностей общий для всех; собираем один раз.
+        var entities = _clients.Values.Select(c => new EntitySnapshot
         {
-            ServerTick = _currentTick,
-            LastProcessedInput = 0,
-            Entities = _clients.Values.Select(c => new EntitySnapshot
-            {
-                NetId = c.PlayerNetId,
-                X = c.X,
-                Y = c.Y,
-                Z = c.Z,
-                Facing = c.Facing
-            }).ToArray()
-        };
+            NetId = c.PlayerNetId,
+            X = c.X,
+            Y = c.Y,
+            Z = c.Z,
+            Facing = c.Facing
+        }).ToArray();
 
-        byte[] snapshotData = snapshot.Serialize();
-
+        // Снапшот шлём персонально: LastProcessedInput у каждого клиента свой
+        // (его собственный последний обработанный Sequence) — это нужно для
+        // reconciliation. Контракт пакета не меняется, меняется лишь то, что
+        // снапшот сериализуется под каждого клиента.
         foreach (var client in _clients.Values)
         {
+            var snapshot = new WorldSnapshot
+            {
+                ServerTick = _currentTick,
+                LastProcessedInput = client.LastProcessedSequence,
+                Entities = entities
+            };
+
+            byte[] snapshotData = snapshot.Serialize();
+
             var writer = new NetDataWriter();
             writer.Put((ushort)MessageType.WorldSnapshot);
             writer.PutBytesWithLength(snapshotData);

@@ -1,10 +1,11 @@
-using System;
-using System.Collections.Generic;
-using UnityEngine;
 using LiteNetLib;
 using LiteNetLib.Utils;
 using Shared.Messages;
 using Shared.Messages.Core;
+using Shared.Messages.Player;
+using System;
+using System.Collections.Generic;
+using UnityEngine;
 
 namespace Client.Net
 {
@@ -14,6 +15,8 @@ namespace Client.Net
         public event Action OnDisconnected;
         public event Action<WorldSnapshot> OnWorldSnapshot;
         public event Action<MoveIntent> OnMoveIntentReceived;
+        public event Action<LoginResponse> OnLoginResponse;
+
 
         public bool IsConnected { get; private set; }
 
@@ -29,6 +32,7 @@ namespace Client.Net
         {
             { MessageType.MoveIntent, () => new MoveIntent() },
             { MessageType.WorldSnapshot, () => new WorldSnapshot() },
+            { MessageType.LoginResponse, () => new LoginResponse() },
         };
 
         public void Connect(string address, int port)
@@ -105,7 +109,10 @@ namespace Client.Net
                 case WorldSnapshot snapshot:
                     OnWorldSnapshot?.Invoke(snapshot);
                     break;
-                // TODO: новые сюда пихать
+
+                case LoginResponse login:
+                    OnLoginResponse?.Invoke(login);
+                    break;
 
                 default:
                     Debug.LogWarning($"[Transport] Unhandled message type: {type}");

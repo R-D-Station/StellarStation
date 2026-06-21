@@ -1,4 +1,6 @@
 using LiteNetLib;
+using System.Collections.Concurrent;
+using Shared.Messages.Core;
 
 namespace Server.Network
 {
@@ -18,6 +20,11 @@ namespace Server.Network
 
         // ƒл€ reconciliation
         public uint LastProcessedSequence { get; set; }
+
+        // ¬ход€щие intent'ы, накопленные между тиками. ќбрабатываютс€ в GameLoop
+        // (по одному за тик), а не сразу при приЄме Ч так движение детерминировано
+        // и совпадает с клиентским предсказанием.
+        public readonly ConcurrentQueue<MoveIntent> IntentQueue = new();
 
         public ClientConnection(NetPeer peer, int connectionId)
         {

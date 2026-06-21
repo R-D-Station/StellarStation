@@ -80,3 +80,9 @@ ServerTests/TestResults/
 ServerTests/coveragereport/
 
 !ServerTests/ServerTests.csproj
+
+# ====================
+# Билд
+# ====================
+
+Builds/

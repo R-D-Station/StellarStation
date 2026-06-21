@@ -1,5 +1,6 @@
 using Server.Network;
 using Shared.Messages.Core;
+using Shared.Messages.Player;
 
 namespace Server.Services
 {
@@ -15,7 +16,8 @@ namespace Server.Services
 
             _server.OnClientConnected += OnClientConnected;
             _server.OnClientDisconnected += OnClientDisconnected;
-            _server.OnMoveIntentReceived += OnMoveIntentReceived;
+            // Движение обрабатывается в GameServer.ProcessIntents (один шаг за тик).
+            // PlayerManager отвечает только за спавн/деспавн игроков.
         }
 
         private void OnClientConnected(ClientConnection client)
@@ -29,6 +31,10 @@ namespace Server.Services
 
             Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} spawned at (0, 0, 0)");
 
+            // Сообщаем клиенту его NetId, чтобы он мог отличить свою сущность
+            // в WorldSnapshot от чужих (нужно для предсказания/reconciliation).
+            _server.SendToClient(client, new LoginResponse { NetId = client.PlayerNetId });
+
             // TODO: отправляем всем остальным игрокам (администрации), что новый игрок присоединился
         }
 
@@ -36,42 +42,6 @@ namespace Server.Services
         {
             _players.Remove(client.ConnectionId);
             Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} left");
-        }
-
-        private void OnMoveIntentReceived(ClientConnection client, MoveIntent intent)
-        {
-            // Обновляем позицию игрока на основе намерения
-            float speed = intent.Sprint ? 0.2f : 0.1f;
-            float newX = client.X;
-            float newY = client.Y;
-
-            switch (intent.Direction)
-            {
-                case IntentDirection.North:
-                    newY += speed;
-                    break;
-                case IntentDirection.South:
-                    newY -= speed;
-                    break;
-                case IntentDirection.East:
-                    newX += speed;
-                    break;
-                case IntentDirection.West:
-                    newX -= speed;
-                    break;
-                default:
-                    break;
-            }
-
-            // TODO: спорная валидация границ (простая)
-            newX = Math.Clamp(newX, -20, 20);
-            newY = Math.Clamp(newY, -20, 20);
-
-            _server.UpdatePlayerPosition(client, newX, newY, client.Z, client.Facing);
-
-            Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} moved to ({newX:F2}, {newY:F2})");
-
-            // TODO: отправляем подтверждение движения обратно клиенту (для reconciliation)
         }
 
         /// <summary>
