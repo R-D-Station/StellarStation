@@ -1,7 +1,7 @@
 namespace Shared.Messages;
 
 /// <summary>
-/// Перечисление типов сообщений, которыми могут обмениваться клиент и сервер.
+/// РўРёРї СЃРµС‚РµРІРѕРіРѕ СЃРѕРѕР±С‰РµРЅРёСЏ вЂ” С‚РµРі РґР»СЏ РјР°СЂС€СЂСѓС‚РёР·Р°С†РёРё РїСЂРё СЃРµСЂРёР°Р»РёР·Р°С†РёРё/РґРµСЃРµСЂРёР°Р»РёР·Р°С†РёРё.
 /// </summary>
 public enum MessageType : ushort
 {
@@ -9,12 +9,16 @@ public enum MessageType : ushort
     MoveIntent = 1,
     WorldSnapshot = 2,
     EntitySnapshot = 3,
+    MapData = 4,
+    TileUpdate = 5,
 
     // Player (100-199)
     LoginRequest = 100,
     LoginResponse = 101,
     PlayerJoined = 102,
     PlayerLeft = 103,
+
+    UseIntent = 6,
 
     // Interaction (200-299)
     ClickIntent = 200,

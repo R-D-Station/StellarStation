@@ -9,6 +9,7 @@ using UnityEngine;
 
 namespace Client.Net
 {
+    /// <summary>РўСЂР°РЅСЃРїРѕСЂС‚ РїРѕРІРµСЂС… LiteNetLib: РїРѕРґРєР»СЋС‡РµРЅРёРµ Рє СЃРµСЂРІРµСЂСѓ Рё РѕР±РјРµРЅ СЃРѕРѕР±С‰РµРЅРёСЏРјРё.</summary>
     public class LiteNetLibTransport : ITransport
     {
         public event Action OnConnected;
@@ -16,6 +17,8 @@ namespace Client.Net
         public event Action<WorldSnapshot> OnWorldSnapshot;
         public event Action<MoveIntent> OnMoveIntentReceived;
         public event Action<LoginResponse> OnLoginResponse;
+        public event Action<MapDataMessage> OnMapData;
+        public event Action<TileUpdate> OnTileUpdate;
 
 
         public bool IsConnected { get; private set; }
@@ -25,14 +28,14 @@ namespace Client.Net
         private NetPeer _server;
         private readonly string _connectionKey = "VGVzdF9zZXJ2ZXIx";
 
-        /// <summary>
-        /// Фабрика сообщений. Позволяет создавать объект нужного типа по MessageType.
-        /// </summary>
+        /// <summary>Р¤Р°Р±СЂРёРєРё СЃРѕРѕР±С‰РµРЅРёР№ РїРѕ MessageType.</summary>
         private static readonly Dictionary<MessageType, Func<INetMessage>> _messageFactories = new()
         {
             { MessageType.MoveIntent, () => new MoveIntent() },
             { MessageType.WorldSnapshot, () => new WorldSnapshot() },
             { MessageType.LoginResponse, () => new LoginResponse() },
+            { MessageType.MapData, () => new MapDataMessage() },
+            { MessageType.TileUpdate, () => new TileUpdate() },
         };
 
         public void Connect(string address, int port)
@@ -112,6 +115,14 @@ namespace Client.Net
 
                 case LoginResponse login:
                     OnLoginResponse?.Invoke(login);
+                    break;
+
+                case MapDataMessage map:
+                    OnMapData?.Invoke(map);
+                    break;
+
+                case TileUpdate tu:
+                    OnTileUpdate?.Invoke(tu);
                     break;
 
                 default:

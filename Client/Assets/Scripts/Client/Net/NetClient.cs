@@ -1,25 +1,20 @@
 using Shared.Messages.Core;
 using Shared.Messages.Player;
+using Shared.Messages.Interaction;
 using System;
 
 namespace Client.Net
 {
-    /// <summary>
-    /// Фасад над транспортом для клиента. Единственное место в клиенте, кроме
-    /// самого транспорта, которое работает с ITransport. Остальной код общается
-    /// с NetClient, а не с конкретной реализацией транспорта.
-    /// </summary>
+    /// <summary>РћР±С‘СЂС‚РєР° РЅР°Рґ ITransport: СЃРѕР±С‹С‚РёСЏ СЃРµСЂРІРµСЂР° Рё РѕС‚РїСЂР°РІРєР° intent'РѕРІ.</summary>
     public class NetClient
     {
         private readonly ITransport _transport;
         private uint _inputSequence;
 
-        /// <summary>Пришёл снапшот мира — отдаём его подписчикам.</summary>
         public event Action<WorldSnapshot> OnWorldSnapshot;
-
-        /// <summary>Пришёл наш NetId от сервера при подключении.</summary>
         public event Action<LoginResponse> OnLoginResponse;
-
+        public event Action<MapDataMessage> OnMapData;
+        public event Action<TileUpdate> OnTileUpdate;
         public event Action OnConnected;
         public event Action OnDisconnected;
 
@@ -32,19 +27,15 @@ namespace Client.Net
             _transport.OnDisconnected += () => OnDisconnected?.Invoke();
             _transport.OnWorldSnapshot += snap => OnWorldSnapshot?.Invoke(snap);
             _transport.OnLoginResponse += login => OnLoginResponse?.Invoke(login);
+            _transport.OnMapData += map => OnMapData?.Invoke(map);
+            _transport.OnTileUpdate += tu => OnTileUpdate?.Invoke(tu);
         }
 
         public void Connect(string address, int port) => _transport.Connect(address, port);
         public void Disconnect() => _transport.Disconnect();
-
-        /// <summary>Прокачать транспорт. Вызывать каждый кадр из Unity (Update).</summary>
         public void Poll() => _transport.Poll();
 
-        /// <summary>
-        /// Отправить намерение движения. Возвращает проставленный Sequence —
-        /// он нужен предсказанию, чтобы привязать локальный шаг к серверному
-        /// подтверждению (reconciliation).
-        /// </summary>
+        /// <summary>РћС‚РїСЂР°РІРёС‚СЊ РЅР°РјРµСЂРµРЅРёРµ РґРІРёР¶РµРЅРёСЏ; РІРѕР·РІСЂР°С‰Р°РµС‚ РµРіРѕ Sequence (РґР»СЏ reconciliation).</summary>
         public uint SendMove(IntentDirection direction, bool sprint)
         {
             var intent = new MoveIntent
@@ -56,5 +47,8 @@ namespace Client.Net
             _transport.Send(intent);
             return intent.Sequence;
         }
+
+        /// <summary>В«РСЃРїРѕР»СЊР·РѕРІР°С‚СЊВ» (E): Р»РµСЃС‚РЅРёС†Р°/Р»РёС„С‚ РїРѕРґ РёРіСЂРѕРєРѕРј. Р‘РµР· РїСЂРµРґСЃРєР°Р·Р°РЅРёСЏ вЂ” z РјРµРЅСЏРµС‚ СЃРµСЂРІРµСЂ.</summary>
+        public void SendUse() => _transport.Send(new UseIntent());
     }
 }

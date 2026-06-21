@@ -21,7 +21,7 @@ namespace ServerTests.Server.Services
         private readonly int _testPort;
         private static int _portCounter = 7790;
         private static readonly object _portLock = new object();
-        private readonly List<NetManager> _clientManagers = new(); // все созданные клиенты
+        private readonly List<NetManager> _clientManagers = new();
 
         public PlayerManagerTests()
         {

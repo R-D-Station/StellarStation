@@ -4,6 +4,7 @@ using Shared.Messages.Core;
 
 namespace Server.Network
 {
+    /// <summary>РЎРѕСЃС‚РѕСЏРЅРёРµ РїРѕРґРєР»СЋС‡С‘РЅРЅРѕРіРѕ РєР»РёРµРЅС‚Р°: РїРёСЂ, РєРѕРѕСЂРґРёРЅР°С‚С‹ РёРіСЂРѕРєР° Рё РѕС‡РµСЂРµРґСЊ intent'РѕРІ.</summary>
     public class ClientConnection
     {
         public NetPeer Peer { get; set; }
@@ -11,19 +12,20 @@ namespace Server.Network
         public DateTime ConnectedAt { get; set; }
         public DateTime LastActivity { get; set; }
 
-        // Данные игрока
+        // РЎРѕСЃС‚РѕСЏРЅРёРµ РёРіСЂРѕРєР°
         public int PlayerNetId { get; set; }
         public float X { get; set; }
         public float Y { get; set; }
         public int Z { get; set; }
         public byte Facing { get; set; }
 
-        // Для reconciliation
+        // Р”Р»СЏ reconciliation
         public uint LastProcessedSequence { get; set; }
 
-        // Входящие intent'ы, накопленные между тиками. Обрабатываются в GameLoop
-        // (по одному за тик), а не сразу при приёме — так движение детерминировано
-        // и совпадает с клиентским предсказанием.
+        // Р—Р°РїСЂРѕСЃ В«РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊВ» (E): РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚СЃСЏ РІ game-loop.
+        public bool UseRequested { get; set; }
+
+        // РћС‡РµСЂРµРґСЊ intent'РѕРІ; РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚СЃСЏ РІ GameLoop (РїРѕ РѕРґРЅРѕРјСѓ РЅР° С‚РёРє).
         public readonly ConcurrentQueue<MoveIntent> IntentQueue = new();
 
         public ClientConnection(NetPeer peer, int connectionId)
@@ -32,7 +34,7 @@ namespace Server.Network
             ConnectionId = connectionId;
             ConnectedAt = DateTime.UtcNow;
             LastActivity = DateTime.UtcNow;
-            PlayerNetId = connectionId; // Просто для начала
+            PlayerNetId = connectionId;
         }
     }
 }

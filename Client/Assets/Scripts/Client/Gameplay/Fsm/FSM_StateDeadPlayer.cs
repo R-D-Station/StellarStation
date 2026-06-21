@@ -3,6 +3,9 @@ using Client.Gameplay.Entities;
 
 namespace Client.Gameplay.Fsm
 {
+    /// <summary>
+    /// РЎРѕСЃС‚РѕСЏРЅРёРµ СЃРјРµСЂС‚Рё РёРіСЂРѕРєР°.
+    /// </summary>
     public class FSM_StateDeadPlayer : FSM_State
     {
         protected Player entity;
@@ -16,15 +19,15 @@ namespace Client.Gameplay.Fsm
         {
             entity.Rigidbody.linearVelocity = Vector3.zero;
             entity.DisableMovement = true;
-            entity.IgnoreCollision = true; // тело можно перетаскивать через других
-            // WIP - UI "стать гостом", труп-спрайт, и т.д.
+            entity.IgnoreCollision = true; // С‚РµР»Рѕ РјРѕР¶РЅРѕ РїРµСЂРµС‚Р°СЃРєРёРІР°С‚СЊ
+            // WIP: UI "СЃС‚Р°С‚СЊ РіРѕСЃС‚РѕРј", С‚СЂСѓРї-СЃРїСЂР°Р№С‚
         }
 
         public override void Update() { }
 
         public override void Exit()
         {
-            // выход — только через дефибриллятор/клонирование
+            // Р’С‹С…РѕРґ С‚РѕР»СЊРєРѕ С‡РµСЂРµР· РґРµС„РёР±СЂРёР»Р»СЏС‚РѕСЂ/РєР»РѕРЅРёСЂРѕРІР°РЅРёРµ
             entity.DisableMovement = false;
             entity.IgnoreCollision = false;
         }

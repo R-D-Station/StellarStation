@@ -109,9 +109,6 @@ namespace ServerTests.Shared.Messages.Core
             Assert.Equal(10, snapshot.TileY);
         }
 
-        /// <summary>
-        /// Вспомогательный метод для создания тестовых данных для десериализации EntitySnapshot.
-        /// </summary>
         private static byte[] CreateTestData(int netId, float x, float y, float z, byte facing)
         {
             using var ms = new MemoryStream();

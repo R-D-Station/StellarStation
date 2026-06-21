@@ -4,31 +4,22 @@ using System.IO;
 namespace Shared.World
 {
     /// <summary>
-    /// Бинарная сериализация GridMap в нейтральный формат. Чистый System.IO —
-    /// НЕ LiteNetLib (карта это файл на диске, не сетевой пакет) и НЕ Unity
-    /// (читает сервер на чистом .NET). Один и тот же код пишет редактор и
-    /// читает сервер — формат не может разъехаться.
-    ///
-    /// Формат (little-endian, как BinaryWriter по умолчанию):
-    ///   [magic int32 = 'S','M','A','P'] [version uint16] [chunkCount int32]
-    ///   далее chunkCount раз:
-    ///     [cx int32][cy int32][z int32]
-    ///     TileCount раз: один тайл (5 байт, см. WriteTile)
-    ///
-    /// Тайл пишется как 2 байта типов + 1 байт упакованных флагов = 3 байта.
-    /// Это компактно и расширяемо: новые флаги — новые биты, версия растёт.
+    /// Р‘РёРЅР°СЂРЅР°СЏ СЃРµСЂРёР°Р»РёР·Р°С†РёСЏ GridMap (РѕРґРёРЅ С„РѕСЂРјР°С‚ РґР»СЏ С„Р°Р№Р»Р° .smap Рё СЃРµС‚РµРІРѕР№ РїРµСЂРµРґР°С‡Рё).
+    /// Р¤РѕСЂРјР°С‚ (little-endian): [magic 'SMAP'][version uint16][chunkCount int32],
+    /// РґР°Р»РµРµ РЅР° С‡Р°РЅРє: [cx][cy][z] + TileCount С‚Р°Р№Р»РѕРІ (РїРѕ 5 Р±Р°Р№С‚, СЃРј. WriteTile).
     /// </summary>
     public static class MapSerializer
     {
-        private const int Magic = ('S') | ('M' << 8) | ('A' << 16) | ('P' << 24);
-        private const ushort Version = 1;
+        public const int Magic = ('S') | ('M' << 8) | ('A' << 16) | ('P' << 24);
+        public const ushort Version = 2;
 
-        // Биты упакованного байта флагов.
+        // Р‘РёС‚РѕРІС‹Рµ С„Р»Р°РіРё С‚Р°Р№Р»Р° (СѓРїР°РєРѕРІР°РЅС‹ РІ РѕРґРёРЅ Р±Р°Р№С‚).
         private const byte FlagSupport = 1 << 0;
         private const byte FlagHorizBlock = 1 << 1;
         private const byte FlagVertBlock = 1 << 2;
         private const byte FlagSealHoriz = 1 << 3;
         private const byte FlagSealVert = 1 << 4;
+        private const byte FlagDoorOpen = 1 << 5;
 
         public static void Write(Stream stream, GridMap map)
         {
@@ -37,7 +28,6 @@ namespace Shared.World
             w.Write(Magic);
             w.Write(Version);
 
-            // Считаем чанки заранее — IReadOnlyCollection.Count есть у Dictionary.Values.
             w.Write(map.Chunks.Count);
 
             foreach (var chunk in map.Chunks)
@@ -61,8 +51,8 @@ namespace Shared.World
                 throw new InvalidDataException("Not a station map file (bad magic).");
 
             ushort version = r.ReadUInt16();
-            if (version != Version)
-                throw new InvalidDataException($"Unsupported map version {version} (expected {Version}).");
+            if (version < 1 || version > Version)
+                throw new InvalidDataException($"Unsupported map version {version} (expected 1..{Version}).");
 
             var map = new GridMap();
             int chunkCount = r.ReadInt32();
@@ -76,7 +66,7 @@ namespace Shared.World
                 var chunk = new Chunk(cx, cy, z);
                 var tiles = chunk.Raw;
                 for (int i = 0; i < tiles.Length; i++)
-                    tiles[i] = ReadTile(r);
+                    tiles[i] = ReadTile(r, version);
 
                 map.AddChunk(chunk);
             }
@@ -84,10 +74,13 @@ namespace Shared.World
             return map;
         }
 
-        private static void WriteTile(BinaryWriter w, in Tile t)
+        /// <summary>Р—Р°РїРёСЃР°С‚СЊ РѕРґРёРЅ С‚Р°Р№Р» РІ С‚РµРєСѓС‰РµРј С„РѕСЂРјР°С‚Рµ (v2). РџСѓР±Р»РёС‡РЅРѕ вЂ” РїРµСЂРµРёСЃРїРѕР»СЊР·СѓРµС‚ TileUpdate.</summary>
+        public static void WriteTile(BinaryWriter w, in Tile t)
         {
             w.Write(t.FloorType);
             w.Write(t.WallType);
+            w.Write(t.DoorType);
+            w.Write((byte)t.Special);
 
             byte flags = 0;
             if (t.Support) flags |= FlagSupport;
@@ -95,26 +88,39 @@ namespace Shared.World
             if (t.BlocksVerticalSight) flags |= FlagVertBlock;
             if (t.SealsHorizontal) flags |= FlagSealHoriz;
             if (t.SealsVertical) flags |= FlagSealVert;
+            if (t.DoorOpen) flags |= FlagDoorOpen;
             w.Write(flags);
         }
 
-        private static Tile ReadTile(BinaryReader r)
+        /// <summary>РџСЂРѕС‡РёС‚Р°С‚СЊ РѕРґРёРЅ С‚Р°Р№Р» С‚РµРєСѓС‰РµРіРѕ С„РѕСЂРјР°С‚Р° (v2).</summary>
+        public static Tile ReadTile(BinaryReader r) => ReadTile(r, Version);
+
+        /// <summary>РџСЂРѕС‡РёС‚Р°С‚СЊ С‚Р°Р№Р» СЃ СѓС‡С‘С‚РѕРј РІРµСЂСЃРёРё С„Р°Р№Р»Р° (v1 вЂ” Р±РµР· РґРІРµСЂРё/СЃРїРµС†-С‚Р°Р№Р»Р°).</summary>
+        public static Tile ReadTile(BinaryReader r, ushort version)
         {
             var t = new Tile
             {
                 FloorType = r.ReadByte(),
                 WallType = r.ReadByte()
             };
+
+            if (version >= 2)
+            {
+                t.DoorType = r.ReadByte();
+                t.Special = (TileSpecial)r.ReadByte();
+            }
+
             byte flags = r.ReadByte();
             t.Support = (flags & FlagSupport) != 0;
             t.BlocksHorizontalSight = (flags & FlagHorizBlock) != 0;
             t.BlocksVerticalSight = (flags & FlagVertBlock) != 0;
             t.SealsHorizontal = (flags & FlagSealHoriz) != 0;
             t.SealsVertical = (flags & FlagSealVert) != 0;
+            if (version >= 2)
+                t.DoorOpen = (flags & FlagDoorOpen) != 0;
             return t;
         }
 
-        // Удобные обёртки для файлов.
         public static void SaveToFile(string path, GridMap map)
         {
             using var fs = File.Create(path);

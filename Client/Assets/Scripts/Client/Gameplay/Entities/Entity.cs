@@ -5,6 +5,9 @@ using Client.Gameplay.Fsm;
 
 namespace Client.Gameplay.Entities
 {
+    /// <summary>
+    /// Р‘Р°Р·РѕРІР°СЏ СЃСѓС‰РЅРѕСЃС‚СЊ СЃ С„РёР·РёРєРѕР№, СЃС‚Р°С‚СѓСЃР°РјРё Рё FSM.
+    /// </summary>
     public class Entity : MonoBehaviour
     {
         [SerializeField] public bool DisableMovement;
@@ -18,17 +21,19 @@ namespace Client.Gameplay.Entities
         protected Vector2 _currentTile;
         protected string _playerName = "";
 
-        // В будущем изменить на безопасный класс
         [Header("Status")]
         public float StunDuration = 0f;
         public float KnockdownDuration = 0f;
 
+        /// <summary>
+        /// РџСЂРёС‡РёРЅР°, РїРѕ РєРѕС‚РѕСЂРѕР№ СЃСѓС‰РЅРѕСЃС‚СЊ Р»РµР¶РёС‚.
+        /// </summary>
         public enum LayingReason
         {
             None,
-            Voluntary,    // сам лёг по F
-            KnockedDown,  // сбили с ног
-            Unconscious,  // потерял сознание
+            Voluntary,    // СЃР°Рј Р»С‘Рі РїРѕ F
+            KnockedDown,  // СЃР±РёР»Рё СЃ РЅРѕРі
+            Unconscious,  // РїРѕС‚РµСЂСЏР» СЃРѕР·РЅР°РЅРёРµ
         }
 
         public LayingReason CurrentLayingReason = LayingReason.None;
@@ -38,6 +43,10 @@ namespace Client.Gameplay.Entities
 
         public Vector3 MoveDirection;
         public bool Moved = false;
+
+        /// <summary>
+        /// РЎС‚РѕСЂРѕРЅР°, РєСѓРґР° СЃРјРѕС‚СЂРёС‚ СЃСѓС‰РЅРѕСЃС‚СЊ.
+        /// </summary>
         public enum Direction
         {
             North,  // +Z

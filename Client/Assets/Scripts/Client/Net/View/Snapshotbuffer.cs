@@ -3,15 +3,7 @@ using Shared.Messages.Core;
 
 namespace Client.Net.View
 {
-    /// <summary>
-    /// Буфер снапшотов для интерполяции. Клиент рисует чужие сущности
-    /// НЕ в последней пришедшей позиции, а с небольшой задержкой, плавно
-    /// интерполируя между двумя снапшотами. Это убирает рывки при суб-
-    /// тайловом движении и переменном пинге.
-    ///
-    /// На этапе 0 (заглушка без задержки) интерполяция почти незаметна,
-    /// но буфер закладываем сразу — он обязателен для реальной сети.
-    /// </summary>
+    /// <summary>Р‘СѓС„РµСЂ СЃРЅР°РїС€РѕС‚РѕРІ: РёРЅС‚РµСЂРїРѕР»СЏС†РёСЏ С‡СѓР¶РёС… СЃСѓС‰РЅРѕСЃС‚РµР№ СЃ РЅРµР±РѕР»СЊС€РѕР№ Р·Р°РґРµСЂР¶РєРѕР№.</summary>
     public class SnapshotBuffer
     {
         private readonly struct Sample
@@ -31,7 +23,7 @@ namespace Client.Net.View
         private readonly List<Sample> _samples = new List<Sample>();
         private const int MaxSamples = 32;
 
-        /// <summary>Задержка интерполяции в секундах (буфер на ~2 тика при 30 TPS).</summary>
+        /// <summary>Р—Р°РґРµСЂР¶РєР° РёРЅС‚РµСЂРїРѕР»СЏС†РёРё РІ СЃРµРєСѓРЅРґР°С… (Р±СѓС„РµСЂ РЅР° ~2 С‚РёРєР° РїСЂРё 30 TPS).</summary>
         public float InterpolationDelay = 0.066f;
 
         public void Push(float now, in EntitySnapshot snap)
@@ -41,10 +33,7 @@ namespace Client.Net.View
                 _samples.RemoveAt(0);
         }
 
-        /// <summary>
-        /// Получить интерполированную позицию на момент (now - InterpolationDelay).
-        /// Возвращает false, если данных ещё нет.
-        /// </summary>
+        /// <summary>РРЅС‚РµСЂРїРѕР»РёСЂРѕРІР°РЅРЅР°СЏ РїРѕР·РёС†РёСЏ РЅР° РјРѕРјРµРЅС‚ (now - InterpolationDelay). false вЂ” РґР°РЅРЅС‹С… РЅРµС‚.</summary>
         public bool HaveSample(float now, out float x, out float y, out float z, out byte facing)
         {
             x = y = 0f; z = 0; facing = 0;
@@ -52,7 +41,7 @@ namespace Client.Net.View
 
             float renderTime = now - InterpolationDelay;
 
-            // Раньше всех данных — отдаём первый.
+            // Р Р°РЅСЊС€Рµ РІСЃРµС… РґР°РЅРЅС‹С… вЂ” РѕС‚РґР°С‘Рј РїРµСЂРІС‹Р№.
             if (renderTime <= _samples[0].Time)
             {
                 var s = _samples[0];
@@ -60,7 +49,7 @@ namespace Client.Net.View
                 return true;
             }
 
-            // Ищем пару, между которой лежит renderTime.
+            // РС‰РµРј РїР°СЂСѓ, РјРµР¶РґСѓ РєРѕС‚РѕСЂРѕР№ Р»РµР¶РёС‚ renderTime.
             for (int i = 0; i < _samples.Count - 1; i++)
             {
                 var a = _samples[i];
@@ -70,7 +59,7 @@ namespace Client.Net.View
                     float span = b.Time - a.Time;
                     float t = span > 0f ? (renderTime - a.Time) / span : 0f;
 
-                    // Z дискретный — НЕ интерполируем, берём целевой этаж.
+                    // Z РґРёСЃРєСЂРµС‚РЅС‹Р№ вЂ” РЅРµ РёРЅС‚РµСЂРїРѕР»РёСЂСѓРµРј.
                     x = a.X + (b.X - a.X) * t;
                     y = a.Y + (b.Y - a.Y) * t;
                     z = b.Z;
@@ -79,7 +68,7 @@ namespace Client.Net.View
                 }
             }
 
-            // Позже всех данных — отдаём последний (экстраполяцию не делаем).
+            // РџРѕР·Р¶Рµ РІСЃРµС… РґР°РЅРЅС‹С… вЂ” РѕС‚РґР°С‘Рј РїРѕСЃР»РµРґРЅРёР№ (СЌРєСЃС‚СЂР°РїРѕР»СЏС†РёСЋ РЅРµ РґРµР»Р°РµРј).
             var last = _samples[_samples.Count - 1];
             x = last.X; y = last.Y; z = last.Z; facing = last.Facing;
             return true;

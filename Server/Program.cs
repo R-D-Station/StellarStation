@@ -2,16 +2,19 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Shared.Configs;
+using Shared.World;
 using Server.Network;
 using Server.Services;
 
 namespace Server
 {
+    /// <summary>РўРѕС‡РєР° РІС…РѕРґР° СЃРµСЂРІРµСЂР°: Р·Р°РіСЂСѓР·РєР° РєРѕРЅС„РёРіР° Рё РєР°СЂС‚С‹, Р·Р°РїСѓСЃРє Рё graceful shutdown.</summary>
     class Program
     {
         private static GameServer? _server;
         private static PlayerManager? _playerManager;
         private static bool _isRunning = true;
+        private static GridMap? _map;
 
         static async Task Main(string[] args)
         {
@@ -27,7 +30,8 @@ namespace Server
                 SVars.LoadFromJson("config.json");
                 var config = SVars.Instance;
 
-                _server = new GameServer(config);
+                _map = LoadMap(config.MapPath);
+                _server = new GameServer(config, _map);
                 _playerManager = new PlayerManager(_server);
 
                 _server.Start();
@@ -57,10 +61,7 @@ namespace Server
             }
         }
 
-        /// <summary>
-        /// Обработчик необработанных исключений в домене приложения
-        /// Срабатывает, когда исключение не поймано ни в одном try-catch
-        /// </summary>
+        /// <summary>Р“Р»РѕР±Р°Р»СЊРЅС‹Р№ РѕР±СЂР°Р±РѕС‚С‡РёРє РЅРµРѕР±СЂР°Р±РѕС‚Р°РЅРЅС‹С… РёСЃРєР»СЋС‡РµРЅРёР№: Р»РѕРі Рё РїРѕРїС‹С‚РєР° РІРѕСЃСЃС‚Р°РЅРѕРІР»РµРЅРёСЏ.</summary>
         private static void OnUnhandledException(object sender, UnhandledExceptionEventArgs e)
         {
             var exception = e.ExceptionObject as Exception;
@@ -79,9 +80,7 @@ namespace Server
             }
         }
 
-        /// <summary>
-        /// Обработчик непрослеживаемых исключений в Task (TPL)
-        /// </summary>
+        /// <summary>РћР±СЂР°Р±РѕС‚С‡РёРє РЅРµРѕР±СЂР°Р±РѕС‚Р°РЅРЅС‹С… РёСЃРєР»СЋС‡РµРЅРёР№ РІ Task (TPL).</summary>
         private static void OnUnobservedTaskException(object? sender, UnobservedTaskExceptionEventArgs e)
         {
             Console.WriteLine($"[FATAL] Unobserved Task exception: {e.Exception.Message}");
@@ -93,30 +92,26 @@ namespace Server
                 $"[{DateTime.Now}] TASK ERROR: {e.Exception.Message}\n{e.Exception.StackTrace}\n\n");
         }
 
-        /// <summary>
-        /// Обработчик Ctrl+C для graceful shutdown
-        /// </summary>
+        /// <summary>Ctrl+C: graceful shutdown.</summary>
         private static void OnCancelKeyPress(object? sender, ConsoleCancelEventArgs e)
         {
-            e.Cancel = true; // Отменяем немедленное завершение
+            e.Cancel = true; // РѕС‚РјРµРЅСЏРµРј РЅРµРјРµРґР»РµРЅРЅРѕРµ Р·Р°РІРµСЂС€РµРЅРёРµ
             _isRunning = false;
             Console.WriteLine("\n[Program] Shutting down gracefully...");
         }
 
-        /// <summary>
-        /// Попытка восстановить критические компоненты после ошибки
-        /// </summary>
+        /// <summary>РџС‹С‚Р°РµС‚СЃСЏ РїРµСЂРµР·Р°РїСѓСЃС‚РёС‚СЊ СЃРµСЂРІРµСЂ РїРѕСЃР»Рµ СЃР±РѕСЏ.</summary>
         private static void RestoreCriticalComponents()
         {
             try
             {
                 Console.WriteLine("[RECOVERY] Attempting to restore server components...");
 
-                // Перезапускаем сервер, если он упал
+                // РџРµСЂРµР·Р°РїСѓСЃРєР°РµРј СЃРµСЂРІРµСЂ, РµСЃР»Рё РѕРЅ СѓРїР°Р»
                 if (_server == null)
                 {
                     var config = SVars.Instance;
-                    _server = new GameServer(config);
+                    _server = new GameServer(config, _map);
                     _playerManager = new PlayerManager(_server);
                     _server.Start();
                     Console.WriteLine("[RECOVERY] Server restarted successfully");
@@ -125,6 +120,33 @@ namespace Server
             catch (Exception ex)
             {
                 Console.WriteLine($"[RECOVERY] Failed to restore: {ex.Message}");
+            }
+        }
+
+        /// <summary>Р—Р°РіСЂСѓР¶Р°РµС‚ РєР°СЂС‚Сѓ РёР· .smap; РїСЂРё РѕС‚СЃСѓС‚СЃС‚РІРёРё/РѕС€РёР±РєРµ вЂ” null (СЃРµСЂРІРµСЂ Р±РµР· РєРѕР»Р»РёР·РёРё).</summary>
+        private static GridMap? LoadMap(string path)
+        {
+            // РћС‚РЅРѕСЃРёС‚РµР»СЊРЅС‹Р№ РїСѓС‚СЊ СЂРµР·РѕР»РІРёРј РѕС‚ РїР°РїРєРё exe, С‡С‚РѕР±С‹ СЂР°Р±РѕС‚Р°Р»Рѕ Рё РїСЂРё dotnet run, Рё Сѓ СЃР±РѕСЂРєРё.
+            string resolved = Path.IsPathRooted(path)
+                ? path
+                : Path.Combine(AppContext.BaseDirectory, path);
+
+            try
+            {
+                if (!File.Exists(resolved))
+                {
+                    Console.WriteLine($"[Map] No map at '{resolved}' - running without collision.");
+                    return null;
+                }
+
+                var map = MapSerializer.LoadFromFile(resolved);
+                Console.WriteLine($"[Map] Loaded '{resolved}': {map.Chunks.Count} chunks.");
+                return map;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Map] Failed to load '{resolved}': {ex.Message} - running without collision.");
+                return null;
             }
         }
     }

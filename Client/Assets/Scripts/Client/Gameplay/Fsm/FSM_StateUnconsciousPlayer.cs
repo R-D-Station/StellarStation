@@ -3,6 +3,9 @@ using Client.Gameplay.Entities;
 
 namespace Client.Gameplay.Fsm
 {
+    /// <summary>
+    /// РЎРѕСЃС‚РѕСЏРЅРёРµ Р±РµР· СЃРѕР·РЅР°РЅРёСЏ: РІС‹С…РѕРґ С‚РѕР»СЊРєРѕ РёР·РІРЅРµ (РјРµРґРёРє, СЌРїРёРЅРµС„СЂРёРЅ).
+    /// </summary>
     public class FSM_StateUnconsciousPlayer : FSM_State
     {
         protected Player entity;
@@ -16,14 +19,12 @@ namespace Client.Gameplay.Fsm
         {
             entity.Rigidbody.linearVelocity = Vector3.zero;
             entity.DisableMovement = true;
-            // WIP чёрный экран, отключение HUD, и т.д.
+            // WIP: С‡С‘СЂРЅС‹Р№ СЌРєСЂР°РЅ, РѕС‚РєР»СЋС‡РµРЅРёРµ HUD
         }
 
         public override void Update()
         {
-            // WIP
-            // из этого состояния выход только извне (медик, эпинефрин)
-            // другая система вызовет Fsm.SetState<FSM_StateStandPlayer>()
+            // WIP: РІС‹С…РѕРґ РІС‹Р·С‹РІР°РµС‚СЃСЏ РІРЅРµС€РЅРµР№ СЃРёСЃС‚РµРјРѕР№ С‡РµСЂРµР· Fsm.SetState
         }
 
         public override void Exit()

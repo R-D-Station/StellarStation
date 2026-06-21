@@ -7,6 +7,9 @@ using Client.Gameplay.Fsm;
 
 namespace Client.Gameplay.Entities
 {
+    /// <summary>
+    /// РРіСЂРѕРє: РІРІРѕРґ, FSM-СЃРѕСЃС‚РѕСЏРЅРёСЏ Рё РЅР°РїСЂР°РІР»РµРЅРёРµ РІР·РіР»СЏРґР°.
+    /// </summary>
     public class Player : Entity
     {
         [SerializeField] PlayerControl _playerControls;
@@ -77,7 +80,6 @@ namespace Client.Gameplay.Entities
         }
         private void OnMovementPerformed(InputAction.CallbackContext context)
         {
-            // Считываем вектор движения (значение от -1 до 1 по осям X и Z)
             Vector2 input = context.ReadValue<Vector2>();
             MoveDirection = new Vector3(input.x, 0, input.y);
         }
@@ -88,7 +90,7 @@ namespace Client.Gameplay.Entities
         }
         private void OnToggleLaying(InputAction.CallbackContext context)
         {
-            // Если уже лежим добровольно — встаём
+            // РЈР¶Рµ Р»РµР¶РёРј РґРѕР±СЂРѕРІРѕР»СЊРЅРѕ вЂ” РІСЃС‚Р°С‘Рј
             if (Fsm.StateCurrent is FSM_StateLayingPlayer
                 && CurrentLayingReason == LayingReason.Voluntary)
             {
@@ -96,15 +98,14 @@ namespace Client.Gameplay.Entities
                 return;
             }
 
-            // Если стоим/двигаемся — ложимся
+            // РЎС‚РѕРёРј/РґРІРёРіР°РµРјСЃСЏ вЂ” Р»РѕР¶РёРјСЃСЏ
             if (Fsm.StateCurrent is FSM_StateStandPlayer
                 || Fsm.StateCurrent is FSM_StateMovePlayer)
             {
                 CurrentLayingReason = LayingReason.Voluntary;
                 Fsm.SetState<FSM_StateLayingPlayer>();
             }
-
-            // Если в стане / нокдауне / без сознания / мёртв — F игнорируется
+            // РЎС‚Р°РЅ/РЅРѕРєРґР°СѓРЅ/Р±РµР· СЃРѕР·РЅР°РЅРёСЏ/РјС‘СЂС‚РІ вЂ” F РёРіРЅРѕСЂРёСЂСѓРµС‚СЃСЏ
         }
 
         private void OnSprintPerformed(InputAction.CallbackContext context)

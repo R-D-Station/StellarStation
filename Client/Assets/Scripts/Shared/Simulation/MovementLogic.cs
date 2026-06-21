@@ -1,58 +1,123 @@
+using System;
 using Shared.Messages.Core;
+using Shared.World;
 
 namespace Shared.Simulation
 {
     /// <summary>
-    /// Единая логика движения. Вызывается И сервером (авторитетная симуляция),
-    /// И клиентом (предсказание своего игрока). Один код = детерминизм:
-    /// предсказание клиента совпадает с сервером, reconciliation не дёргает позицию.
-    ///
-    /// Один вызов = один серверный тик = один обработанный MoveIntent.
-    /// Шаг суб-тайловый (дробный X/Y), Z (этаж) здесь не трогается.
+    /// Р•РґРёРЅР°СЏ Р»РѕРіРёРєР° РґРІРёР¶РµРЅРёСЏ РґР»СЏ СЃРµСЂРІРµСЂР° Рё РєР»РёРµРЅС‚Р° (РїСЂРµРґСЃРєР°Р·Р°РЅРёРµ). РћР±С‰РёР№ РєРѕРґ =
+    /// РґРµС‚РµСЂРјРёРЅРёР·Рј. РћРґРёРЅ РІС‹Р·РѕРІ = РѕРґРёРЅ С‚РёРє = РѕРґРёРЅ MoveIntent; РґРІРёР¶РµРЅРёРµ СЃСѓР±-С‚Р°Р№Р»РѕРІРѕРµ, Z РЅРµ РјРµРЅСЏРµС‚СЃСЏ.
     /// </summary>
     public static class MovementLogic
     {
-        /// <summary>Базовый шаг за один тик в тайлах.</summary>
+        /// <summary>Р‘Р°Р·РѕРІС‹Р№ С€Р°Рі Р·Р° С‚РёРє РїСЂРё С…РѕРґСЊР±Рµ.</summary>
         public const float StepPerTick = 0.1f;
 
-        /// <summary>Множитель шага при спринте (0.2 / 0.1).</summary>
+        /// <summary>РњРЅРѕР¶РёС‚РµР»СЊ С€Р°РіР° РїСЂРё Р±РµРіРµ.</summary>
         public const float SprintMultiplier = 2f;
 
-        /// <summary>
-        /// Применяет одно намерение движения к позиции (X/Y — суб-тайловые).
-        /// Z не меняется: смена этажа — отдельная механика.
-        /// </summary>
-        public static void Apply(ref float x, ref float y, IntentDirection dir, bool sprint)
-        {
-            float step = StepPerTick * (sprint ? SprintMultiplier : 1f);
+        /// <summary>1/в€љ2 вЂ” РЅРѕСЂРјР°Р»РёР·Р°С†РёСЏ РґРёР°РіРѕРЅР°Р»Рё, С‡С‚РѕР±С‹ РѕРЅР° РЅРµ Р±С‹Р»Р° Р±С‹СЃС‚СЂРµРµ РїСЂСЏРјРѕРіРѕ С…РѕРґР°.</summary>
+        public const float InvSqrt2 = 0.70710677f;
 
+        /// <summary>РџСЂРёРјРµРЅРёС‚СЊ РѕРґРёРЅ С€Р°Рі РґРІРёР¶РµРЅРёСЏ Рє РїРѕР·РёС†РёРё (X/Y СЃСѓР±-С‚Р°Р№Р»РѕРІС‹Рµ, Z РЅРµ РјРµРЅСЏРµС‚СЃСЏ).</summary>
+        public static void Apply(GridMap map, int z, ref float x, ref float y, IntentDirection dir, bool sprint)
+        {
+            GetAxes(dir, out int dx, out int dy);
+            if (dx == 0 && dy == 0) return;
+
+            float step = StepPerTick * (sprint ? SprintMultiplier : 1f);
+            if (dx != 0 && dy != 0) step *= InvSqrt2; // РґРёР°РіРѕРЅР°Р»СЊ РЅРµ Р±С‹СЃС‚СЂРµРµ РїСЂСЏРјРѕРіРѕ С…РѕРґР°
+
+            // РћСЃРё СЂР°Р·РґРµР»СЊРЅРѕ: СѓРїС‘СЂР»РёСЃСЊ РїРѕ РѕРґРЅРѕР№ вЂ” СЃРєРѕР»СЊР·РёРј РІРґРѕР»СЊ СЃС‚РµРЅС‹ РїРѕ РґСЂСѓРіРѕР№.
+            if (dx != 0) MoveAxisX(map, z, ref x, ref y, dx * step);
+            if (dy != 0) MoveAxisY(map, z, ref x, ref y, dy * step);
+        }
+
+        // РҐРѕРґ РїРѕ X. Р•СЃР»Рё С‚РµР»Рѕ СѓРїС‘СЂР»РѕСЃСЊ, РЅРѕ РІРїРµСЂРµРґРё СЂРµР°Р»СЊРЅРѕ РїСЂРѕС…РѕРґ вЂ” РїРѕРґС†РµРЅС‚СЂРѕРІС‹РІР°РµРјСЃСЏ
+        // РїРѕ Y Рє С†РµРЅС‚СЂСѓ СЃС‚СЂРѕРєРё, С‡С‚РѕР±С‹ РїСЂРѕСЃРєРѕР»СЊР·РЅСѓС‚СЊ РІ РїСЂРѕС‘Рј. РЈ СЃРїР»РѕС€РЅРѕР№ СЃС‚РµРЅС‹ вЂ” СЃС‚РѕРї.
+        private static void MoveAxisX(GridMap map, int z, ref float x, ref float y, float dx)
+        {
+            float nx = x + dx;
+            if (!IsBlocked(map, nx, y, z)) { x = nx; return; }
+
+            int col = (int)MathF.Floor(nx + (dx > 0 ? CollisionRadius : -CollisionRadius));
+            int row = (int)MathF.Floor(y);
+            if (map == null || !map.GetTile(col, row, z).Walkable) return; // РІРїРµСЂРµРґРё СЃС‚РµРЅР°
+
+            float ny = y + Math.Clamp((row + 0.5f) - y, -StepPerTick, StepPerTick);
+            if (ny != y && !IsBlocked(map, x, ny, z)) y = ny;   // РїРѕРґС†РµРЅС‚СЂРѕРІР°Р»РёСЃСЊ РїРѕ Y
+            if (!IsBlocked(map, nx, y, z)) x = nx;              // РїСЂРѕР±СѓРµРј РІРїРµСЂС‘Рґ
+        }
+
+        // РҐРѕРґ РїРѕ Y (СЃРёРјРјРµС‚СЂРёС‡РЅРѕ MoveAxisX: РїРѕРґС†РµРЅС‚СЂРѕРІРєР° РїРѕ X).
+        private static void MoveAxisY(GridMap map, int z, ref float x, ref float y, float dy)
+        {
+            float ny = y + dy;
+            if (!IsBlocked(map, x, ny, z)) { y = ny; return; }
+
+            int row = (int)MathF.Floor(ny + (dy > 0 ? CollisionRadius : -CollisionRadius));
+            int col = (int)MathF.Floor(x);
+            if (map == null || !map.GetTile(col, row, z).Walkable) return; // РІРїРµСЂРµРґРё СЃС‚РµРЅР°
+
+            float nx = x + Math.Clamp((col + 0.5f) - x, -StepPerTick, StepPerTick);
+            if (nx != x && !IsBlocked(map, nx, y, z)) x = nx;   // РїРѕРґС†РµРЅС‚СЂРѕРІР°Р»РёСЃСЊ РїРѕ X
+            if (!IsBlocked(map, x, ny, z)) y = ny;              // РїСЂРѕР±СѓРµРј РІРїРµСЂС‘Рґ
+        }
+
+        /// <summary>Р Р°Р·Р»РѕР¶РёС‚СЊ РЅР°РїСЂР°РІР»РµРЅРёРµ РЅР° РѕСЃРё: dx, dy в€€ {-1, 0, 1}.</summary>
+        public static void GetAxes(IntentDirection dir, out int dx, out int dy)
+        {
+            dx = 0;
+            dy = 0;
             switch (dir)
             {
-                case IntentDirection.North: y += step; break;
-                case IntentDirection.South: y -= step; break;
-                case IntentDirection.East: x += step; break;
-                case IntentDirection.West: x -= step; break;
-                case IntentDirection.None: break;
+                case IntentDirection.North: dy = 1; break;
+                case IntentDirection.South: dy = -1; break;
+                case IntentDirection.East: dx = 1; break;
+                case IntentDirection.West: dx = -1; break;
+                case IntentDirection.NorthEast: dx = 1; dy = 1; break;
+                case IntentDirection.NorthWest: dx = -1; dy = 1; break;
+                case IntentDirection.SouthEast: dx = 1; dy = -1; break;
+                case IntentDirection.SouthWest: dx = -1; dy = -1; break;
             }
         }
 
-        /// <summary>
-        /// Переводит IntentDirection в facing-байт в семантике Entity.Direction
-        /// (North=0, South=1, East=2, West=3) — именно это читает клиентский визуал.
-        /// ВАЖНО: IntentDirection имеет другой порядок (None=0, сдвиг +1), поэтому
-        /// конвертация явная, а не приведением типа.
-        ///
-        /// None оставляет facing без изменений — возвращает текущее значение.
-        /// </summary>
+        /// <summary>РџРѕР»РѕРІРёРЅР° В«С‚РµР»Р°В» РёРіСЂРѕРєР° РІ С‚Р°Р№Р»Р°С… (AABB-СЂР°РґРёСѓСЃ). РЎС‚СЂРѕРіРѕ &lt; 0.5, РёРЅР°С‡Рµ Р·Р°СЃС‚СЂСЏРЅРµС‚ РІ РєРѕСЂРёРґРѕСЂРµ С€РёСЂРёРЅРѕР№ 1.</summary>
+        public const float CollisionRadius = 0.45f;
+
+        // Р—Р°РґРµРІР°РµС‚ Р»Рё В«С‚РµР»РѕВ» РёРіСЂРѕРєР° (РєРІР°РґСЂР°С‚ 2*CollisionRadius РІРѕРєСЂСѓРі cx,cy) РЅРµРїСЂРѕС…РѕРґРёРјС‹Р№ С‚Р°Р№Р» РЅР° СЌС‚Р°Р¶Рµ z.
+        private static bool IsBlocked(GridMap map, float cx, float cy, int z)
+        {
+            if (map == null || map.Chunks.Count == 0)
+                return false;
+
+            int minX = (int)MathF.Floor(cx - CollisionRadius);
+            int maxX = (int)MathF.Floor(cx + CollisionRadius);
+            int minY = (int)MathF.Floor(cy - CollisionRadius);
+            int maxY = (int)MathF.Floor(cy + CollisionRadius);
+
+            for (int tx = minX; tx <= maxX; tx++)
+                for (int ty = minY; ty <= maxY; ty++)
+                    if (!map.GetTile(tx, ty, z).Walkable)
+                        return true;
+
+            return false;
+        }
+
+        /// <summary>IntentDirection в†’ facing-Р±Р°Р№С‚ Entity.Direction (N=0, S=1, E=2, W=3). None СЃРѕС…СЂР°РЅСЏРµС‚ С‚РµРєСѓС‰РёР№.</summary>
         public static byte ToFacing(IntentDirection dir, byte currentFacing)
         {
             switch (dir)
             {
-                case IntentDirection.North: return 0; // Entity.Direction.North
-                case IntentDirection.South: return 1; // Entity.Direction.South
-                case IntentDirection.East: return 2; // Entity.Direction.East
-                case IntentDirection.West: return 3; // Entity.Direction.West
-                default: return currentFacing;        // None — не меняем
+                case IntentDirection.North: return 0;
+                case IntentDirection.South: return 1;
+                case IntentDirection.East:
+                case IntentDirection.NorthEast:
+                case IntentDirection.SouthEast: return 2; // РґРёР°РіРѕРЅР°Р»СЊ в†’ РіРѕСЂРёР·РѕРЅС‚Р°Р»СЊ
+                case IntentDirection.West:
+                case IntentDirection.NorthWest:
+                case IntentDirection.SouthWest: return 3;
+                default: return currentFacing;            // None вЂ” РЅРµ РІСЂР°С‰Р°РµРј
             }
         }
     }

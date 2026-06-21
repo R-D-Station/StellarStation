@@ -4,6 +4,7 @@ using Shared.Messages.Player;
 
 namespace Server.Services
 {
+    /// <summary>РЈРїСЂР°РІР»СЏРµС‚ Р¶РёР·РЅРµРЅРЅС‹Рј С†РёРєР»РѕРј РёРіСЂРѕРєРѕРІ: СЃРїР°РІРЅ РїСЂРё РІС…РѕРґРµ, РѕС‡РёСЃС‚РєР° РїСЂРё РІС‹С…РѕРґРµ.</summary>
     public class PlayerManager
     {
         private readonly GameServer _server;
@@ -16,26 +17,29 @@ namespace Server.Services
 
             _server.OnClientConnected += OnClientConnected;
             _server.OnClientDisconnected += OnClientDisconnected;
-            // Движение обрабатывается в GameServer.ProcessIntents (один шаг за тик).
-            // PlayerManager отвечает только за спавн/деспавн игроков.
+            // Р”РІРёР¶РµРЅРёРµ РѕР±СЂР°Р±Р°С‚С‹РІР°РµС‚ GameServer.ProcessIntents; Р·РґРµСЃСЊ вЂ” С‚РѕР»СЊРєРѕ РІС…РѕРґ/РІС‹С…РѕРґ РёРіСЂРѕРєРѕРІ.
         }
 
         private void OnClientConnected(ClientConnection client)
         {
-            client.X = 0;
-            client.Y = 0;
-            client.Z = 0;
+            client.X = _server.SpawnX;
+            client.Y = _server.SpawnY;
+            client.Z = _server.SpawnZ;
             client.Facing = 0;
 
             _players[client.ConnectionId] = client;
 
-            Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} spawned at (0, 0, 0)");
+            Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} spawned at ({client.X}, {client.Y}, z{client.Z})");
 
-            // Сообщаем клиенту его NetId, чтобы он мог отличить свою сущность
-            // в WorldSnapshot от чужих (нужно для предсказания/reconciliation).
+            // РЎРѕРѕР±С‰Р°РµРј РєР»РёРµРЅС‚Сѓ РµРіРѕ NetId вЂ” С‡С‚РѕР±С‹ РѕРЅ СѓР·РЅР°РІР°Р» СЃРµР±СЏ РІ WorldSnapshot.
             _server.SendToClient(client, new LoginResponse { NetId = client.PlayerNetId });
 
-            // TODO: отправляем всем остальным игрокам (администрации), что новый игрок присоединился
+            // РљР°СЂС‚Р° С†РµР»РёРєРѕРј СЃСЂР°Р·Сѓ РїРѕСЃР»Рµ Р»РѕРіРёРЅР° (РїРѕР·Р¶Рµ вЂ” СЃС‚СЂРёРјРёРЅРі РїРѕ PVS).
+            _server.SendMap(client);
+            // РўРµРєСѓС‰РµРµ СЃРѕСЃС‚РѕСЏРЅРёРµ РѕС‚РєСЂС‹С‚С‹С… РґРІРµСЂРµР№ (РєР°СЂС‚Р° СЃС‚Р°С‚РёС‡РЅР°, РґРІРµСЂРё вЂ” СЂР°РЅС‚Р°Р№Рј).
+            _server.SendOpenDoors(client);
+
+            // TODO: СЂР°Р·РѕСЃР»Р°С‚СЊ РЅРѕРІРёС‡РєР° РѕСЃС‚Р°Р»СЊРЅС‹Рј РёРіСЂРѕРєР°Рј (СЃРїР°РІРЅ)
         }
 
         private void OnClientDisconnected(ClientConnection client)
@@ -44,9 +48,6 @@ namespace Server.Services
             Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} left");
         }
 
-        /// <summary>
-        /// Метод для получения всех игроков (для отладки)
-        /// </summary>
         public IReadOnlyCollection<ClientConnection> GetAllPlayers() => _players.Values;
     }
 }

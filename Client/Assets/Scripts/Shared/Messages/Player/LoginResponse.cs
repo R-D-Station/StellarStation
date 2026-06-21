@@ -3,11 +3,7 @@ using System.IO;
 
 namespace Shared.Messages.Player
 {
-    /// <summary>
-    /// Ответ сервера новому клиенту при подключении. Несёт NetId, который
-    /// сервер присвоил этому игроку. Клиент запоминает его, чтобы отличать
-    /// свою сущность в WorldSnapshot от чужих (нужно для предсказания).
-    /// </summary>
+    /// <summary>РћС‚РІРµС‚ СЃРµСЂРІРµСЂР° РїСЂРё РїРѕРґРєР»СЋС‡РµРЅРёРё: РїСЂРёСЃРІРѕРµРЅРЅС‹Р№ РёРіСЂРѕРєСѓ NetId (РЅСѓР¶РµРЅ РґР»СЏ РїСЂРµРґСЃРєР°Р·Р°РЅРёСЏ).</summary>
     public struct LoginResponse : INetMessage
     {
         public int NetId;
@@ -29,7 +25,7 @@ namespace Shared.Messages.Player
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "LoginResponse data cannot be null");
 
-            // LoginResponse: NetId(4) = 4 байта
+            // NetId(4) = 4 Р±Р°Р№С‚Р°
             const int expectedSize = 4;
 
             if (data.Length != expectedSize)

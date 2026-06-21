@@ -4,6 +4,7 @@ using Shared.Messages;
 
 namespace Shared.Messages.Core
 {
+    /// <summary>РЎРЅР°РїС€РѕС‚ РѕРґРЅРѕР№ СЃСѓС‰РЅРѕСЃС‚Рё: NetId, РїРѕР·РёС†РёСЏ (X/Y/Z) Рё РЅР°РїСЂР°РІР»РµРЅРёРµ РІР·РіР»СЏРґР°.</summary>
     public struct EntitySnapshot : INetMessage
     {
         public int NetId;
@@ -14,9 +15,6 @@ namespace Shared.Messages.Core
 
         public MessageType Type => MessageType.EntitySnapshot;
 
-        /// <summary>
-        /// Сериализует данные EntitySnapshot в компактный байтовый массив для передачи по сети.
-        /// </summary>
         public byte[] Serialize()
         {
             using var ms = new MemoryStream();
@@ -31,16 +29,12 @@ namespace Shared.Messages.Core
             return ms.ToArray();
         }
 
-        /// <summary>
-        /// Безопасная реализация десериализации, которая проверяет размер данных, 
-        /// обрабатывает исключения и гарантирует целостность данных.
-        /// </summary>
         public void Deserialize(byte[] data)
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "EntitySnapshot data cannot be null");
 
-            // EntitySnapshot: NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) = 17 байт
+            // NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) = 17 Р±Р°Р№С‚
             const int expectedSize = 17;
 
             if (data.Length != expectedSize)

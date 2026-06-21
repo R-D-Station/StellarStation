@@ -1,24 +1,14 @@
 using UnityEngine;
 using Shared.Messages.Core;
-using Client.Gameplay.Entities; // нужен enum Entity.Direction
+using Client.Gameplay.Entities;
+using Client.Config;
 
 namespace Client.Net.View
 {
-    /// <summary>
-    /// Визуальное представление одной сетевой сущности. Позиция приходит из
-    /// снапшотов и интерполируется. Нет Rigidbody-движения, нет клиентского
-    /// FSM и нет ссылки на Player — это просто отображение состояния сервера.
-    ///
-    /// Маппинг осей: сервер мыслит плоскостью XY (Y = земля), Z = дискретный этаж.
-    /// Unity мыслит XZ (Y = высота). Перевод делается в одной точке — здесь.
-    /// 1 тайл = 1 юнит по X/Y сервера.
-    /// </summary>
+    /// <summary>Р’РёР·СѓР°Р» СЃСѓС‰РЅРѕСЃС‚Рё: РґРІРёР¶РµРЅРёРµ РїРѕ СЃРЅР°РїС€РѕС‚Р°Рј (РёРЅС‚РµСЂРїРѕР»СЏС†РёСЏ) РёР»Рё РїСЂРµРґСЃРєР°Р·Р°РЅРёСЋ (СЃРІРѕР№ РёРіСЂРѕРє).</summary>
     public class NetEntityView : MonoBehaviour
     {
         [SerializeField] private SpriteRenderer _spriteRenderer;
-
-        [Tooltip("Высота этажа в юнитах Unity по оси Y (высота). Для плоского теста = 0.")]
-        [SerializeField] private float FloorHeight = 0f;
 
         [Header("Direction Sprites")]
         [SerializeField] private Sprite _northSprite;
@@ -30,10 +20,7 @@ namespace Client.Net.View
         private byte _lastFacing = 255;
         private bool _isLocal;
 
-        // Сглаживание визуальной позиции своего игрока. Логическая (предсказанная)
-        // позиция точная, а спрайт догоняет её плавно — резкие коррекции
-        // reconciliation не видны как телепорт.
-        [Tooltip("Скорость, с которой спрайт догоняет предсказанную позицию. Больше = резче/точнее, меньше = плавнее.")]
+        [Tooltip("РЎРєРѕСЂРѕСЃС‚СЊ, СЃ РєРѕС‚РѕСЂРѕР№ Р»РѕРєР°Р»СЊРЅС‹Р№ РІРёР·СѓР°Р» РґРѕРіРѕРЅСЏРµС‚ РїСЂРµРґСЃРєР°Р·Р°РЅРЅСѓСЋ РїРѕР·РёС†РёСЋ. Р‘РѕР»СЊС€Рµ = СЂРµР·С‡Рµ.")]
         [SerializeField] private float _smoothing = 20f;
         private Vector3 _targetPos;
         private bool _hasTarget;
@@ -46,24 +33,18 @@ namespace Client.Net.View
             if (_spriteRenderer == null) _spriteRenderer = GetComponent<SpriteRenderer>();
         }
 
-        /// <summary>Принять новый снапшот сущности.</summary>
         public void Receive(in EntitySnapshot snap, float now)
         {
             _buffer.Push(now, snap);
         }
 
-        /// <summary>
-        /// Прямая установка позиции для СВОЕГО игрока (предсказание). В обход
-        /// интерполяционного буфера: свой игрок не интерполируется, он ведётся
-        /// предсказанием + reconciliation в NetworkRunner.
-        /// </summary>
-        public void SetPredicted(float x, float y, int z, byte facing, float floorHeight)
+        /// <summary>Р—Р°РґР°С‚СЊ РїСЂРµРґСЃРєР°Р·Р°РЅРЅСѓСЋ РїРѕР·РёС†РёСЋ Р»РѕРєР°Р»СЊРЅРѕРіРѕ РёРіСЂРѕРєР°.</summary>
+        public void SetPredicted(float x, float y, int z, byte facing)
         {
             _isLocal = true;
-            _targetPos = new Vector3(x, z * floorHeight, y);
+            _targetPos = new Vector3(x, z * RenderConfig.FloorHeight, y);
 
-            // Первый кадр — ставим сразу, без сглаживания (иначе спрайт приедет
-            // из (0,0,0)). Дальше визуал плавно догоняет цель в Update.
+            // РџРµСЂРІС‹Р№ РєР°РґСЂ вЂ” Р¶С‘СЃС‚РєРѕ, Р±РµР· РёРЅС‚РµСЂРїРѕР»СЏС†РёРё РёР· (0,0,0).
             if (!_hasTarget)
             {
                 transform.position = _targetPos;
@@ -81,7 +62,7 @@ namespace Client.Net.View
         {
             if (_isLocal)
             {
-                // Свой игрок: визуал плавно догоняет предсказанную цель.
+                // РЎРІРѕР№ РёРіСЂРѕРє: РїР»Р°РІРЅРѕ С‚СЏРЅРµРјСЃСЏ Рє РїСЂРµРґСЃРєР°Р·Р°РЅРЅРѕР№ С†РµР»Рё.
                 if (_hasTarget)
                 {
                     float t = 1f - Mathf.Exp(-_smoothing * Time.deltaTime);
@@ -93,9 +74,8 @@ namespace Client.Net.View
             if (!_buffer.HaveSample(Time.time, out float x, out float y, out float z, out byte facing))
                 return;
 
-            // Сервер (X, Y=земля, Z=этаж) -> Unity (X, высота, Y_земля).
-            // Высота: пока Z дискретный, Unity-Y = z * FloorHeight (тест-режим 1:1).
-            transform.position = new Vector3(x, z * FloorHeight, y);
+            // РЎРµСЂРІРµСЂ (X, Y=РіР»СѓР±РёРЅР°, Z=СЌС‚Р°Р¶) -> Unity (X, РІС‹СЃРѕС‚Р°, Z=РіР»СѓР±РёРЅР°).
+            transform.position = new Vector3(x, z * RenderConfig.FloorHeight, y);
 
             if (facing != _lastFacing)
             {

@@ -3,6 +3,9 @@ using Client.Gameplay.Entities;
 
 namespace Client.Gameplay.Fsm
 {
+    /// <summary>
+    /// Состояние покоя игрока.
+    /// </summary>
     public class FSM_StateStandPlayer : FSM_State
     {
         protected Player entity;

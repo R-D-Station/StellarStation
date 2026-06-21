@@ -1,0 +1,43 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d56fa465190b33949bfc3944bb05f11d, type: 3}
+  m_Name: TileCatalog
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.TileCatalog
+  _floors:
+  - Type: 1
+    DisplayName: "\u0421\u043F\u043B\u043E\u0448\u043D\u043E\u0439"
+    Sprite: {fileID: 21300000, guid: e2e41efd3c2d51040ae85a1ccfe839cf, type: 3}
+    Prefab: {fileID: 2421183101955209972, guid: 9a99030f6aea75042984b8aa718bbe21, type: 3}
+    Support: 0
+    BlocksVerticalSight: 1
+    SealsVertical: 1
+  - Type: 2
+    DisplayName: "\u0420\u0435\u0448\u0451\u0442\u043A\u0430"
+    Sprite: {fileID: 0}
+    Prefab: {fileID: 2421183101955209972, guid: 6420abf9dfd945340b8049cee1f00ce3, type: 3}
+    Support: 0
+    BlocksVerticalSight: 0
+    SealsVertical: 0
+  _walls:
+  - Type: 1
+    DisplayName: "\u0421\u0442\u0435\u043D\u0430"
+    Sprite: {fileID: 0}
+    Prefab: {fileID: 8192654253773008610, guid: b2cee704cd8084e419d91e3aa6d78784, type: 3}
+    BlocksHorizontalSight: 1
+    SealsHorizontal: 1
+  _doors:
+  - Type: 1
+    DisplayName: Airlock
+    ClosedSprite: {fileID: 0}
+    ClosedPrefab: {fileID: 8192654253773008610, guid: 33e46f13f07430d4c853bb3320880d9c, type: 3}
+    OpenSprite: {fileID: 0}
+    OpenPrefab: {fileID: 8192654253773008610, guid: b18890f44c7e22c45bf648c4112dd609, type: 3}

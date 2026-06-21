@@ -1,56 +1,40 @@
 using System.Collections.Generic;
 using UnityEngine;
 using Shared.World;
+using Client.Map;
+using Client.Config;
 
 namespace Client.Net.View
 {
-    /// <summary>
-    /// Рендер карты в Unity. Держит GridMap и рисует каждый чанк отдельным
-    /// мешем (один меш на чанк, пол+стены — решение этапа 1).
-    ///
-    /// Источник карты развязан, как транспорт: сейчас грузим .smap локально
-    /// (тест без сервера), позже SetMap/ApplyChunk будут вызываться из сетевого
-    /// кода при chunk-streaming — рендер не изменится, он работает с GridMap.
-    ///
-    /// Этап 1: рисуем ВСЕ чанки карты (нет PVS, нет выбора этажа в рендере).
-    /// Видимость по этажам/FOV — этап 3.
-    /// </summary>
+    /// <summary>Р РёСЃСѓРµС‚ GridMap РїСЂРµС„Р°Р±Р°РјРё РёР· TileCatalog РІ 2.5D-СЂР°СЃРєР»Р°РґРєРµ (СЌС‚Р°Р¶Рё РїРѕ Unity-Y).</summary>
     public class MapRenderer : MonoBehaviour
     {
-        [Header("Atlas (договорённость B: FloorType/WallType -> ячейка атласа)")]
-        [Tooltip("Материал с текстурой-атласом тайлов. Unlit/спрайт-шейдер.")]
-        [SerializeField] private Material _atlasMaterial;
+        [Header("РљР°С‚Р°Р»РѕРі С‚Р°Р№Р»РѕРІ (id в†’ РїСЂРµС„Р°Р±/СЃРїСЂР°Р№С‚)")]
+        [SerializeField] private TileCatalog _catalog;
 
-        [Tooltip("Сетка атласа: столбцов x строк. Тип N -> ячейка (N-1).")]
-        [SerializeField] private Vector2Int _atlasGrid = new Vector2Int(4, 4);
+        [Header("Р­С‚Р°Р¶/РІС‹СЃРѕС‚Р° (2.5D: СЌС‚Р°Р¶Рё СЃС‚РѕСЏС‚ РїРѕ Unity-Y)")]
+        [Tooltip("РљР°РєРѕР№ Z-СЌС‚Р°Р¶ СЂРёСЃСѓРµРј. Р­С‚Р°Рї 3 РґРѕР±Р°РІРёС‚ СЃРѕСЃРµРґРЅРёРµ СЃР»РѕРё.")]
+        [SerializeField] private int _activeZ = 0;
+        [Tooltip("Р”РѕРї. СЃРґРІРёРі РїРѕР»Р° РїРѕ Y РЅР°Рґ СѓСЂРѕРІРЅРµРј СЌС‚Р°Р¶Р° (РѕР±С‹С‡РЅРѕ 0).")]
+        [SerializeField] private float _floorYOffset = 0f;
+        [Tooltip("Р”РѕРї. СЃРґРІРёРі СЃС‚РµРЅС‹ РїРѕ Y РЅР°Рґ РїРѕР»РѕРј вЂ” РїСЂРѕС‚РёРІ z-fighting Сѓ РїР»РѕСЃРєРёС… РєРІР°РґРѕРІ.")]
+        [SerializeField] private float _wallYOffset = 0.001f;
+        [SerializeField] private int _floorSortingOrder = 0;
+        [SerializeField] private int _wallSortingOrder = 10;
 
-        [Tooltip("Размер тайла в юнитах Unity. 1 = 1 тайл на юнит.")]
-        [SerializeField] private float _tileSize = 1f;
+        [Tooltip("Р›С‘РіРєРѕРµ СЂР°СЃС€РёСЂРµРЅРёРµ С‚Р°Р№Р»РѕРІ РїРѕР»Р° РІ РїР»РѕСЃРєРѕСЃС‚Рё (1.0 = РІС‹РєР»), С‡С‚РѕР±С‹ СЃРѕСЃРµРґРЅРёРµ " +
+                 "РїСЂРµС„Р°Р±С‹ РїРµСЂРµРєСЂС‹РІР°Р»РёСЃСЊ Рё РЅРµ РїРѕРєР°Р·С‹РІР°Р»Рё С€РѕРІ РїСЂРё РґРІРёР¶РµРЅРёРё РєР°РјРµСЂС‹. " +
+                 "Р•СЃР»Рё РЅР° РїРѕР»Сѓ РїРѕСЏРІРёС‚СЃСЏ РјРµСЂС†Р°РЅРёРµ (z-fighting) вЂ” СѓРјРµРЅСЊС€Р°Р№ Рє 1.0.")]
+        [SerializeField] private float _floorSeamScale = 1.02f;
 
-        [Tooltip("Высота этажа по Unity-Y. Для плоского теста = 0.")]
-        [SerializeField] private float _floorHeight = 0f;
-
-        [Header("Локальный тест (без сервера)")]
-        [Tooltip("Абсолютный путь к .smap для загрузки при старте. Пусто = не грузить.")]
+        [Header("РўРµСЃС‚РѕРІР°СЏ РєР°СЂС‚Р° (РґР»СЏ РѕС‚Р»Р°РґРєРё Р±РµР· СЃРµСЂРІРµСЂР°)")]
+        [Tooltip("РћС‚РЅРѕСЃРёС‚РµР»СЊРЅС‹Р№ РїСѓС‚СЊ Рє .smap РґР»СЏ Р·Р°РіСЂСѓР·РєРё РїСЂРё СЃС‚Р°СЂС‚Рµ. РџСѓСЃС‚Рѕ = РЅРµ РіСЂСѓР·РёС‚СЊ.")]
         [SerializeField] private string _testMapPath = "";
 
         private GridMap _map;
-        private ChunkMeshBuilder _builder;
 
-        // По одному объекту-рендеру на чанк, ключ — тот же упакованный (cx,cy,z).
-        private readonly Dictionary<long, ChunkRenderObject> _renderObjects = new();
-
-        private sealed class ChunkRenderObject
-        {
-            public GameObject Go;
-            public MeshFilter Filter;
-            public Mesh Mesh;
-        }
-
-        private void Awake()
-        {
-            _builder = new ChunkMeshBuilder(_atlasGrid.x, _atlasGrid.y, _tileSize);
-        }
+        // РљРѕСЂРµРЅСЊ-РѕР±СЉРµРєС‚ РЅР° РєР°Р¶РґС‹Р№ С‡Р°РЅРє; РєР»СЋС‡ С‚РѕС‚ Р¶Рµ, С‡С‚Рѕ РІ GridMap.
+        private readonly Dictionary<long, GameObject> _chunkRoots = new();
 
         private void Start()
         {
@@ -58,7 +42,7 @@ namespace Client.Net.View
                 LoadLocal(_testMapPath);
         }
 
-        /// <summary>Загрузить карту из .smap (локальный тест). Тот же сериализатор, что у сервера.</summary>
+        /// <summary>Р—Р°РіСЂСѓР·РёС‚СЊ РєР°СЂС‚Сѓ РёР· .smap (Р»РѕРєР°Р»СЊРЅС‹Р№ С„Р°Р№Р»). РўРѕС‚ Р¶Рµ С„РѕСЂРјР°С‚, С‡С‚Рѕ Сѓ СЃРµСЂРІРµСЂР°.</summary>
         public void LoadLocal(string path)
         {
             try
@@ -73,10 +57,7 @@ namespace Client.Net.View
             }
         }
 
-        /// <summary>
-        /// Заменить всю карту и перестроить рендер. Вызывается из локальной
-        /// загрузки или (позже) из сетевого кода при первичной синхронизации.
-        /// </summary>
+        /// <summary>РџРѕР»РЅРѕСЃС‚СЊСЋ Р·Р°РјРµРЅРёС‚СЊ РєР°СЂС‚Сѓ. Р РёСЃСѓРµРј С‚РѕР»СЊРєРѕ С‡Р°РЅРєРё Р°РєС‚РёРІРЅРѕРіРѕ СЌС‚Р°Р¶Р° (_activeZ).</summary>
         public void SetMap(GridMap map)
         {
             ClearAll();
@@ -84,51 +65,156 @@ namespace Client.Net.View
             if (_map == null) return;
 
             foreach (var chunk in _map.Chunks)
-                ApplyChunk(chunk);
+                if (chunk.Z == _activeZ)
+                    ApplyChunk(chunk);
         }
 
-        /// <summary>
-        /// Построить/обновить рендер одного чанка. Точка входа для chunk-streaming:
-        /// сетевой код будет звать это при получении чанка от сервера.
-        /// </summary>
+        /// <summary>РЎРјРµРЅРёС‚СЊ Р°РєС‚РёРІРЅС‹Р№ СЌС‚Р°Р¶ Рё РїРµСЂРµСЂРёСЃРѕРІР°С‚СЊ (Р·Р°РіРѕС‚РѕРІРєР° РїРѕРґ СЌС‚Р°Р¶-РїРµСЂРµС…РѕРґС‹, СЌС‚Р°Рї 3).</summary>
+        public void SetActiveZ(int z)
+        {
+            if (_activeZ == z) return;
+            _activeZ = z;
+            if (_map != null) SetMap(_map);
+        }
+
+        /// <summary>РџРµСЂРµСЂРёСЃРѕРІР°С‚СЊ С‡Р°РЅРє С‚Р°Р№Р»Р° РїРѕСЃР»Рµ СЂР°РЅС‚Р°Р№Рј-РёР·РјРµРЅРµРЅРёСЏ (TileUpdate).</summary>
+        public void RefreshTileAt(int x, int y, int z)
+        {
+            if (_map == null || z != _activeZ) return;
+            var chunk = _map.GetChunk(FloorDiv(x, Chunk.Size), FloorDiv(y, Chunk.Size), z);
+            if (chunk != null) ApplyChunk(chunk);
+        }
+
+        private static int FloorDiv(int a, int b)
+        {
+            int q = a / b;
+            if ((a % b != 0) && ((a < 0) != (b < 0))) q--;
+            return q;
+        }
+
+        /// <summary>РџРѕРІРѕСЂРѕС‚ РґРІРµСЂРё РїРѕ РѕСЂРёРµРЅС‚Р°С†РёРё СЃС‚РµРЅС‹: СЃС‚РµРЅР° СЃРµРІРµСЂ-СЋРі в†’ РїРѕРІРѕСЂРѕС‚ РЅР° 90В°.</summary>
+        private Quaternion DoorRotation(int x, int y, int z)
+        {
+            if (_map == null) return Quaternion.identity;
+            bool wallEW = _map.GetTile(x - 1, y, z).WallType != 0 || _map.GetTile(x + 1, y, z).WallType != 0;
+            bool wallNS = _map.GetTile(x, y - 1, z).WallType != 0 || _map.GetTile(x, y + 1, z).WallType != 0;
+            if (!wallNS && wallEW) return Quaternion.Euler(0f, 90f, 0f);
+            return Quaternion.identity;
+        }
+
+        /// <summary>РџРµСЂРµСЃРѕР±СЂР°С‚СЊ РёРЅСЃС‚Р°РЅСЃС‹ С‚Р°Р№Р»РѕРІ РѕРґРЅРѕРіРѕ С‡Р°РЅРєР°.</summary>
         public void ApplyChunk(Chunk chunk)
         {
-            long key = Key(chunk.ChunkX, chunk.ChunkY, chunk.Z);
-
-            if (!_renderObjects.TryGetValue(key, out var ro))
+            if (_catalog == null)
             {
-                var go = new GameObject($"Chunk_{chunk.ChunkX}_{chunk.ChunkY}_z{chunk.Z}");
-                go.transform.SetParent(transform, false);
-
-                // Позиция чанка в мире: угол чанка в тайлах * tileSize, высота по Z.
-                go.transform.localPosition = new Vector3(
-                    chunk.ChunkX * Chunk.Size * _tileSize,
-                    chunk.Z * _floorHeight,
-                    chunk.ChunkY * Chunk.Size * _tileSize);
-
-                var filter = go.AddComponent<MeshFilter>();
-                var renderer = go.AddComponent<MeshRenderer>();
-                renderer.sharedMaterial = _atlasMaterial;
-
-                ro = new ChunkRenderObject { Go = go, Filter = filter };
-                _renderObjects[key] = ro;
+                Debug.LogError("[MapRenderer] TileCatalog РЅРµ РЅР°Р·РЅР°С‡РµРЅ вЂ” РЅРµС‡РµРј СЂРёСЃРѕРІР°С‚СЊ С‚Р°Р№Р»С‹.");
+                return;
             }
 
-            ro.Mesh = _builder.Build(chunk, ro.Mesh);
-            ro.Filter.sharedMesh = ro.Mesh;
+            if (chunk.Z != _activeZ)
+                return;
+
+            long key = Key(chunk.ChunkX, chunk.ChunkY, chunk.Z);
+
+            if (_chunkRoots.TryGetValue(key, out var old) && old != null)
+                Destroy(old);
+
+            var root = new GameObject($"Chunk_{chunk.ChunkX}_{chunk.ChunkY}_z{chunk.Z}");
+            root.transform.SetParent(transform, false);
+            _chunkRoots[key] = root;
+
+            int baseX = chunk.ChunkX * Chunk.Size;
+            int baseY = chunk.ChunkY * Chunk.Size;
+            float floorBaseY = chunk.Z * RenderConfig.FloorHeight;
+
+            for (int ly = 0; ly < Chunk.Size; ly++)
+            {
+                for (int lx = 0; lx < Chunk.Size; lx++)
+                {
+                    Tile t = chunk[lx, ly];
+                    int wx = baseX + lx;
+                    int wy = baseY + ly;
+
+                    if (t.FloorType != 0)
+                    {
+                        var f = _catalog.GetFloor(t.FloorType);
+                        Spawn(f?.Prefab, f?.Sprite, wx, wy, floorBaseY + _floorYOffset, _floorSortingOrder, root.transform, "Floor", alignTop: true, planarScale: _floorSeamScale, rotation: Quaternion.identity);
+                    }
+
+                    if (t.WallType != 0)
+                    {
+                        var w = _catalog.GetWall(t.WallType);
+                        Spawn(w?.Prefab, w?.Sprite, wx, wy, floorBaseY + _wallYOffset, _wallSortingOrder, root.transform, "Wall", alignTop: false, planarScale: 1f, rotation: Quaternion.identity);
+                    }
+
+                    if (t.DoorType != 0)
+                    {
+                        var d = _catalog.GetDoor(t.DoorType);
+                        var prefab = t.DoorOpen ? d?.OpenPrefab : d?.ClosedPrefab;
+                        var sprite = t.DoorOpen ? d?.OpenSprite : d?.ClosedSprite;
+                        Spawn(prefab, sprite, wx, wy, floorBaseY + _wallYOffset, _wallSortingOrder, root.transform, "Door", alignTop: false, planarScale: 1f, rotation: DoorRotation(wx, wy, chunk.Z));
+                    }
+                }
+            }
+        }
+
+        /// <summary>РЎРѕР·РґР°С‚СЊ РёРЅСЃС‚Р°РЅСЃ С‚Р°Р№Р»Р° (РїСЂРµС„Р°Р± РёР»Рё fallback-СЃРїСЂР°Р№С‚) РІ С†РµРЅС‚СЂРµ С‚Р°Р№Р»Р° Рё РІС‹СЂРѕРІРЅСЏС‚СЊ РїРѕ РіСЂР°РЅРё.</summary>
+        private void Spawn(GameObject prefab, Sprite sprite, int wx, int wy, float y, int sortingOrder, Transform parent, string label, bool alignTop, float planarScale, Quaternion rotation)
+        {
+            GameObject go;
+            if (prefab != null)
+            {
+                go = Instantiate(prefab, parent);
+            }
+            else if (sprite != null)
+            {
+                go = new GameObject(label);
+                go.transform.SetParent(parent, false);
+                var sr = go.AddComponent<SpriteRenderer>();
+                sr.sprite = sprite;
+                sr.sortingOrder = sortingOrder;
+            }
+            else
+            {
+                return; // РЅРё РїСЂРµС„Р°Р±Р°, РЅРё СЃРїСЂР°Р№С‚Р°
+            }
+
+            go.transform.rotation = rotation;
+
+            // Р§СѓС‚СЊ СЂР°СЃС€РёСЂСЏРµРј С‚Р°Р№Р» РІ РїР»РѕСЃРєРѕСЃС‚Рё XZ РїСЂРѕС‚РёРІ С€РІР° РЅР° СЃС‚С‹РєР°С….
+            if (planarScale != 1f)
+            {
+                Vector3 s = go.transform.localScale;
+                go.transform.localScale = new Vector3(s.x * planarScale, s.y, s.z * planarScale);
+            }
+
+            // +0.5 вЂ” С†РµРЅС‚СЂ С‚Р°Р№Р»Р° (С†РµР»РѕРµ (wx,wy) вЂ” СѓРіРѕР»), С‡С‚РѕР±С‹ СЃРµС‚РєР° СЃРѕРІРїР°Р»Р° СЃ РєРѕР»Р»РёР·РёРµР№.
+            go.transform.position = new Vector3(wx + 0.5f, y, wy + 0.5f);
+            AlignEdgeTo(go, y, alignTop);
+        }
+
+        /// <summary>РЎРґРІРёРЅСѓС‚СЊ РѕР±СЉРµРєС‚ РїРѕ Y, С‡С‚РѕР±С‹ РµРіРѕ РІРµСЂС…РЅСЏСЏ/РЅРёР¶РЅСЏСЏ РіСЂР°РЅСЊ Р»РµРіР»Р° РЅР° targetY.</summary>
+        private static void AlignEdgeTo(GameObject go, float targetY, bool alignTop)
+        {
+            var renderers = go.GetComponentsInChildren<Renderer>();
+            if (renderers.Length == 0) return;
+
+            Bounds b = renderers[0].bounds;
+            for (int i = 1; i < renderers.Length; i++)
+                b.Encapsulate(renderers[i].bounds);
+
+            float edge = alignTop ? b.max.y : b.min.y;
+            go.transform.position += new Vector3(0f, targetY - edge, 0f);
         }
 
         private void ClearAll()
         {
-            foreach (var ro in _renderObjects.Values)
-            {
-                if (ro.Mesh != null) Destroy(ro.Mesh);
-                if (ro.Go != null) Destroy(ro.Go);
-            }
-            _renderObjects.Clear();
+            foreach (var root in _chunkRoots.Values)
+                if (root != null) Destroy(root);
+            _chunkRoots.Clear();
         }
 
-        // Тот же ключ, что в GridMap — чтобы рендер-объекты адресовались одинаково.
+        // РўР° Р¶Рµ СѓРїР°РєРѕРІРєР° РєР»СЋС‡Р°, С‡С‚Рѕ РІ GridMap.
         private static long Key(int cx, int cy, int z)
         {
             return ((long)(cx & 0x1FFFFF))

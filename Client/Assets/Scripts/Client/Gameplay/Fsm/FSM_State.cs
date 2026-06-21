@@ -1,5 +1,8 @@
 namespace Client.Gameplay.Fsm;
 
+/// <summary>
+/// Базовое состояние FSM с хуками Enter/Update/Exit.
+/// </summary>
 public class FSM_State
 {
     protected readonly FSM fsm;

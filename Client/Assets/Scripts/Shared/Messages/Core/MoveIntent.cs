@@ -4,19 +4,17 @@ using Shared.Messages;
 
 namespace Shared.Messages.Core
 {
+    /// <summary>РќР°РјРµСЂРµРЅРёРµ РґРІРёР¶РµРЅРёСЏ РѕС‚ РєР»РёРµРЅС‚Р°: РЅР°РїСЂР°РІР»РµРЅРёРµ, Р±РµРі Рё РїРѕСЂСЏРґРєРѕРІС‹Р№ РЅРѕРјРµСЂ РІРІРѕРґР°.</summary>
     public struct MoveIntent : INetMessage
     {
         public IntentDirection Direction;
         public bool Sprint;
         public uint Sequence;
 
-        private const uint MaxSequence = 10_000_000; // Максимальный номер тика (защита от переполнения)
+        private const uint MaxSequence = 10_000_000; // РІРµСЂС…РЅСЏСЏ РіСЂР°РЅРёС†Р° (Р·Р°С‰РёС‚Р° РѕС‚ РјСѓСЃРѕСЂР°)
 
         public MessageType Type => MessageType.MoveIntent;
 
-        /// <summary>
-        /// Сериализует данные EntitySnapshot в компактный байтовый массив для передачи по сети.
-        /// </summary>
         public byte[] Serialize()
         {
             using var ms = new MemoryStream();
@@ -29,16 +27,12 @@ namespace Shared.Messages.Core
             return ms.ToArray();
         }
 
-        /// <summary>
-        /// Безопасная реализация десериализации, которая проверяет размер данных, 
-        /// обрабатывает исключения и гарантирует целостность данных.
-        /// </summary>
         public void Deserialize(byte[] data)
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "MoveIntent data cannot be null");
 
-            // MoveIntent: Direction(1) + Sprint(1) + Sequence(4) = 6 байт
+            // Direction(1) + Sprint(1) + Sequence(4) = 6 Р±Р°Р№С‚
             const int expectedSize = 6;
 
             if (data.Length != expectedSize)
@@ -51,7 +45,7 @@ namespace Shared.Messages.Core
 
                 byte directionByte = reader.ReadByte();
                 if (!Enum.IsDefined(typeof(IntentDirection), directionByte))
-                    throw new InvalidOperationException($"Invalid Direction value: {directionByte}. Valid values: 0-4");
+                    throw new InvalidOperationException($"Invalid Direction value: {directionByte}. Valid values: 0-8");
                 Direction = (IntentDirection)directionByte;
 
                 Sprint = reader.ReadBoolean();
@@ -75,20 +69,17 @@ namespace Shared.Messages.Core
         }
     }
 
-    /// <summary>
-    /// Направление движения по тайлам (намерение, не позиция)
-    /// None;
-    /// North = +Y;
-    /// South = -Y;
-    /// East = +X;
-    /// West = -X;
-    /// </summary>
+    /// <summary>РќР°РїСЂР°РІР»РµРЅРёРµ РґРІРёР¶РµРЅРёСЏ РІ РѕСЃСЏС… (North=+Y, South=-Y, East=+X, West=-X).</summary>
     public enum IntentDirection : byte
     {
         None = 0,
-        North = 1,
-        South = 2,
-        East = 3,
-        West = 4
+        North = 1,      // +Y
+        South = 2,      // -Y
+        East = 3,       // +X
+        West = 4,       // -X
+        NorthEast = 5,  // +X +Y
+        NorthWest = 6,  // -X +Y
+        SouthEast = 7,  // +X -Y
+        SouthWest = 8   // -X -Y
     }
 }

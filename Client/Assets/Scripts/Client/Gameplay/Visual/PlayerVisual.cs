@@ -3,6 +3,9 @@ using Client.Gameplay.Entities;
 
 namespace Client.Gameplay.Visual
 {
+    /// <summary>
+    /// РњРµРЅСЏРµС‚ СЃРїСЂР°Р№С‚ РёРіСЂРѕРєР° РїРѕ РЅР°РїСЂР°РІР»РµРЅРёСЋ РІР·РіР»СЏРґР°.
+    /// </summary>
     [RequireComponent(typeof(SpriteRenderer))]
     public class PlayerVisual : MonoBehaviour
     {
@@ -19,7 +22,6 @@ namespace Client.Gameplay.Visual
 
         private void Reset()
         {
-            // Автозаполнение в редакторе
             _spriteRenderer = GetComponent<SpriteRenderer>();
             _player = GetComponentInParent<Player>();
         }
@@ -32,7 +34,7 @@ namespace Client.Gameplay.Visual
 
         private void LateUpdate()
         {
-            // LateUpdate — после Update, чтобы Facing уже обновился
+            // LateUpdate вЂ” С‡С‚РѕР±С‹ Facing СѓР¶Рµ РѕР±РЅРѕРІРёР»СЃСЏ РІ Update
             if (_player.Facing != _lastFacing)
             {
                 _spriteRenderer.sprite = GetSpriteForDirection(_player.Facing);

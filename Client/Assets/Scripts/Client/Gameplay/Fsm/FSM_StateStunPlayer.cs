@@ -3,6 +3,9 @@ using Client.Gameplay.Entities;
 
 namespace Client.Gameplay.Fsm
 {
+    /// <summary>
+    /// Состояние стана: блокирует движение на время таймера.
+    /// </summary>
     public class FSM_StateStunPlayer : FSM_State
     {
         protected Player entity;

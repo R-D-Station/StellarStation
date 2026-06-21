@@ -65,8 +65,7 @@ namespace ServerTests.Shared.Messages.Core
         public void WorldSnapshot_DeserializeIncompleteData_ThrowsEndOfStreamException()
         {
             var snapshot = new WorldSnapshot();
-            // Данные только для ServerTick (4 байта), но не для остальных полей
-            var incompleteData = new byte[] { 0x01, 0x00, 0x00, 0x00 };
+            var incompleteData = new byte[] { 0x01, 0x00, 0x00, 0x00 }; // С…РІР°С‚Р°РµС‚ С‚РѕР»СЊРєРѕ РЅР° ServerTick
 
             Assert.Throws<InvalidOperationException>(() => snapshot.Deserialize(incompleteData));
         }
@@ -75,9 +74,9 @@ namespace ServerTests.Shared.Messages.Core
         public void WorldSnapshot_DeserializeCorruptedData_ThrowsException()
         {
             var snapshot = new WorldSnapshot();
-            var corruptedData = new byte[] { 0xFF, 0xFF, 0xFF, 0xFF }; // Невалидные данные
+            var corruptedData = new byte[] { 0xFF, 0xFF, 0xFF, 0xFF };
 
-            // Может выбросить EndOfStreamException, OverflowException или другое
+            // РўРёРї РёСЃРєР»СЋС‡РµРЅРёСЏ РЅРµ С„РёРєСЃРёСЂСѓРµРј: РІРѕР·РјРѕР¶РЅС‹ EndOfStream/Overflow Рё РґСЂ.
             Assert.ThrowsAny<Exception>(() => snapshot.Deserialize(corruptedData));
         }
     }
