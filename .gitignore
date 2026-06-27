@@ -87,3 +87,4 @@ ServerTests/coveragereport/
 # ====================
 
 Builds/
+/docs

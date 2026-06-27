@@ -219,6 +219,9 @@ public class GameServer
             // Сбрасываем накопившееся, оставляя только свежий intent.
             while (client.IntentQueue.Count > maxQueued && client.IntentQueue.TryDequeue(out _)) { }
 
+            // Дефолт тика: нет ввода → Stand. Ниже перебьётся на Move, если позиция изменилась.
+            client.State = PlayerState.Stand;
+
             if (client.IntentQueue.TryDequeue(out var intent))
             {
                 float x = client.X;
@@ -226,12 +229,17 @@ public class GameServer
 
                 MovementLogic.Apply(_map, client.Z, ref x, ref y, intent.Direction, intent.Sprint);
 
+                // Сравнение new vs old (client.X/Y ещё не обновлены): Apply либо двигает на
+                // фиксированный StepPerTick, либо нет (детерминизм) — упор в стену даёт Stand.
+                bool moved = x != client.X || y != client.Y;
+
                 // Границы держит коллизия тайлов (Walkable); жёсткий clamp убран.
 
                 client.X = x;
                 client.Y = y;
                 client.Facing = MovementLogic.ToFacing(intent.Direction, client.Facing);
                 client.LastProcessedSequence = intent.Sequence;
+                client.State = moved ? PlayerState.Move : PlayerState.Stand;
 
                 // Бамп: упёрся в закрытую дверь по направлению ввода — открываем её.
                 OpenBumpedDoors(client, intent.Direction, intent.Sprint);
@@ -333,7 +341,8 @@ public class GameServer
             X = c.X,
             Y = c.Y,
             Z = c.Z,
-            Facing = c.Facing
+            Facing = c.Facing,
+            State = (byte)c.State
         }).ToArray();
 
         // Каждому клиенту — его LastProcessedInput для reconciliation.

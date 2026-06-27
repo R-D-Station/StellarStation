@@ -4,7 +4,7 @@ using Shared.Messages;
 
 namespace Shared.Messages.Core
 {
-    /// <summary>Снапшот одной сущности: NetId, позиция (X/Y/Z) и направление взгляда.</summary>
+    /// <summary>Снапшот одной сущности: NetId, позиция (X/Y/Z), направление взгляда и FSM-состояние.</summary>
     public struct EntitySnapshot : INetMessage
     {
         public int NetId;
@@ -12,6 +12,7 @@ namespace Shared.Messages.Core
         public float Y;
         public float Z;
         public byte Facing;
+        public byte State; // FSM-состояние, реплицируется как byte (Shared.Simulation.PlayerState)
 
         public MessageType Type => MessageType.EntitySnapshot;
 
@@ -25,6 +26,7 @@ namespace Shared.Messages.Core
             writer.Write(Y);
             writer.Write(Z);
             writer.Write(Facing);
+            writer.Write(State);
 
             return ms.ToArray();
         }
@@ -34,8 +36,8 @@ namespace Shared.Messages.Core
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "EntitySnapshot data cannot be null");
 
-            // NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) = 17 байт
-            const int expectedSize = 17;
+            // NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) + State(1) = 18 байт
+            const int expectedSize = 18;
 
             if (data.Length != expectedSize)
                 throw new ArgumentException($"Invalid data size: expected {expectedSize} bytes, got {data.Length} bytes", nameof(data));
@@ -63,6 +65,7 @@ namespace Shared.Messages.Core
                 Z = z;
 
                 Facing = reader.ReadByte();
+                State = reader.ReadByte(); // любой byte валиден (рендерится как PlayerState)
 
                 if (ms.Position != ms.Length)
                     throw new InvalidOperationException($"Unexpected extra data: {ms.Length - ms.Position} bytes remaining");

@@ -1,6 +1,7 @@
 using LiteNetLib;
 using System.Collections.Concurrent;
 using Shared.Messages.Core;
+using Shared.Simulation;
 
 namespace Server.Network
 {
@@ -18,6 +19,7 @@ namespace Server.Network
         public float Y { get; set; }
         public int Z { get; set; }
         public byte Facing { get; set; }
+        public PlayerState State { get; set; } // дефолт Stand(0); стампится в ProcessIntents каждый тик
 
         // Для reconciliation
         public uint LastProcessedSequence { get; set; }

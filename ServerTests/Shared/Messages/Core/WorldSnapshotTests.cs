@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using Shared.Messages;
 using Shared.Messages.Core;
+using Shared.Simulation;
 
 namespace ServerTests.Shared.Messages.Core
 {
@@ -17,8 +18,8 @@ namespace ServerTests.Shared.Messages.Core
                 LastProcessedInput = 67890,
                 Entities = new[]
                 {
-                new EntitySnapshot { NetId = 1, X = 10, Y = 20, Z = 0, Facing = 0 },
-                new EntitySnapshot { NetId = 2, X = 30, Y = 40, Z = 1, Facing = 1 }
+                new EntitySnapshot { NetId = 1, X = 10, Y = 20, Z = 0, Facing = 0, State = (byte)PlayerState.Stand },
+                new EntitySnapshot { NetId = 2, X = 30, Y = 40, Z = 1, Facing = 1, State = (byte)PlayerState.Move }
             }
             };
 
@@ -36,6 +37,7 @@ namespace ServerTests.Shared.Messages.Core
                 Assert.Equal(original.Entities[i].Y, deserialized.Entities[i].Y);
                 Assert.Equal(original.Entities[i].Z, deserialized.Entities[i].Z);
                 Assert.Equal(original.Entities[i].Facing, deserialized.Entities[i].Facing);
+                Assert.Equal(original.Entities[i].State, deserialized.Entities[i].State);
             }
         }
 

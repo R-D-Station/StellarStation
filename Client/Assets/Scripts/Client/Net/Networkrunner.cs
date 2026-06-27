@@ -37,6 +37,9 @@ namespace Client.Net
         private readonly PlayerPredictor _predictor = new PlayerPredictor();
         private NetEntityView _localView;
 
+        // State локального игрока: авторитетный из снапшота (не предсказываем до Этапа 4).
+        private byte _localState;
+
         // Реплика карты: один объект на предиктор и рендер, TileUpdate применяем один раз.
         private GridMap _map;
 
@@ -101,10 +104,9 @@ namespace Client.Net
                 Tick();
             }
 
-            // Свой игрок — по предсказанной позиции каждый кадр.
             if (_localView != null && _predictor.IsInitialized)
             {
-                _localView.SetPredicted(_predictor.X, _predictor.Y, _predictor.Z, _predictor.Facing);
+                _localView.SetPredicted(_predictor.X, _predictor.Y, _predictor.Z, _predictor.Facing, _localState);
             }
 
             if (_fov != null && _predictor.IsInitialized)
@@ -167,6 +169,7 @@ namespace Client.Net
                 {
                     // Свой игрок: reconciliation, без интерполяционного буфера.
                     _predictor.Reconcile(e.X, e.Y, (int)e.Z, e.Facing, snap.LastProcessedInput);
+                    _localState = e.State; // State авторитетен из снапшота (позиция — из предиктора)
                     if (_mapRenderer != null) _mapRenderer.SetActiveZ(_predictor.Z);
 
                     if (_localView == null)
@@ -179,7 +182,6 @@ namespace Client.Net
                     continue;
                 }
 
-                // Чужой: создаём/интерполируем.
                 if (!_views.TryGetValue(e.NetId, out var view))
                 {
                     view = Instantiate(_entityViewPrefab, transform);

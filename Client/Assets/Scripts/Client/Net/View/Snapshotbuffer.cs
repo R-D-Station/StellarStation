@@ -13,10 +13,11 @@ namespace Client.Net.View
             public readonly float Y;
             public readonly float Z;
             public readonly byte Facing;
+            public readonly byte State;
 
-            public Sample(float time, float x, float y, float z, byte facing)
+            public Sample(float time, float x, float y, float z, byte facing, byte state)
             {
-                Time = time; X = x; Y = y; Z = z; Facing = facing;
+                Time = time; X = x; Y = y; Z = z; Facing = facing; State = state;
             }
         }
 
@@ -28,28 +29,26 @@ namespace Client.Net.View
 
         public void Push(float now, in EntitySnapshot snap)
         {
-            _samples.Add(new Sample(now, snap.X, snap.Y, snap.Z, snap.Facing));
+            _samples.Add(new Sample(now, snap.X, snap.Y, snap.Z, snap.Facing, snap.State));
             if (_samples.Count > MaxSamples)
                 _samples.RemoveAt(0);
         }
 
         /// <summary>Интерполированная позиция на момент (now - InterpolationDelay). false — данных нет.</summary>
-        public bool HaveSample(float now, out float x, out float y, out float z, out byte facing)
+        public bool HaveSample(float now, out float x, out float y, out float z, out byte facing, out byte state)
         {
-            x = y = 0f; z = 0; facing = 0;
+            x = y = 0f; z = 0; facing = 0; state = 0;
             if (_samples.Count == 0) return false;
 
             float renderTime = now - InterpolationDelay;
 
-            // Раньше всех данных — отдаём первый.
             if (renderTime <= _samples[0].Time)
             {
                 var s = _samples[0];
-                x = s.X; y = s.Y; z = s.Z; facing = s.Facing;
+                x = s.X; y = s.Y; z = s.Z; facing = s.Facing; state = s.State;
                 return true;
             }
 
-            // Ищем пару, между которой лежит renderTime.
             for (int i = 0; i < _samples.Count - 1; i++)
             {
                 var a = _samples[i];
@@ -59,18 +58,19 @@ namespace Client.Net.View
                     float span = b.Time - a.Time;
                     float t = span > 0f ? (renderTime - a.Time) / span : 0f;
 
-                    // Z дискретный — не интерполируем.
+                    // Z/Facing/State дискретны — не интерполируем.
                     x = a.X + (b.X - a.X) * t;
                     y = a.Y + (b.Y - a.Y) * t;
                     z = b.Z;
                     facing = b.Facing;
+                    state = b.State;
                     return true;
                 }
             }
 
             // Позже всех данных — отдаём последний (экстраполяцию не делаем).
             var last = _samples[_samples.Count - 1];
-            x = last.X; y = last.Y; z = last.Z; facing = last.Facing;
+            x = last.X; y = last.Y; z = last.Z; facing = last.Facing; state = last.State;
             return true;
         }
     }

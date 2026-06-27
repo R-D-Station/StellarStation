@@ -1,5 +1,6 @@
 using UnityEngine;
 using Shared.Messages.Core;
+using Shared.Simulation;
 using Client.Gameplay.Entities;
 using Client.Config;
 
@@ -16,8 +17,15 @@ namespace Client.Net.View
         [SerializeField] private Sprite _eastSprite;
         [SerializeField] private Sprite _westSprite;
 
+        [Header("Move Sprites (опц.: пусто → берётся Stand-набор выше)")]
+        [SerializeField] private Sprite _northMoveSprite;
+        [SerializeField] private Sprite _southMoveSprite;
+        [SerializeField] private Sprite _eastMoveSprite;
+        [SerializeField] private Sprite _westMoveSprite;
+
         private readonly SnapshotBuffer _buffer = new SnapshotBuffer();
         private byte _lastFacing = 255;
+        private byte _lastState = 255;
         private bool _isLocal;
 
         [Tooltip("Скорость, с которой локальный визуал догоняет предсказанную позицию. Больше = резче.")]
@@ -38,8 +46,8 @@ namespace Client.Net.View
             _buffer.Push(now, snap);
         }
 
-        /// <summary>Задать предсказанную позицию локального игрока.</summary>
-        public void SetPredicted(float x, float y, int z, byte facing)
+        /// <summary>Задать предсказанную позицию локального игрока; State — авторитетный из снапшота.</summary>
+        public void SetPredicted(float x, float y, int z, byte facing, byte state)
         {
             _isLocal = true;
             _targetPos = new Vector3(x, z * RenderConfig.FloorHeight, y);
@@ -51,18 +59,13 @@ namespace Client.Net.View
                 _hasTarget = true;
             }
 
-            if (facing != _lastFacing)
-            {
-                _spriteRenderer.sprite = GetSprite((Entity.Direction)facing);
-                _lastFacing = facing;
-            }
+            ApplySprite(state, facing);
         }
 
         private void Update()
         {
             if (_isLocal)
             {
-                // Свой игрок: плавно тянемся к предсказанной цели.
                 if (_hasTarget)
                 {
                     float t = 1f - Mathf.Exp(-_smoothing * Time.deltaTime);
@@ -71,28 +74,35 @@ namespace Client.Net.View
                 return;
             }
 
-            if (!_buffer.HaveSample(Time.time, out float x, out float y, out float z, out byte facing))
+            if (!_buffer.HaveSample(Time.time, out float x, out float y, out float z, out byte facing, out byte state))
                 return;
 
             // Сервер (X, Y=глубина, Z=этаж) -> Unity (X, высота, Z=глубина).
             transform.position = new Vector3(x, z * RenderConfig.FloorHeight, y);
 
-            if (facing != _lastFacing)
-            {
-                _spriteRenderer.sprite = GetSprite((Entity.Direction)facing);
-                _lastFacing = facing;
-            }
+            ApplySprite(state, facing);
         }
 
-        private Sprite GetSprite(Entity.Direction dir)
+        /// <summary>Перевыбрать спрайт при смене State ИЛИ Facing (оба дискретны).</summary>
+        private void ApplySprite(byte state, byte facing)
         {
+            if (facing == _lastFacing && state == _lastState) return;
+            _spriteRenderer.sprite = GetSprite(state, (Entity.Direction)facing);
+            _lastFacing = facing;
+            _lastState = state;
+        }
+
+        private Sprite GetSprite(byte state, Entity.Direction dir)
+        {
+            // Move-вариант опционален: пока он не назначен в префабе, Move выглядит как Stand.
+            bool moving = state == (byte)PlayerState.Move;
             switch (dir)
             {
-                case Entity.Direction.North: return _northSprite;
-                case Entity.Direction.South: return _southSprite;
-                case Entity.Direction.East: return _eastSprite;
-                case Entity.Direction.West: return _westSprite;
-                default: return _southSprite;
+                case Entity.Direction.North: return moving && _northMoveSprite != null ? _northMoveSprite : _northSprite;
+                case Entity.Direction.South: return moving && _southMoveSprite != null ? _southMoveSprite : _southSprite;
+                case Entity.Direction.East:  return moving && _eastMoveSprite != null ? _eastMoveSprite : _eastSprite;
+                case Entity.Direction.West:  return moving && _westMoveSprite != null ? _westMoveSprite : _westSprite;
+                default:                     return moving && _southMoveSprite != null ? _southMoveSprite : _southSprite;
             }
         }
     }
