@@ -7,19 +7,10 @@ using UnityEngine;
 
 namespace EditorTools
 {
-    /// <summary>
-    /// Создание C#-скрипта с автоматическим namespace.
-    /// Namespace = Root Namespace ближайшего вверх .asmdef + путь папок
-    /// от этого .asmdef до целевой папки.
-    ///
-    /// Пример: Scripts/Client/Net/Foo.cs при Client.asmdef (root=Client)
-    ///         -> namespace Client.Net
-    ///
-    /// Скрипт редакторский — лежать должен в папке с именем Editor.
-    /// </summary>
+    /// <summary>РЎРѕР·РґР°С‘С‚ C#-СЃРєСЂРёРїС‚ СЃ Р°РІС‚Рѕ-namespace: rootNamespace Р±Р»РёР¶Р°Р№С€РµРіРѕ .asmdef + РїСѓС‚СЊ РїР°РїРѕРє РґРѕ С„Р°Р№Р»Р°.</summary>
     public static class NamespacedScriptCreator
     {
-        // Ctrl/Cmd + Alt + N — по желанию. Приоритет ставит пункт рядом с Create > C# Script.
+        // Ctrl/Cmd + Alt + N; РїСѓРЅРєС‚ СЂСЏРґРѕРј СЃ Create > C# Script.
         [MenuItem("Assets/Create/Scripting/# Script (Auto Namespace) %&n", false, 80)]
         public static void CreateScript()
         {
@@ -37,22 +28,22 @@ namespace EditorTools
                 null);
         }
 
-        /// <summary>Папка текущего выделения в Project-окне (или Assets по умолчанию).</summary>
+        /// <summary>РџР°РїРєР° С‚РµРєСѓС‰РµРіРѕ РІС‹РґРµР»РµРЅРёСЏ РІ Project-РѕРєРЅРµ (РёР»Рё Assets РїРѕ СѓРјРѕР»С‡Р°РЅРёСЋ).</summary>
         private static string GetSelectedFolder()
         {
             foreach (var obj in Selection.GetFiltered<Object>(SelectionMode.Assets))
             {
                 string p = AssetDatabase.GetAssetPath(obj);
                 if (string.IsNullOrEmpty(p)) continue;
-                if (Directory.Exists(p)) return p;            // выбрана папка
-                if (File.Exists(p)) return Path.GetDirectoryName(p); // выбран файл — берём его папку
+                if (Directory.Exists(p)) return p;            // РІС‹Р±СЂР°РЅР° РїР°РїРєР°
+                if (File.Exists(p)) return Path.GetDirectoryName(p); // РІС‹Р±СЂР°РЅ С„Р°Р№Р» вЂ” Р±РµСЂС‘Рј РµРіРѕ РїР°РїРєСѓ
             }
             return "Assets";
         }
 
         /// <summary>
-        /// Вычисляет namespace для файла по пути targetFolder.
-        /// Ищет ближайший .asmdef вверх, берёт его rootNamespace + хвост папок.
+        /// Р’С‹С‡РёСЃР»СЏРµС‚ namespace РґР»СЏ С„Р°Р№Р»Р° РїРѕ РїСѓС‚Рё targetFolder.
+        /// РС‰РµС‚ Р±Р»РёР¶Р°Р№С€РёР№ .asmdef РІРІРµСЂС…, Р±РµСЂС‘С‚ РµРіРѕ rootNamespace + С…РІРѕСЃС‚ РїР°РїРѕРє.
         /// </summary>
         public static string ResolveNamespace(string targetFolder)
         {
@@ -62,7 +53,7 @@ namespace EditorTools
 
             if (asmdefDir != null)
             {
-                // путь от папки asmdef до целевой папки -> суффикс
+                // РїСѓС‚СЊ РѕС‚ РїР°РїРєРё asmdef РґРѕ С†РµР»РµРІРѕР№ -> СЃСѓС„С„РёРєСЃ
                 string suffix = targetFolder.Length > asmdefDir.Length
                     ? targetFolder.Substring(asmdefDir.Length).Trim('/')
                     : "";
@@ -76,14 +67,14 @@ namespace EditorTools
                 return SanitizeNamespace(ns);
             }
 
-            // Fallback: нет asmdef — собираем из папок от Assets.
+            // Fallback: РЅРµС‚ asmdef вЂ” СЃРѕР±РёСЂР°РµРј РёР· РїР°РїРѕРє РѕС‚ Assets.
             string fromAssets = targetFolder.StartsWith("Assets")
                 ? targetFolder.Substring("Assets".Length).Trim('/')
                 : targetFolder;
             return SanitizeNamespace(fromAssets.Replace('/', '.'));
         }
 
-        /// <summary>Поднимается вверх по дереву, ищет .asmdef. Возвращает папку asmdef и его rootNamespace.</summary>
+        /// <summary>РџРѕРґРЅРёРјР°РµС‚СЃСЏ РІРІРµСЂС… РїРѕ РґРµСЂРµРІСѓ, РёС‰РµС‚ .asmdef. Р’РѕР·РІСЂР°С‰Р°РµС‚ РїР°РїРєСѓ asmdef Рё РµРіРѕ rootNamespace.</summary>
         private static string FindAsmdefDir(string folder, out string rootNamespace)
         {
             rootNamespace = null;
@@ -105,7 +96,7 @@ namespace EditorTools
             return null;
         }
 
-        /// <summary>Читает поле rootNamespace из JSON .asmdef (без JsonUtility — поле может отсутствовать).</summary>
+        /// <summary>Р§РёС‚Р°РµС‚ РїРѕР»Рµ rootNamespace РёР· JSON .asmdef (Р±РµР· JsonUtility вЂ” РїРѕР»Рµ РјРѕР¶РµС‚ РѕС‚СЃСѓС‚СЃС‚РІРѕРІР°С‚СЊ).</summary>
         private static string ReadRootNamespace(string asmdefPath)
         {
             try
@@ -121,7 +112,7 @@ namespace EditorTools
         private static string SanitizeNamespace(string ns)
         {
             if (string.IsNullOrEmpty(ns)) return "";
-            // каждый сегмент: убрать недопустимые символы, не начинать с цифры
+            // РєР°Р¶РґС‹Р№ СЃРµРіРјРµРЅС‚: СѓР±СЂР°С‚СЊ РЅРµРґРѕРїСѓСЃС‚РёРјС‹Рµ СЃРёРјРІРѕР»С‹, РЅРµ РЅР°С‡РёРЅР°С‚СЊ СЃ С†РёС„СЂС‹
             var parts = ns.Split('.');
             for (int i = 0; i < parts.Length; i++)
             {
@@ -133,7 +124,7 @@ namespace EditorTools
         }
     }
 
-    /// <summary>Действие по завершении ввода имени файла: пишет содержимое с namespace.</summary>
+    /// <summary>Р”РµР№СЃС‚РІРёРµ РїРѕ Р·Р°РІРµСЂС€РµРЅРёРё РІРІРѕРґР° РёРјРµРЅРё С„Р°Р№Р»Р°: РїРёС€РµС‚ СЃРѕРґРµСЂР¶РёРјРѕРµ СЃ namespace.</summary>
     public class DoCreateNamespacedScript : EndNameEditAction
     {
         public override void Action(int instanceId, string pathName, string resourceFile)
@@ -165,7 +156,7 @@ namespace EditorTools
                 return sb.ToString();
             }
 
-            // Блочный namespace с табуляцией (как просили).
+            // Р‘Р»РѕС‡РЅС‹Р№ namespace СЃ С‚Р°Р±СѓР»СЏС†РёРµР№ (РєР°Рє РїСЂРѕСЃРёР»Рё).
             sb.AppendLine($"namespace {ns}");
             sb.AppendLine("{");
             sb.AppendLine($"    public class {className}");

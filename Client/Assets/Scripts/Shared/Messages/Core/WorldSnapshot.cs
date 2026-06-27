@@ -5,6 +5,7 @@ using Shared.Messages;
 
 namespace Shared.Messages.Core
 {
+    /// <summary>РђРІС‚РѕСЂРёС‚РµС‚РЅС‹Р№ СЃРЅР°РїС€РѕС‚ РјРёСЂР° РЅР° С‚РёРє: СЃРїРёСЃРѕРє СЃСѓС‰РЅРѕСЃС‚РµР№ + РЅРѕРјРµСЂ РѕР±СЂР°Р±РѕС‚Р°РЅРЅРѕРіРѕ РІРІРѕРґР°.</summary>
     public struct WorldSnapshot : INetMessage
     {
         public uint ServerTick;
@@ -13,9 +14,6 @@ namespace Shared.Messages.Core
 
         public MessageType Type => MessageType.WorldSnapshot;
 
-        /// <summary>
-        /// Сериализует данные EntitySnapshot в компактный байтовый массив для передачи по сети.
-        /// </summary>
         public byte[] Serialize()
         {
             using var ms = new MemoryStream();
@@ -35,10 +33,6 @@ namespace Shared.Messages.Core
             return ms.ToArray();
         }
 
-        /// <summary>
-        /// Безопасная реализация десериализации, которая проверяет размер данных, 
-        /// обрабатывает исключения и гарантирует целостность данных.
-        /// </summary>
         public void Deserialize(byte[] data)
         {
             if (data == null)

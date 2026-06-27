@@ -20,7 +20,7 @@ namespace ServerTests.Server.Network
 
         public GameServerTests()
         {
-            // Генерируем уникальный порт для каждого теста
+            // РЈРЅРёРєР°Р»СЊРЅС‹Р№ РїРѕСЂС‚ РЅР° РєР°Р¶РґС‹Р№ С‚РµСЃС‚, С‡С‚РѕР±С‹ РЅРµ РєРѕРЅС„Р»РёРєС‚РѕРІР°Р»Рё.
             lock (_portLock)
             {
                 _testPort = _portCounter++;
@@ -250,9 +250,6 @@ namespace ServerTests.Server.Network
             Assert.Equal($"TestKey_{_testPort}", _config.ConnectionKey);
         }
 
-        /// <summary>
-        /// Проверяет, занят ли UDP порт
-        /// </summary>
         private bool IsUdpPortInUse(int port)
         {
             try
@@ -260,17 +257,14 @@ namespace ServerTests.Server.Network
                 using var udp = new UdpClient();
                 udp.Client.Bind(new IPEndPoint(IPAddress.Loopback, port));
                 udp.Close();
-                return false; // Порт свободен
+                return false;
             }
             catch (SocketException)
             {
-                return true; // Порт занят
+                return true; // bind СѓРїР°Р» вЂ” РїРѕСЂС‚ Р·Р°РЅСЏС‚
             }
         }
 
-        /// <summary>
-        /// Создаёт подключённый NetPeer для тестов.
-        /// </summary>
         private NetPeer CreateConnectedPeer()
         {
             var clientListener = new EventBasedNetListener();

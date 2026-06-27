@@ -3,6 +3,9 @@ using System.Collections.Generic;
 
 namespace Client.Gameplay.Fsm;
 
+/// <summary>
+/// Конечный автомат: хранит состояния и переключает текущее.
+/// </summary>
 public class FSM
 {
     public FSM_State StateCurrent { get; private set; }

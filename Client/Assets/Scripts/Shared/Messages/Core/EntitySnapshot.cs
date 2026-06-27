@@ -4,6 +4,7 @@ using Shared.Messages;
 
 namespace Shared.Messages.Core
 {
+    /// <summary>РЎРЅР°РїС€РѕС‚ РѕРґРЅРѕР№ СЃСѓС‰РЅРѕСЃС‚Рё: NetId, РїРѕР·РёС†РёСЏ (X/Y/Z), РЅР°РїСЂР°РІР»РµРЅРёРµ РІР·РіР»СЏРґР° Рё FSM-СЃРѕСЃС‚РѕСЏРЅРёРµ.</summary>
     public struct EntitySnapshot : INetMessage
     {
         public int NetId;
@@ -11,12 +12,10 @@ namespace Shared.Messages.Core
         public float Y;
         public float Z;
         public byte Facing;
+        public byte State; // FSM-СЃРѕСЃС‚РѕСЏРЅРёРµ, СЂРµРїР»РёС†РёСЂСѓРµС‚СЃСЏ РєР°Рє byte (Shared.Simulation.PlayerState)
 
         public MessageType Type => MessageType.EntitySnapshot;
 
-        /// <summary>
-        /// Сериализует данные EntitySnapshot в компактный байтовый массив для передачи по сети.
-        /// </summary>
         public byte[] Serialize()
         {
             using var ms = new MemoryStream();
@@ -27,21 +26,18 @@ namespace Shared.Messages.Core
             writer.Write(Y);
             writer.Write(Z);
             writer.Write(Facing);
+            writer.Write(State);
 
             return ms.ToArray();
         }
 
-        /// <summary>
-        /// Безопасная реализация десериализации, которая проверяет размер данных, 
-        /// обрабатывает исключения и гарантирует целостность данных.
-        /// </summary>
         public void Deserialize(byte[] data)
         {
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "EntitySnapshot data cannot be null");
 
-            // EntitySnapshot: NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) = 17 байт
-            const int expectedSize = 17;
+            // NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) + State(1) = 18 Р±Р°Р№С‚
+            const int expectedSize = 18;
 
             if (data.Length != expectedSize)
                 throw new ArgumentException($"Invalid data size: expected {expectedSize} bytes, got {data.Length} bytes", nameof(data));
@@ -69,6 +65,7 @@ namespace Shared.Messages.Core
                 Z = z;
 
                 Facing = reader.ReadByte();
+                State = reader.ReadByte(); // Р»СЋР±РѕР№ byte РІР°Р»РёРґРµРЅ (СЂРµРЅРґРµСЂРёС‚СЃСЏ РєР°Рє PlayerState)
 
                 if (ms.Position != ms.Length)
                     throw new InvalidOperationException($"Unexpected extra data: {ms.Length - ms.Position} bytes remaining");

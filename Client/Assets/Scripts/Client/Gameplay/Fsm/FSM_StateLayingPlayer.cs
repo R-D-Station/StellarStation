@@ -3,6 +3,9 @@ using Client.Gameplay.Entities;
 
 namespace Client.Gameplay.Fsm
 {
+    /// <summary>
+    /// РЎРѕСЃС‚РѕСЏРЅРёРµ "Р»РµР¶РёС‚": РїРѕР»Р·Р°РЅРёРµ Рё Р°РІС‚РѕРїРѕРґСЉС‘Рј РїРѕСЃР»Рµ РЅРѕРєРґР°СѓРЅР°.
+    /// </summary>
     public class FSM_StateLayingPlayer : FSM_State
     {
         protected Player entity;
@@ -17,7 +20,7 @@ namespace Client.Gameplay.Fsm
 
         public override void Enter()
         {
-            // Если зашли из-за нокдауна — запускаем таймер
+            // РќРѕРєРґР°СѓРЅ вЂ” Р·Р°РїСѓСЃРєР°РµРј С‚Р°Р№РјРµСЂ Р°РІС‚РѕРїРѕРґСЉС‘РјР°
             if (entity.CurrentLayingReason == Entity.LayingReason.KnockedDown)
             {
                 _knockdownTimer = entity.KnockdownDuration;
@@ -28,12 +31,10 @@ namespace Client.Gameplay.Fsm
             }
 
             entity.Speed.UpdateScaleCurrentValue(-CrawlAdvancedValueMultiplier);
-            // тут позже: переключить спрайт на "лежачий", уменьшить хитбокс и т.д.
         }
 
         public override void Update()
         {
-            // Ползание
             if (entity.MoveDirection != Vector3.zero)
             {
                 entity.Moved = true;
@@ -47,17 +48,15 @@ namespace Client.Gameplay.Fsm
                 entity.Rigidbody.linearVelocity = Vector3.zero;
             }
 
-            // Если лежим из-за нокдауна — отсчитываем таймер
+            // РќРѕРєРґР°СѓРЅ вЂ” РїРѕ РёСЃС‚РµС‡РµРЅРёРё С‚Р°Р№РјРµСЂР° РІСЃС‚Р°С‘Рј Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё
             if (entity.CurrentLayingReason == Entity.LayingReason.KnockedDown)
             {
                 _knockdownTimer -= Time.deltaTime;
                 if (_knockdownTimer <= 0f)
                 {
-                    // Таймер истёк — встаём автоматически
                     fsm.SetState<FSM_StateStandPlayer>();
                 }
             }
-            // Если лежим добровольно — ждём нажатия F (обрабатывается в Player.OnToggleLaying)
         }
 
         public override void Exit()

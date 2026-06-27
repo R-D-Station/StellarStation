@@ -3,5 +3,6 @@
   "port": 7777,
   "maxPlayers": 100,
   "tickRate": 30,
-  "connectionKey": "VGVzdF9zZXJ2ZXIx"
+  "connectionKey": "VGVzdF9zZXJ2ZXIx",
+  "mapPath": "Map/station.smap"
 }

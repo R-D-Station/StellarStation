@@ -3,6 +3,7 @@ using System.IO;
 using System.Text;
 using Shared.Messages;
 using Shared.Messages.Core;
+using Shared.Simulation;
 
 namespace ServerTests.Shared.Messages.Core
 {
@@ -17,8 +18,8 @@ namespace ServerTests.Shared.Messages.Core
                 LastProcessedInput = 67890,
                 Entities = new[]
                 {
-                new EntitySnapshot { NetId = 1, X = 10, Y = 20, Z = 0, Facing = 0 },
-                new EntitySnapshot { NetId = 2, X = 30, Y = 40, Z = 1, Facing = 1 }
+                new EntitySnapshot { NetId = 1, X = 10, Y = 20, Z = 0, Facing = 0, State = (byte)PlayerState.Stand },
+                new EntitySnapshot { NetId = 2, X = 30, Y = 40, Z = 1, Facing = 1, State = (byte)PlayerState.Move }
             }
             };
 
@@ -36,6 +37,7 @@ namespace ServerTests.Shared.Messages.Core
                 Assert.Equal(original.Entities[i].Y, deserialized.Entities[i].Y);
                 Assert.Equal(original.Entities[i].Z, deserialized.Entities[i].Z);
                 Assert.Equal(original.Entities[i].Facing, deserialized.Entities[i].Facing);
+                Assert.Equal(original.Entities[i].State, deserialized.Entities[i].State);
             }
         }
 
@@ -65,8 +67,7 @@ namespace ServerTests.Shared.Messages.Core
         public void WorldSnapshot_DeserializeIncompleteData_ThrowsEndOfStreamException()
         {
             var snapshot = new WorldSnapshot();
-            // Данные только для ServerTick (4 байта), но не для остальных полей
-            var incompleteData = new byte[] { 0x01, 0x00, 0x00, 0x00 };
+            var incompleteData = new byte[] { 0x01, 0x00, 0x00, 0x00 }; // С…РІР°С‚Р°РµС‚ С‚РѕР»СЊРєРѕ РЅР° ServerTick
 
             Assert.Throws<InvalidOperationException>(() => snapshot.Deserialize(incompleteData));
         }
@@ -75,9 +76,9 @@ namespace ServerTests.Shared.Messages.Core
         public void WorldSnapshot_DeserializeCorruptedData_ThrowsException()
         {
             var snapshot = new WorldSnapshot();
-            var corruptedData = new byte[] { 0xFF, 0xFF, 0xFF, 0xFF }; // Невалидные данные
+            var corruptedData = new byte[] { 0xFF, 0xFF, 0xFF, 0xFF };
 
-            // Может выбросить EndOfStreamException, OverflowException или другое
+            // РўРёРї РёСЃРєР»СЋС‡РµРЅРёСЏ РЅРµ С„РёРєСЃРёСЂСѓРµРј: РІРѕР·РјРѕР¶РЅС‹ EndOfStream/Overflow Рё РґСЂ.
             Assert.ThrowsAny<Exception>(() => snapshot.Deserialize(corruptedData));
         }
     }

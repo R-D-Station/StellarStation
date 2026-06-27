@@ -3,6 +3,9 @@ using Client.Gameplay.Entities;
 
 namespace Client.Gameplay.Camera
 {
+    /// <summary>
+    /// Плавно следует камерой за целью с заданным смещением.
+    /// </summary>
     public class FollowCamera : MonoBehaviour
     {
         [SerializeField] private Transform _target;

@@ -59,7 +59,7 @@ namespace ServerTests.Shared.Messages.Core
         public void Deserialize_TooShortData_ThrowsArgumentException()
         {
             var intent = new MoveIntent();
-            var tooShortData = new byte[3]; // 3 байта вместо 6
+            var tooShortData = new byte[3]; // РјРµРЅСЊС€Рµ РјРёРЅРёРјР°Р»СЊРЅС‹С… 6 Р±Р°Р№С‚
             Assert.Throws<ArgumentException>(() => intent.Deserialize(tooShortData));
         }
 
@@ -67,8 +67,7 @@ namespace ServerTests.Shared.Messages.Core
         public void Deserialize_InvalidDirection_ThrowsInvalidOperationException()
         {
             var intent = new MoveIntent();
-            // Создаём данные с невалидным Direction (99)
-            var data = CreateTestData(direction: 99, sprint: true, sequence: 42);
+            var data = CreateTestData(direction: 99, sprint: true, sequence: 42); // 99 вЂ” РЅРµС‚ С‚Р°РєРѕРіРѕ РЅР°РїСЂР°РІР»РµРЅРёСЏ
 
             Assert.Throws<InvalidOperationException>(() => intent.Deserialize(data));
         }
@@ -77,8 +76,7 @@ namespace ServerTests.Shared.Messages.Core
         public void Deserialize_TooLargeSequence_ThrowsInvalidOperationException()
         {
             var intent = new MoveIntent();
-            // Sequence превышает максимальное значение
-            var data = CreateTestData(direction: 1, sprint: true, sequence: 20_000_000);
+            var data = CreateTestData(direction: 1, sprint: true, sequence: 20_000_000); // РІС‹С€Рµ РґРѕРїСѓСЃС‚РёРјРѕРіРѕ РїСЂРµРґРµР»Р°
 
             Assert.Throws<InvalidOperationException>(() => intent.Deserialize(data));
         }
@@ -115,7 +113,6 @@ namespace ServerTests.Shared.Messages.Core
         [Fact]
         public void Serialize_SprintValues_WorkCorrectly()
         {
-            // Тест для Sprint = true
             var intentTrue = new MoveIntent
             {
                 Direction = IntentDirection.North,
@@ -128,7 +125,6 @@ namespace ServerTests.Shared.Messages.Core
             deserializedTrue.Deserialize(dataTrue);
             Assert.True(deserializedTrue.Sprint);
 
-            // Тест для Sprint = false
             var intentFalse = new MoveIntent
             {
                 Direction = IntentDirection.North,
@@ -145,7 +141,6 @@ namespace ServerTests.Shared.Messages.Core
         [Fact]
         public void Serialize_SequenceBoundaryValues_WorkCorrectly()
         {
-            // Минимальное значение
             var intentMin = new MoveIntent
             {
                 Direction = IntentDirection.North,
@@ -158,7 +153,6 @@ namespace ServerTests.Shared.Messages.Core
             deserializedMin.Deserialize(dataMin);
             Assert.Equal(0u, deserializedMin.Sequence);
 
-            // Максимальное допустимое значение
             var intentMax = new MoveIntent
             {
                 Direction = IntentDirection.North,

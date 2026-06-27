@@ -3,6 +3,9 @@ using Client.Gameplay.Entities;
 
 namespace Client.Gameplay.Fsm
 {
+    /// <summary>
+    /// РЎРѕСЃС‚РѕСЏРЅРёРµ РґРІРёР¶РµРЅРёСЏ РёРіСЂРѕРєР°.
+    /// </summary>
     public class FSM_StateMovePlayer : FSM_State
     {
         protected Player entity;
@@ -25,7 +28,7 @@ namespace Client.Gameplay.Fsm
                 return;
             }
 
-            // если игрок отпустил клавиши — возвращаемся в Stand
+            // РљР»Р°РІРёС€Рё РѕС‚РїСѓС‰РµРЅС‹ вЂ” РІРѕР·РІСЂР°С‰Р°РµРјСЃСЏ РІ Stand
             if (entity.MoveDirection == Vector3.zero)
             {
                 fsm.SetState<FSM_StateStandPlayer>();

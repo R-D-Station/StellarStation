@@ -6,80 +6,39 @@ using UnityEngine.Events;
 namespace Client.Gameplay.Util.AdvancedValues;
 
 /// <summary>
-/// Класс для удобной работы с множителями к различным параметрам
+/// Значение с множителями: база, скейлы и итоговое CurrentValue с ограничениями.
 /// </summary>
 [System.Serializable]
 public class AdvancedValue
 {
-    /// <summary>
-    /// Все вычисления происходят над эти значение, оно остаётся не изменным
-    /// </summary>
     public float BaseValue;
 
-
-    /// <summary>
-    /// Множитель базового значение (<typeparam name="BaseValue">)
-    /// </summary>
     public float ScaleBaseValue = 1;
 
-
-    /// <summary>
-    /// Множитель текущиего значения (<typeparam name="CurrentValue")
-    /// </summary>
     public float ScaleCurrentValue = 1;
 
-
-    /// <summary>
-    /// Множители базового значения, которые перемножаются между собой
-    /// </summary>
     public List<float> ScaleSequentiallyValue = new List<float> { 1f };
 
-
     /// <summary>
-    /// Показывает значение после всех трансформаций над ним
+    /// Итоговое значение после всех преобразований.
     /// </summary>
-    public float CurrentValue { get; protected set; } // Текущие значение 
+    public float CurrentValue { get; protected set; }
 
+    public float MinValue = 0.1f;
 
-    /// <summary>
-    /// Ограничение по минимому
-    /// </summary>
-    public float MinValue = 0.1f; // Минимальное значение
-
-
-    /// <summary>
-    /// Ограничение по максимуму
-    /// </summary>
     public float MaxValue = Mathf.Infinity;
 
+    [SerializeField]
+    protected float sumValueChanges;
 
     /// <summary>
-    /// Все изменения над базовым значением
+    /// Вызывается при любом изменении значения.
     /// </summary>
-    [SerializeField] 
-    protected float sumValueChanges; // Все изменения над значением
+    public UnityAction<float> OnUpdateValue;
 
-
-    /// <summary>
-    /// События при любом изменении значения
-    /// </summary>
-    public UnityAction<float> OnUpdateValue; // Собитые при изменении характеристики
-
-
-    /// <summary>
-    /// Если true - все изменения выходящие за границы значений, будут сохранены в буфер и применены по возможности
-    /// </summary>
+    // Если true — изменения за пределами границ сохраняются в буфер и применяются по возможности
     protected bool canOver = true;
 
-
-    /// <summary>
-    /// Инициализация
-    /// </summary>
-    /// <param name="baseValue"></param>
-    /// <param name="scaleBaseValue"></param>
-    /// <param name="scaleCurrentValue"></param>
-    /// <param name="minValue"></param>
-    /// <param name="canOver"></param>
     public AdvancedValue(float baseValue, float scaleBaseValue = 1, float scaleCurrentValue = 1, float minValue = 0.1f, bool canOver = true)
     {
         BaseValue = baseValue;
@@ -91,14 +50,6 @@ public class AdvancedValue
     }
 
 
-    /// <summary>
-    /// Инициализация
-    /// </summary>
-    /// <param name="baseValue"></param>
-    /// <param name="scaleBaseValue"></param>
-    /// <param name="scaleCurrentValue"></param>
-    /// <param name="minValue"></param>
-    /// /// <param name="canOver"></param>
     public AdvancedValue(float baseValue, float maxValue, float scaleBaseValue = 1, float scaleCurrentValue = 1, float minValue = 0.1f, bool canOver = true)
     {
         BaseValue = baseValue;
@@ -151,12 +102,8 @@ public class AdvancedValue
     }
 
     /// <summary>
-    /// Устанавливает новые значения не создавая новый класс, затем отчищает все изменения и применяет UpdateValue
+    /// Задаёт новые параметры, сбрасывает изменения и пересчитывает значение.
     /// </summary>
-    /// <param name="baseValue"></param>
-    /// <param name="scaleBaseValue"></param>
-    /// <param name="scaleCurrentValue"></param>
-    /// <param name="minValue"></param>
     public void SetNewParameters(float baseValue, float scaleBaseValue = 1, float scaleCurrentValue = 1, float minValue = 0.1f)
     {
         BaseValue = baseValue;
@@ -170,13 +117,8 @@ public class AdvancedValue
 
 
     /// <summary>
-    /// Устанавливает новые значения не создавая новый класс, затем отчищает все изменения и применяет UpdateValue
+    /// Задаёт новые параметры с MaxValue, сбрасывает изменения и пересчитывает значение.
     /// </summary>
-    /// <param name="baseValue"></param>
-    /// <param name="maxValue"></param>
-    /// <param name="scaleBaseValue"></param>
-    /// <param name="scaleCurrentValue"></param>
-    /// <param name="minValue"></param>
     public void SetNewParameters(float baseValue, float maxValue, float scaleBaseValue = 1, float scaleCurrentValue = 1, float minValue = 0.1f)
     {
         BaseValue = baseValue;
@@ -191,10 +133,8 @@ public class AdvancedValue
 
 
     /// <summary>
-    /// Выполняет все преобразования над значением BaseValue и возвращает разницу между старым и новым значением
+    /// Добавляет value к сумме, пересчитывает CurrentValue и возвращает разницу.
     /// </summary>
-    /// <param name="value">Adds value to all sum</param>
-    /// <returns>Difference in change</returns>
     public virtual float UpdateValue(float value)
     {
         float valueNow = CurrentValue;
@@ -221,9 +161,8 @@ public class AdvancedValue
 
 
     /// <summary>
-    /// Выполняет все преобразования над значением BaseValue и возвращает разницу между старым и новым значением
+    /// Пересчитывает CurrentValue по текущим параметрам и возвращает разницу.
     /// </summary>
-    /// <returns>Difference in change</returns>
     public virtual float UpdateValue()
     {
         float valueNow = CurrentValue;
@@ -244,10 +183,6 @@ public class AdvancedValue
     }
 
 
-    /// <summary>
-    /// Суммирует множители базового значения
-    /// </summary>
-    /// <returns>Value of sum</returns>
     public float SumScales()
     {
         float sum = 1;
@@ -259,11 +194,6 @@ public class AdvancedValue
     }
 
 
-    /// <summary>
-    /// Обновляет BaseValue, затем приминяет UpdateValue
-    /// </summary>
-    /// <param name="value"></param>
-    /// <param name="WithMinValue">if true adds to min value too</param>
     public void UpdateBaseValue(float value, bool WithMinValue = false)
     {
         BaseValue += value;
@@ -276,10 +206,6 @@ public class AdvancedValue
     }
 
 
-    /// <summary>
-    /// Обновляет ограничение по минимому, затем приминяет UpdateValue
-    /// </summary>
-    /// <param name="value"></param>
     public void UpdateMinValue(float value)
     {
         MinValue += value;
@@ -287,10 +213,6 @@ public class AdvancedValue
     }
 
 
-    /// <summary>
-    /// Обновляет ScaleCurrentValue, затем приминяет UpdateValue
-    /// </summary>
-    /// <param name="value"></param>
     public void UpdateScaleCurrentValue(float value)
     {
         ScaleCurrentValue += value;
@@ -315,6 +237,9 @@ public class AdvancedValue
     }
 }
 #if UNITY_EDITOR
+/// <summary>
+/// Кастомный инспектор для AdvancedValue.
+/// </summary>
 [CustomEditor(typeof(AdvancedValue))]
 public class AdvancedValueEditor : Editor
 {

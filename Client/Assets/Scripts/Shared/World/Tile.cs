@@ -1,85 +1,57 @@
 namespace Shared.World
 {
     /// <summary>
-    /// Один тайл сетки. Чистый C#, без Unity — живёт в Shared, читают и сервер,
-    /// и клиент (для рендера), и редактор карт (для экспорта).
-    ///
-    /// ЖЁСТКОЕ ПРАВИЛО проекта: симуляция читает ТОЛЬКО целый тайл (floor X,
-    /// floor Y, z). Дробные позиции сущностей сюда не протекают.
-    ///
-    /// Три флага описывают физику и видимость тайла независимо. Их НЕЛЬЗЯ
-    /// сливать — решётка и дырка различаются именно комбинацией:
-    ///   Сплошной пол: Support=true,  BlocksVerticalSight=true
-    ///   Решётка:      Support=true,  BlocksVerticalSight=false
-    ///   Дырка:        Support=false, BlocksVerticalSight=false
-    ///
-    /// Walkable не хранится — он вычисляемый (WallType==0 &amp;&amp; Support),
-    /// иначе рассинхрон при правке.
+    /// РўР°Р№Р» РєР°СЂС‚С‹ (РѕР±С‰РёР№ РґР»СЏ РєР»РёРµРЅС‚Р° Рё СЃРµСЂРІРµСЂР°). РќРµР·Р°РІРёСЃРёРјС‹ СЃР»РѕР№ РїРѕР»Р° (FloorType) Рё СЃР»РѕР№
+    /// РЅР°СЃС‚РµРЅРЅРѕРіРѕ РѕР±СЉРµРєС‚Р° (StructureType вЂ” СЃС‚РµРЅР°/РґРІРµСЂСЊ/Р»СЋРє/РѕРєРЅРѕ). РџРѕРІРµРґРµРЅРёРµ РѕР±СЉРµРєС‚Р° вЂ” РІРѕ С„Р»Р°РіР°С…,
+    /// РѕС‚РєСЂС‹РІР°РµРјРѕСЃС‚СЊ вЂ” Openable/Open. РљРѕРѕСЂРґРёРЅР°С‚С‹ С†РµР»С‹Рµ (x, y, z).
     /// </summary>
     public struct Tile
     {
-        /// <summary>Тип пола (рендер; позже — герметичность для атмоса). 0 = нет пола/космос.</summary>
         public byte FloorType;
 
-        /// <summary>Тип стены. 0 = стены нет.</summary>
-        public byte WallType;
+        /// <summary>РќР°СЃС‚РµРЅРЅС‹Р№ РѕР±СЉРµРєС‚: СЃС‚РµРЅР°/РґРІРµСЂСЊ/Р»СЋРє/РѕРєРЅРѕ (0 = РЅРµС‚). Р’РёРґ Рё РєР°С‚РµРіРѕСЂРёСЏ вЂ” РІ TileCatalog.</summary>
+        public byte StructureType;
 
-        /// <summary>Держит ли тайл ногами. Решётка — true, дырка — false.</summary>
         public bool Support;
-
-        /// <summary>Блокирует ли горизонтальный обзор (стена) — для FOV в плоскости этажа.</summary>
         public bool BlocksHorizontalSight;
-
-        /// <summary>
-        /// Блокирует ли вертикальный обзор по Z (в ОБЕ стороны). Это «пол» тайла,
-        /// и одновременно «потолок» для тайла под ним. Сплошной пол — true,
-        /// решётка/дырка/космос — false. Отдельного флага потолка нет:
-        /// потолок этажа z = пол этажа z+1.
-        /// </summary>
         public bool BlocksVerticalSight;
-
-        /// <summary>
-        /// Герметичен ли тайл по горизонтали (не пропускает газ в плоскости этажа).
-        /// Отдельно от обзора: стекло пропускает взгляд, но держит газ. Стена —
-        /// и взгляд, и газ. Потребитель — атмос (этап 5); сейчас флаг заложен
-        /// заранее, чтобы не версионировать формат карт позже.
-        /// </summary>
         public bool SealsHorizontal;
-
-        /// <summary>
-        /// Герметичен ли тайл по вертикали (не пропускает газ между этажами).
-        /// Стеклянный пол: BlocksVerticalSight=false, SealsVertical=true (видно
-        /// вниз, газ не идёт). Решётка: оба false (видно и газ проходит).
-        /// Сплошной пол: оба true. Потребитель — атмос (этап 5).
-        /// </summary>
         public bool SealsVertical;
 
-        /// <summary>Можно ли войти и встать. Вычисляемое, не хранится в файле.</summary>
-        public readonly bool Walkable => WallType == 0 && Support;
+        /// <summary>РћР±СЉРµРєС‚ РѕС‚РєСЂС‹РІР°РµРјС‹Р№ (РґРІРµСЂСЊ/Р»СЋРє), Р° РЅРµ РіР»СѓС…РѕР№ (СЃС‚РµРЅР°/РѕРєРЅРѕ).</summary>
+        public bool Openable;
 
-        /// <summary>
-        /// Можно войти, но нет опоры — шаг разрешён, далее падение на z-1.
-        /// Вычисляемое. Механика падения включается на этапе 3 (Z-переходы).
-        /// </summary>
-        public readonly bool IsFall => WallType == 0 && !Support;
+        /// <summary>РћС‚РєСЂС‹С‚ Р»Рё СЃРµР№С‡Р°СЃ (СЂР°РЅС‚Р°Р№Рј-СЃРѕСЃС‚РѕСЏРЅРёРµ РѕС‚РєСЂС‹РІР°РµРјРѕРіРѕ РѕР±СЉРµРєС‚Р°, РІРµРґС‘С‚ СЃРµСЂРІРµСЂ).</summary>
+        public bool Open;
 
-        /// <summary>Пустой тайл — открытый космос: ни пола, ни стены, ни опоры, ничего не держит.</summary>
+        /// <summary>РЎРїРµС†-С‚Р°Р№Р» РїРµСЂРµС…РѕРґР° РјРµР¶РґСѓ СЌС‚Р°Р¶Р°РјРё (Р»РµСЃС‚РЅРёС†Р°/Р»РёС„С‚). РЎРј. TileSpecial.</summary>
+        public TileSpecial Special;
+
+        /// <summary>РџСЂРѕС…РѕРґРёРј: РµСЃС‚СЊ РѕРїРѕСЂР° Рё РЅРµС‚ РїСЂРµРіСЂР°РґС‹ (РѕР±СЉРµРєС‚Р° РЅРµС‚, Р»РёР±Рѕ РѕРЅ РѕС‚РєСЂС‹РІР°РµРјС‹Р№ Рё РѕС‚РєСЂС‹С‚).</summary>
+        public readonly bool Walkable => Support && (StructureType == 0 || (Openable && Open));
+
+        /// <summary>РџСЂРѕРІР°Р»: РЅРµС‚ РѕРїРѕСЂС‹ Рё РЅРµС‚ РіР»СѓС…РѕРіРѕ РѕР±СЉРµРєС‚Р° вЂ” РїР°РґРµРЅРёРµ РЅР° z-1.</summary>
+        public readonly bool IsFall => !Support && (StructureType == 0 || Openable);
+
+        /// <summary>РџСѓСЃС‚РѕР№ С‚Р°Р№Р» (РєРѕСЃРјРѕСЃ): РЅРµС‚ РїРѕР»Р°, РѕР±СЉРµРєС‚Р° Рё РѕРїРѕСЂС‹.</summary>
         public static Tile Space => new Tile
         {
             FloorType = 0,
-            WallType = 0,
+            StructureType = 0,
             Support = false,
             BlocksHorizontalSight = false,
             BlocksVerticalSight = false,
             SealsHorizontal = false,
-            SealsVertical = false
+            SealsVertical = false,
+            Openable = false,
+            Open = false
         };
 
-        /// <summary>Сплошной пол: стоишь, взгляд по Z не проходит, газ снизу/сверху не проходит.</summary>
+        /// <summary>Р“РѕС‚РѕРІС‹Р№ РїРѕР»: РµСЃС‚СЊ РѕРїРѕСЂР°, РїРµСЂРµРєСЂС‹РІР°РµС‚ РѕР±Р·РѕСЂ РїРѕ Z, РїСЂРѕС…РѕРґРёРј.</summary>
         public static Tile Floor(byte floorType = 1) => new Tile
         {
             FloorType = floorType,
-            WallType = 0,
+            StructureType = 0,
             Support = true,
             BlocksHorizontalSight = false,
             BlocksVerticalSight = true,

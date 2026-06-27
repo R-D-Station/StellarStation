@@ -51,6 +51,7 @@ Server/publish/
 *.sln
 *.csproj
 !Server/Server.csproj
+/.claude
 
 # VS Code
 .vscode/
@@ -86,3 +87,4 @@ ServerTests/coveragereport/
 # ====================
 
 Builds/
+/docs

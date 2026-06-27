@@ -45,7 +45,7 @@ namespace ServerTests.Server
             var exception = Record.Exception(() =>
             {
                 server.Start();
-                Thread.Sleep(100); // Даем серверу немного времени, чтобы запуститься
+                Thread.Sleep(100);
                 server.Stop();
             });
 

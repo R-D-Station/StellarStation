@@ -26,8 +26,8 @@ Transform:
   m_GameObject: {fileID: 1025228287478109249}
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: 0, y: 0.01, z: 0}
+  m_LocalScale: {x: 4, y: 4, z: 4}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6558328058909304322}
@@ -137,7 +137,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Client.Net.View.NetEntityView
   _spriteRenderer: {fileID: 5250995514051772255}
-  _northSprite: {fileID: -525304849, guid: f0ab8d32e50f82e4b9dc97065a4d5914, type: 3}
-  _southSprite: {fileID: -2140226194, guid: f0ab8d32e50f82e4b9dc97065a4d5914, type: 3}
+  _northSprite: {fileID: -2140226194, guid: f0ab8d32e50f82e4b9dc97065a4d5914, type: 3}
+  _southSprite: {fileID: -525304849, guid: f0ab8d32e50f82e4b9dc97065a4d5914, type: 3}
   _eastSprite: {fileID: 1623338204, guid: f0ab8d32e50f82e4b9dc97065a4d5914, type: 3}
   _westSprite: {fileID: -1528376254, guid: f0ab8d32e50f82e4b9dc97065a4d5914, type: 3}
+  _smoothing: 20

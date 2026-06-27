@@ -5,12 +5,23 @@ using Shared.Configs;
 using Shared.Messages;
 using Shared.Messages.Core;
 using Shared.Simulation;
+using Shared.World;
 
 namespace Server.Network;
 
+/// <summary>РЎРµС‚РµРІРѕР№ СЃРµСЂРІРµСЂ: РїСЂРёС‘Рј РїРѕРґРєР»СЋС‡РµРЅРёР№, game-loop, СЃРёРјСѓР»СЏС†РёСЏ Рё СЂР°СЃСЃС‹Р»РєР° СЃРЅР°РїС€РѕС‚РѕРІ РјРёСЂР°.</summary>
 public class GameServer
 {
     private readonly SVars _config;
+    private readonly GridMap _map;
+    private readonly float _spawnX;
+    private readonly float _spawnY;
+    private readonly int _spawnZ;
+
+    // РћС‚РєСЂС‹С‚С‹Рµ РґРІРµСЂРё: РєР»СЋС‡ (x,y,z) в†’ СЃРµСЂРІРµСЂРЅС‹Р№ С‚РёРє Р°РІС‚РѕР·Р°РєСЂС‹С‚РёСЏ. РћР±РЅРѕРІР»СЏСЋС‚СЃСЏ РІ GameLoop.
+    private readonly Dictionary<(int x, int y, int z), uint> _openDoors = new();
+    private readonly List<(int x, int y, int z)> _doorsToClose = new();
+    private uint DoorOpenTicks => (uint)(_config.TickRate * 5); // Р°РІС‚РѕР·Р°РєСЂС‹С‚РёРµ ~5 СЃРµРєСѓРЅРґ
     private NetManager? _server;
     private readonly Dictionary<NetPeer, ClientConnection> _clients;
     private readonly ConcurrentQueue<Action> _mainThreadActions;
@@ -18,16 +29,23 @@ public class GameServer
     private int _nextConnectionId = 1;
     private uint _currentTick;
 
-    // Кеш для списка подключённых пиров
     private readonly List<NetPeer> _connectedPeersCache = new();
 
     public event Action<ClientConnection>? OnClientConnected;
     public event Action<ClientConnection>? OnClientDisconnected;
     public event Action<ClientConnection, MoveIntent>? OnMoveIntentReceived;
 
-    public GameServer(SVars config)
+    // РўРѕС‡РєР° СЃРїР°РІРЅР° РёРіСЂРѕРєРѕРІ (С†РµРЅС‚СЂ РїСЂРѕС…РѕРґРёРјРѕР№ РѕР±Р»Р°СЃС‚Рё РєР°СЂС‚С‹).
+    public float SpawnX => _spawnX;
+    public float SpawnY => _spawnY;
+    public int SpawnZ => _spawnZ;
+
+    public GameServer(SVars config, GridMap? map = null)
     {
         _config = config;
+        _map = map ?? new GridMap(); // РїСѓСЃС‚Р°СЏ РєР°СЂС‚Р° = РјРёСЂ Р±РµР· РєРѕР»Р»РёР·РёРё
+        (_spawnX, _spawnY, _spawnZ) = FindSpawn(_map);
+        Console.WriteLine($"[Map] Spawn at ({_spawnX}, {_spawnY}, z{_spawnZ})");
         _clients = new Dictionary<NetPeer, ClientConnection>();
         _mainThreadActions = new ConcurrentQueue<Action>();
     }
@@ -90,10 +108,7 @@ public class GameServer
         _mainThreadActions.Enqueue(() => OnClientConnected?.Invoke(client));
     }
 
-    /// <summary>
-    /// Обработчик отключения клиента. Он удаляет клиента из словаря, 
-    /// выводит сообщение в консоль и вызывает событие OnClientDisconnected на главном потоке.
-    /// </summary>
+    /// <summary>РћС‚РєР»СЋС‡РµРЅРёРµ РїРёСЂР°: СѓР±СЂР°С‚СЊ РєР»РёРµРЅС‚Р° Рё РїРѕРґРЅСЏС‚СЊ OnClientDisconnected РІ main-РїРѕС‚РѕРєРµ.</summary>
     private void OnPeerDisconnected(NetPeer peer, DisconnectInfo disconnectInfo)
     {
         if (_clients.TryGetValue(peer, out var client))
@@ -105,11 +120,7 @@ public class GameServer
         }
     }
 
-    /// <summary>
-    /// Обработчик входящих сообщений от клиентов. 
-    /// Сначала он пытается найти соответствующего клиента по пиру, чтобы обновить 
-    /// его время активности, затем читает тип сообщения и данные.
-    /// </summary>
+    /// <summary>РџСЂРёС‘Рј СЃРѕРѕР±С‰РµРЅРёСЏ РѕС‚ РєР»РёРµРЅС‚Р°: СЂР°Р·Р±РѕСЂ С‚РёРїР° Рё РїРѕСЃС‚Р°РЅРѕРІРєР° РІ РѕС‡РµСЂРµРґСЊ РѕР±СЂР°Р±РѕС‚РєРё.</summary>
     private void OnNetworkReceive(NetPeer peer, NetDataReader reader, byte channel, DeliveryMethod method)
     {
         try
@@ -124,11 +135,14 @@ public class GameServer
 
             switch (type)
             {
+                case MessageType.UseIntent:
+                    // Р”РµР№СЃС‚РІСѓРµРј РїРѕ С‚РµРєСѓС‰РµРјСѓ С‚Р°Р№Р»Сѓ РёРіСЂРѕРєР° РІ game-loop.
+                    client.UseRequested = true;
+                    break;
+
                 case MessageType.MoveIntent:
                     var intent = new MoveIntent();
                     intent.Deserialize(data);
-                    // Не двигаем сразу: складываем в очередь, обработаем в тик-лупе
-                    // (один intent за тик) для детерминизма с клиентским предсказанием.
                     client.IntentQueue.Enqueue(intent);
                     break;
 
@@ -141,16 +155,17 @@ public class GameServer
         {
             Console.WriteLine($"[Server] Error processing message from #{peer.Address}: {ex.Message}");
 
-            // TODO: возможно, стоит отключать клиента, если он шлёт битые пакеты
+            // TODO: РІРѕР·РјРѕР¶РЅРѕ, СЃС‚РѕРёС‚ РґРёСЃРєРѕРЅРЅРµРєС‚РёС‚СЊ РєР»РёРµРЅС‚Р° РїСЂРё Р±РёС‚С‹С… РґР°РЅРЅС‹С…
         }
     }
 
+    /// <summary>Р“Р»Р°РІРЅС‹Р№ С†РёРєР» СЃРµСЂРІРµСЂР°: СЃРѕР±С‹С‚РёСЏ, intent'С‹, С‚РёРє, СЂР°СЃСЃС‹Р»РєР° СЃРЅР°РїС€РѕС‚Р° СЃ С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Рј С€Р°РіРѕРј.</summary>
     private async Task GameLoop()
     {
         double tickMs = 1000.0 / _config.TickRate;
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        double nextTick = sw.Elapsed.TotalMilliseconds; // целевое время следующего тика
+        double nextTick = sw.Elapsed.TotalMilliseconds;
 
         while (_isRunning)
         {
@@ -162,12 +177,13 @@ public class GameServer
             }
 
             ProcessIntents();
+            ProcessUses();
 
             _currentTick++;
+            UpdateDoors();
             BroadcastWorldSnapshot();
 
-            // Следующий тик планируем от фиксированной сетки, а не от "сейчас".
-            // Так накопленная погрешность сна не уводит реальную частоту от целевой.
+            // РџСЂРёРІСЏР·РєР° Рє Р°Р±СЃРѕР»СЋС‚РЅРѕРјСѓ РІСЂРµРјРµРЅРё, С‡С‚РѕР±С‹ С‚РёРє РЅРµ РїР»С‹Р».
             nextTick += tickMs;
 
             double now = sw.Elapsed.TotalMilliseconds;
@@ -175,18 +191,17 @@ public class GameServer
 
             if (wait > 4)
             {
-                // Грубый сон до почти-цели (Task.Delay неточен, оставляем запас).
+                // Р“СЂСѓР±РѕРµ РѕР¶РёРґР°РЅРёРµ (Task.Delay РЅРµС‚РѕС‡РµРЅ, РѕСЃС‚Р°РІР»СЏРµРј Р·Р°РїР°СЃ).
                 await Task.Delay((int)(wait - 2));
             }
             else if (wait < -tickMs)
             {
-                // Сильно отстали (фриз/брейкпоинт) — не пытаемся догонять пачкой
-                // тиков, сбрасываем сетку на текущий момент.
+                // РЎРёР»СЊРЅРѕ РѕС‚СЃС‚Р°Р»Рё вЂ” РЅРµ РЅР°РіРѕРЅСЏРµРј, СЃС‚Р°СЂС‚СѓРµРј СЃС‡С‘С‚ Р·Р°РЅРѕРІРѕ.
                 nextTick = sw.Elapsed.TotalMilliseconds;
                 continue;
             }
 
-            // Доспиновываем оставшиеся ~миллисекунды для точного попадания в сетку.
+            // РўРѕС‡РЅР°СЏ РґРѕРІРѕРґРєР° РґРѕ nextTick СЃРїРёРЅРѕРј.
             while (sw.Elapsed.TotalMilliseconds < nextTick)
             {
                 System.Threading.Thread.SpinWait(50);
@@ -194,64 +209,143 @@ public class GameServer
         }
     }
 
-    /// <summary>
-    /// Обработка накопленных intent'ов: ровно один шаг на клиента за тик.
-    /// Это держит серверное движение в одном темпе с клиентским предсказанием
-    /// (клиент шлёт intent раз в тик). Если в очереди скопилось больше одного
-    /// (джиттер сети), лишние старые отбрасываются, чтобы не копить задержку.
-    /// </summary>
+    /// <summary>РџСЂРёРјРµРЅСЏРµС‚ РїРѕ РѕРґРЅРѕРјСѓ intent'Сѓ РЅР° РєР»РёРµРЅС‚Р° Р·Р° С‚РёРє; СЃР±СЂР°СЃС‹РІР°РµС‚ РЅР°РєРѕРїРёРІС€РёР№СЃСЏ С…РІРѕСЃС‚.</summary>
     private void ProcessIntents()
     {
-        const int maxQueued = 4; // потолок: не даём очереди распухать
+        const int maxQueued = 4; // Р·Р°С‰РёС‚Р° РѕС‚ СЂР°Р·СЂР°СЃС‚Р°РЅРёСЏ РѕС‡РµСЂРµРґРё
 
         foreach (var client in _clients.Values)
         {
-            // Сбрасываем переполнение, оставляя только свежие intent'ы.
+            // РЎР±СЂР°СЃС‹РІР°РµРј РЅР°РєРѕРїРёРІС€РµРµСЃСЏ, РѕСЃС‚Р°РІР»СЏСЏ С‚РѕР»СЊРєРѕ СЃРІРµР¶РёР№ intent.
             while (client.IntentQueue.Count > maxQueued && client.IntentQueue.TryDequeue(out _)) { }
+
+            // Р”РµС„РѕР»С‚ С‚РёРєР°: РЅРµС‚ РІРІРѕРґР° в†’ Stand. РќРёР¶Рµ РїРµСЂРµР±СЊС‘С‚СЃСЏ РЅР° Move, РµСЃР»Рё РїРѕР·РёС†РёСЏ РёР·РјРµРЅРёР»Р°СЃСЊ.
+            client.State = PlayerState.Stand;
 
             if (client.IntentQueue.TryDequeue(out var intent))
             {
                 float x = client.X;
                 float y = client.Y;
 
-                MovementLogic.Apply(ref x, ref y, intent.Direction, intent.Sprint);
+                MovementLogic.Apply(_map, client.Z, ref x, ref y, intent.Direction, intent.Sprint);
 
-                // Границы (простая заглушка, как было)
-                x = Math.Clamp(x, -20f, 20f);
-                y = Math.Clamp(y, -20f, 20f);
+                // РЎСЂР°РІРЅРµРЅРёРµ new vs old (client.X/Y РµС‰С‘ РЅРµ РѕР±РЅРѕРІР»РµРЅС‹): Apply Р»РёР±Рѕ РґРІРёРіР°РµС‚ РЅР°
+                // С„РёРєСЃРёСЂРѕРІР°РЅРЅС‹Р№ StepPerTick, Р»РёР±Рѕ РЅРµС‚ (РґРµС‚РµСЂРјРёРЅРёР·Рј) вЂ” СѓРїРѕСЂ РІ СЃС‚РµРЅСѓ РґР°С‘С‚ Stand.
+                bool moved = x != client.X || y != client.Y;
+
+                // Р“СЂР°РЅРёС†С‹ РґРµСЂР¶РёС‚ РєРѕР»Р»РёР·РёСЏ С‚Р°Р№Р»РѕРІ (Walkable); Р¶С‘СЃС‚РєРёР№ clamp СѓР±СЂР°РЅ.
 
                 client.X = x;
                 client.Y = y;
                 client.Facing = MovementLogic.ToFacing(intent.Direction, client.Facing);
                 client.LastProcessedSequence = intent.Sequence;
+                client.State = moved ? PlayerState.Move : PlayerState.Stand;
+
+                // Р‘Р°РјРї: СѓРїС‘СЂСЃСЏ РІ Р·Р°РєСЂС‹С‚СѓСЋ РґРІРµСЂСЊ РїРѕ РЅР°РїСЂР°РІР»РµРЅРёСЋ РІРІРѕРґР° вЂ” РѕС‚РєСЂС‹РІР°РµРј РµС‘.
+                OpenBumpedDoors(client, intent.Direction, intent.Sprint);
             }
         }
     }
 
-    /// <summary>
-    /// Метод для создания и отправки снимка мира всем подключённым клиентам. 
-    /// Снимок содержит текущий тик сервера, список всех сущностей (игроков) с их позициями и направлениями. 
-    /// Клиенты будут использовать эти данные для синхронизации своего состояния с сервером.
-    /// </summary>
+    /// <summary>РўРѕС‡РєР° СЃРїР°РІРЅР°: РјР°СЂРєРµСЂ Spawn, РёРЅР°С‡Рµ Р±Р»РёР¶Р°Р№С€РёР№ Рє С†РµРЅС‚СЂСѓ РїСЂРѕС…РѕРґРёРјС‹Р№ С‚Р°Р№Р». РќРµС‚ РєР°СЂС‚С‹ в†’ (0,0,0).</summary>
+    private static (float x, float y, int z) FindSpawn(GridMap map)
+    {
+        if (map.Chunks.Count == 0)
+            return (0f, 0f, 0);
+
+        // 1) РЇРІРЅС‹Р№ РјР°СЂРєРµСЂ СЃРїР°РІРЅР° (РїСЂРёРѕСЂРёС‚РµС‚).
+        foreach (var chunk in map.Chunks)
+        {
+            var raw = chunk.Raw;
+            for (int i = 0; i < raw.Length; i++)
+            {
+                if (raw[i].Special != TileSpecial.Spawn) continue;
+                int sx = chunk.ChunkX * Chunk.Size + (i % Chunk.Size);
+                int sy = chunk.ChunkY * Chunk.Size + (i / Chunk.Size);
+                return (sx + 0.5f, sy + 0.5f, chunk.Z);
+            }
+        }
+
+        // 2) Р¤РѕР»Р±СЌРє: СЌС‚Р°Р¶ СЃ РЅР°РёР±РѕР»СЊС€РёРј С‡РёСЃР»РѕРј РїСЂРѕС…РѕРґРёРјС‹С… С‚Р°Р№Р»РѕРІ.
+        var walkablePerZ = new Dictionary<int, int>();
+        foreach (var chunk in map.Chunks)
+        {
+            int count = 0;
+            var raw = chunk.Raw;
+            for (int i = 0; i < raw.Length; i++)
+                if (raw[i].Walkable) count++;
+            if (count == 0) continue;
+            walkablePerZ.TryGetValue(chunk.Z, out int cur);
+            walkablePerZ[chunk.Z] = cur + count;
+        }
+
+        if (walkablePerZ.Count == 0)
+            return (0f, 0f, 0);
+
+        int spawnZ = 0;
+        int best = -1;
+        foreach (var kv in walkablePerZ)
+            if (kv.Value > best) { best = kv.Value; spawnZ = kv.Key; }
+
+        // Р¦РµРЅС‚СЂ РїСЂРѕС…РѕРґРёРјРѕР№ РѕР±Р»Р°СЃС‚Рё РІС‹Р±СЂР°РЅРЅРѕРіРѕ СЌС‚Р°Р¶Р°.
+        long sumX = 0, sumY = 0;
+        int total = 0;
+        foreach (var chunk in map.Chunks)
+        {
+            if (chunk.Z != spawnZ) continue;
+            for (int ly = 0; ly < Chunk.Size; ly++)
+                for (int lx = 0; lx < Chunk.Size; lx++)
+                {
+                    if (!chunk[lx, ly].Walkable) continue;
+                    sumX += chunk.ChunkX * Chunk.Size + lx;
+                    sumY += chunk.ChunkY * Chunk.Size + ly;
+                    total++;
+                }
+        }
+
+        int cx = (int)(sumX / total);
+        int cy = (int)(sumY / total);
+
+        // Р‘Р»РёР¶Р°Р№С€РёР№ РїСЂРѕС…РѕРґРёРјС‹Р№ С‚Р°Р№Р» Рє С†РµРЅС‚СЂСѓ.
+        int spawnTileX = cx, spawnTileY = cy;
+        long bestDist = long.MaxValue;
+        foreach (var chunk in map.Chunks)
+        {
+            if (chunk.Z != spawnZ) continue;
+            for (int ly = 0; ly < Chunk.Size; ly++)
+                for (int lx = 0; lx < Chunk.Size; lx++)
+                {
+                    if (!chunk[lx, ly].Walkable) continue;
+                    int wx = chunk.ChunkX * Chunk.Size + lx;
+                    int wy = chunk.ChunkY * Chunk.Size + ly;
+                    long dx = wx - cx, dy = wy - cy;
+                    long d = dx * dx + dy * dy;
+                    if (d < bestDist) { bestDist = d; spawnTileX = wx; spawnTileY = wy; }
+                }
+        }
+
+        // Р¦РµРЅС‚СЂ С‚Р°Р№Р»Р° (+0.5), С‡С‚РѕР±С‹ floor(x/y) РїРѕРїР°РґР°Р» РёРјРµРЅРЅРѕ РІ СЌС‚РѕС‚ С‚Р°Р№Р».
+        return (spawnTileX + 0.5f, spawnTileY + 0.5f, spawnZ);
+    }
+
+    /// <summary>Р Р°СЃСЃС‹Р»Р°РµС‚ СЃРЅР°РїС€РѕС‚ РјРёСЂР° РєР°Р¶РґРѕРјСѓ РєР»РёРµРЅС‚Сѓ (СЃРѕ СЃРІРѕРёРј LastProcessedInput РґР»СЏ reconciliation).</summary>
     private void BroadcastWorldSnapshot()
     {
         if (_clients.Count == 0)
             return;
 
-        // Список сущностей общий для всех; собираем один раз.
+        // РћР±С‰РёР№ СЃРїРёСЃРѕРє СЃСѓС‰РЅРѕСЃС‚РµР№; СЃРѕР±РёСЂР°РµРј РѕРґРёРЅ СЂР°Р·.
         var entities = _clients.Values.Select(c => new EntitySnapshot
         {
             NetId = c.PlayerNetId,
             X = c.X,
             Y = c.Y,
             Z = c.Z,
-            Facing = c.Facing
+            Facing = c.Facing,
+            State = (byte)c.State
         }).ToArray();
 
-        // Снапшот шлём персонально: LastProcessedInput у каждого клиента свой
-        // (его собственный последний обработанный Sequence) — это нужно для
-        // reconciliation. Контракт пакета не меняется, меняется лишь то, что
-        // снапшот сериализуется под каждого клиента.
+        // РљР°Р¶РґРѕРјСѓ РєР»РёРµРЅС‚Сѓ вЂ” РµРіРѕ LastProcessedInput РґР»СЏ reconciliation.
         foreach (var client in _clients.Values)
         {
             var snapshot = new WorldSnapshot
@@ -270,9 +364,6 @@ public class GameServer
         }
     }
 
-    /// <summary>
-    /// Метод для обновления позиции игрока на сервере.
-    /// </summary>
     public void UpdatePlayerPosition(ClientConnection client, float x, float y, int z, byte facing)
     {
         client.X = x;
@@ -281,9 +372,7 @@ public class GameServer
         client.Facing = facing;
     }
 
-    /// <summary>
-    /// Метод для отправки сообщения конкретному клиенту.
-    /// </summary>
+    /// <summary>РћС‚РїСЂР°РІРёС‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ РѕРґРЅРѕРјСѓ РєР»РёРµРЅС‚Сѓ.</summary>
     public void SendToClient<T>(ClientConnection client, T message) where T : struct, INetMessage
     {
         var writer = new NetDataWriter();
@@ -292,9 +381,174 @@ public class GameServer
         client.Peer.Send(writer, DeliveryMethod.ReliableOrdered);
     }
 
-    /// <summary>
-    /// Метод для широковещательной отправки сообщения всем клиентам, с возможностью фильтрации по предикату.
-    /// </summary>
+    /// <summary>РћС‚РїСЂР°РІРёС‚СЊ РєР»РёРµРЅС‚Сѓ РІСЃСЋ РєР°СЂС‚Сѓ (РїСЂРё РїРѕРґРєР»СЋС‡РµРЅРёРё; РїРѕР·Р¶Рµ вЂ” СЃС‚СЂРёРјРёРЅРі С‡Р°РЅРєРѕРІ РїРѕ PVS).</summary>
+    public void SendMap(ClientConnection client)
+    {
+        SendToClient(client, new MapDataMessage { Map = _map });
+    }
+
+    /// <summary>Р”РѕРіРЅР°С‚СЊ РЅРѕРІРѕРїСЂРёР±С‹РІС€РµРіРѕ РєР»РёРµРЅС‚Р° С‚РµРєСѓС‰РёРјРё РѕС‚РєСЂС‹С‚С‹РјРё РґРІРµСЂСЏРјРё (РєР°СЂС‚Р° СЃС‚Р°С‚РёС‡РЅР°, РґРІРµСЂРё вЂ” СЂР°РЅС‚Р°Р№Рј).</summary>
+    public void SendOpenDoors(ClientConnection client)
+    {
+        foreach (var key in _openDoors.Keys)
+        {
+            var tile = _map.GetTile(key.x, key.y, key.z);
+            SendToClient(client, new TileUpdate { X = key.x, Y = key.y, Z = key.z, Tile = tile });
+        }
+    }
+
+    /// <summary>РћС‚РєСЂС‹С‚СЊ Р·Р°РєСЂС‹С‚С‹Рµ РґРІРµСЂРё, РІ РєРѕС‚РѕСЂС‹Рµ РёРіСЂРѕРє СѓРїС‘СЂСЃСЏ РїРѕ РЅР°РїСЂР°РІР»РµРЅРёСЋ РІРІРѕРґР° (Р±Р°РјРї).</summary>
+    private void OpenBumpedDoors(ClientConnection client, IntentDirection dir, bool sprint)
+    {
+        MovementLogic.GetAxes(dir, out int dx, out int dy);
+        if (dx == 0 && dy == 0) return;
+
+        // РўРѕС‡РєР°, РєСѓРґР° РёРіСЂРѕРє РїС‹С‚Р°Р»СЃСЏ С€Р°РіРЅСѓС‚СЊ, + Р·Р°РїР°СЃ: РґРІРµСЂСЊ РІ AABB С‚РµР»Р° в†’ РѕС‚РєСЂС‹РІР°РµРј.
+        float step = MovementLogic.StepPerTick * (sprint ? MovementLogic.SprintMultiplier : 1f) + 0.05f;
+        float nx = client.X + dx * step;
+        float ny = client.Y + dy * step;
+        float r = MovementLogic.CollisionRadius;
+
+        int minX = (int)MathF.Floor(nx - r), maxX = (int)MathF.Floor(nx + r);
+        int minY = (int)MathF.Floor(ny - r), maxY = (int)MathF.Floor(ny + r);
+        for (int tx = minX; tx <= maxX; tx++)
+            for (int ty = minY; ty <= maxY; ty++)
+            {
+                var t = _map.GetTile(tx, ty, client.Z);
+                if (t.Openable && !t.Open)
+                    TryOpenDoor(tx, ty, client.Z);
+            }
+    }
+
+    /// <summary>РћС‚РєСЂС‹С‚СЊ РґРІРµСЂСЊ Рё РІР·РІРµСЃС‚Рё С‚Р°Р№РјРµСЂ Р°РІС‚РѕР·Р°РєСЂС‹С‚РёСЏ. РћС‚РєСЂС‹РІР°РµС‚СЃСЏ РІСЃСЏ СЃРІСЏР·РЅР°СЏ РіСЂСѓРїРїР°
+    /// РґРІРµСЂРЅС‹С… С‚Р°Р№Р»РѕРІ (2-С€РёСЂРѕРєР°СЏ РґРІРµСЂСЊ = РѕР±Рµ СЃС‚РІРѕСЂРєРё), РёРЅР°С‡Рµ РёРіСЂРѕРє СѓРїСЂС‘С‚СЃСЏ РІ Р·Р°РєСЂС‹С‚СѓСЋ СЃРѕСЃРµРґРЅСЋСЋ.</summary>
+    private void TryOpenDoor(int x, int y, int z)
+    {
+        if (!_map.GetTile(x, y, z).Openable) return; // РЅРµ РѕС‚РєСЂС‹РІР°РµРјС‹Р№ РѕР±СЉРµРєС‚
+
+        foreach (var (gx, gy) in DoorGroup(x, y, z))
+        {
+            var tile = _map.GetTile(gx, gy, z);
+            if (!tile.Open)
+            {
+                tile.Open = true;
+                _map.SetTile(gx, gy, z, in tile);
+                BroadcastTileUpdate(gx, gy, z, in tile);
+            }
+            _openDoors[(gx, gy, z)] = _currentTick + DoorOpenTicks; // (РїРµСЂРµ)РІР·РІРµСЃС‚Рё Р°РІС‚РѕР·Р°РєСЂС‹С‚РёРµ
+        }
+    }
+
+    /// <summary>РЎРІСЏР·РЅР°СЏ РіСЂСѓРїРїР° СЃРјРµР¶РЅС‹С… РґРІРµСЂРЅС‹С… С‚Р°Р№Р»РѕРІ (РїРѕ 4 РЅР°РїСЂР°РІР»РµРЅРёСЏРј) РЅР° СЌС‚Р°Р¶Рµ z.</summary>
+    private List<(int x, int y)> DoorGroup(int sx, int sy, int z)
+    {
+        var group = new List<(int, int)>();
+        var seen = new HashSet<(int, int)> { (sx, sy) };
+        var stack = new Stack<(int, int)>();
+        stack.Push((sx, sy));
+
+        while (stack.Count > 0)
+        {
+            var (cx, cy) = stack.Pop();
+            if (!_map.GetTile(cx, cy, z).Openable) continue;
+            group.Add((cx, cy));
+
+            DoorVisit(cx - 1, cy, z, seen, stack);
+            DoorVisit(cx + 1, cy, z, seen, stack);
+            DoorVisit(cx, cy - 1, z, seen, stack);
+            DoorVisit(cx, cy + 1, z, seen, stack);
+        }
+        return group;
+    }
+
+    private void DoorVisit(int x, int y, int z, HashSet<(int, int)> seen, Stack<(int, int)> stack)
+    {
+        if (seen.Add((x, y)) && _map.GetTile(x, y, z).Openable)
+            stack.Push((x, y));
+    }
+
+    /// <summary>РўРёРє РґРІРµСЂРµР№: Р·Р°РєСЂС‹С‚СЊ С‚Рµ, Сѓ РєРѕРіРѕ РёСЃС‚С‘Рє С‚Р°Р№РјРµСЂ Рё РІ РїСЂРѕС‘РјРµ РЅРёРєРѕРіРѕ РЅРµС‚.</summary>
+    private void UpdateDoors()
+    {
+        if (_openDoors.Count == 0) return;
+
+        _doorsToClose.Clear();
+        foreach (var kv in _openDoors)
+            if (_currentTick >= kv.Value) _doorsToClose.Add(kv.Key);
+
+        foreach (var key in _doorsToClose)
+        {
+            if (IsDoorBlocked(key.x, key.y, key.z))
+            {
+                _openDoors[key] = _currentTick + DoorOpenTicks; // РєС‚Рѕ-С‚Рѕ РІ РїСЂРѕС‘РјРµ вЂ” РїСЂРѕРґР»РµРІР°РµРј
+                continue;
+            }
+
+            var tile = _map.GetTile(key.x, key.y, key.z);
+            if (tile.Openable && tile.Open)
+            {
+                tile.Open = false;
+                _map.SetTile(key.x, key.y, key.z, in tile);
+                BroadcastTileUpdate(key.x, key.y, key.z, in tile);
+            }
+            _openDoors.Remove(key);
+        }
+    }
+
+    /// <summary>РЎС‚РѕРёС‚ Р»Рё РєС‚Рѕ-С‚Рѕ С‚РµР»РѕРј РІ РїСЂРѕС‘РјРµ РґРІРµСЂРё (РЅРµР»СЊР·СЏ Р·Р°РєСЂС‹РІР°С‚СЊ).</summary>
+    private bool IsDoorBlocked(int x, int y, int z)
+    {
+        float r = MovementLogic.CollisionRadius;
+        foreach (var c in _clients.Values)
+        {
+            if (c.Z != z) continue;
+            if (c.X + r > x && c.X - r < x + 1 && c.Y + r > y && c.Y - r < y + 1)
+                return true;
+        }
+        return false;
+    }
+
+    private void BroadcastTileUpdate(int x, int y, int z, in Tile tile)
+    {
+        BroadcastToAll(new TileUpdate { X = x, Y = y, Z = z, Tile = tile });
+    }
+
+    /// <summary>РћР±СЂР°Р±РѕС‚Р°С‚СЊ Р·Р°РїСЂРѕСЃС‹ В«РёСЃРїРѕР»СЊР·РѕРІР°С‚СЊВ» (E) РѕС‚ РєР»РёРµРЅС‚РѕРІ Р·Р° СЌС‚РѕС‚ С‚РёРє.</summary>
+    private void ProcessUses()
+    {
+        foreach (var client in _clients.Values)
+        {
+            if (!client.UseRequested) continue;
+            client.UseRequested = false;
+            TryUseTile(client);
+        }
+    }
+
+    /// <summary>РСЃРїРѕР»СЊР·РѕРІР°С‚СЊ С‚Р°Р№Р», РЅР° РєРѕС‚РѕСЂРѕРј СЃС‚РѕРёС‚ РёРіСЂРѕРє. РЎРµР№С‡Р°СЃ вЂ” Р»РµСЃС‚РЅРёС†С‹ (РїРµСЂРµС…РѕРґ РїРѕ Z).</summary>
+    private void TryUseTile(ClientConnection client)
+    {
+        int px = (int)MathF.Floor(client.X);
+        int py = (int)MathF.Floor(client.Y);
+        int fromZ = client.Z;
+        var tile = _map.GetTile(px, py, fromZ);
+
+        int targetZ;
+        if (tile.Special == TileSpecial.StairUp) targetZ = fromZ + 1;
+        else if (tile.Special == TileSpecial.StairDown) targetZ = fromZ - 1;
+        else return; // РЅРµ Р»РµСЃС‚РЅРёС†Р° вЂ” РЅРёС‡РµРіРѕ РЅРµ РґРµР»Р°РµРј
+
+        // РќР°Р·РЅР°С‡РµРЅРёРµ вЂ” РїР°СЂРЅР°СЏ Р»РµСЃС‚РЅРёС†Р° РІ С‚РѕР№ Р¶Рµ РєРѕР»РѕРЅРєРµ. РџРµСЂРµС…РѕРґРёРј, С‚РѕР»СЊРєРѕ РµСЃР»Рё С‚Р°Рј
+        // РјРѕР¶РЅРѕ СЃС‚РѕСЏС‚СЊ (СЂРµРґР°РєС‚РѕСЂ СЃС‚Р°РІРёС‚ РїР°СЂСѓ СЃ РїРѕР»РѕРј; Р·Р°С‰РёС‚Р° РѕС‚ В«Р»РµСЃС‚РЅРёС†С‹ РІ РЅРёРєСѓРґР°В»).
+        var dest = _map.GetTile(px, py, targetZ);
+        if (!dest.Walkable) return;
+
+        client.X = px + 0.5f;   // РІ С†РµРЅС‚СЂ РїР°СЂРЅРѕР№ Р»РµСЃС‚РЅРёС†С‹ РЅР° РґСЂСѓРіРѕРј СЌС‚Р°Р¶Рµ
+        client.Y = py + 0.5f;
+        client.Z = targetZ;
+        Console.WriteLine($"[Stairs] #{client.ConnectionId}: z{fromZ} -> z{targetZ} at ({px},{py})");
+    }
+
+    /// <summary>Р Р°Р·РѕСЃР»Р°С‚СЊ СЃРѕРѕР±С‰РµРЅРёРµ РІСЃРµРј РєР»РёРµРЅС‚Р°Рј (РѕРїС†РёРѕРЅР°Р»СЊРЅРѕ РїРѕ С„РёР»СЊС‚СЂСѓ).</summary>
     public void BroadcastToAll<T>(T message, Func<ClientConnection, bool>? predicate = null) where T : struct, INetMessage
     {
         var writer = new NetDataWriter();

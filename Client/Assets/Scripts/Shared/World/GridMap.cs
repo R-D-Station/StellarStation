@@ -3,30 +3,25 @@ using System.Collections.Generic;
 namespace Shared.World
 {
     /// <summary>
-    /// Карта мира: набор чанков, адресуемых по (chunkX, chunkY, z).
-    /// Пустые чанки отсутствуют — отсутствие чанка означает космос.
-    ///
-    /// Индексируется ЦЕЛЫМИ тайловыми координатами. Дробные позиции сущностей
-    /// сюда не передаются: вызывающий код сам берёт floor() перед запросом тайла
-    /// (жёсткое правило проекта). Z — целый этаж.
+    /// РљР°СЂС‚Р° РјРёСЂР°: РЅР°Р±РѕСЂ С‡Р°РЅРєРѕРІ РїРѕ (chunkX, chunkY, z); РѕС‚СЃСѓС‚СЃС‚РІРёРµ С‡Р°РЅРєР° = РєРѕСЃРјРѕСЃ.
+    /// РРЅРґРµРєСЃРёСЂСѓРµС‚СЃСЏ С†РµР»С‹РјРё С‚Р°Р№Р»РѕРІС‹РјРё РєРѕРѕСЂРґРёРЅР°С‚Р°РјРё (floor Р±РµСЂС‘С‚ РІС‹Р·С‹РІР°СЋС‰РёР№ РєРѕРґ).
     /// </summary>
     public sealed class GridMap
     {
-        // Ключ чанка упакован в long: cx | cy | z. Дешевле, чем кортеж/класс-ключ.
+        // РљР»СЋС‡ С‡Р°РЅРєР° СѓРїР°РєРѕРІР°РЅ РІ long: cx | cy | z.
         private readonly Dictionary<long, Chunk> _chunks = new();
 
         public IReadOnlyCollection<Chunk> Chunks => _chunks.Values;
 
         private static long Key(int chunkX, int chunkY, int z)
         {
-            // 21 бит на ось со знаком — диапазон ~±1млн чанков по каждой, с запасом.
+            // 21 Р±РёС‚ РЅР° РѕСЃСЊ СЃРѕ Р·РЅР°РєРѕРј вЂ” ~В±1РјР»РЅ С‡Р°РЅРєРѕРІ РїРѕ РєР°Р¶РґРѕР№.
             return ((long)(chunkX & 0x1FFFFF))
                  | ((long)(chunkY & 0x1FFFFF) << 21)
                  | ((long)(z & 0x1FFFFF) << 42);
         }
 
-        // Floor-деление: корректно для отрицательных тайловых координат,
-        // в отличие от обычного / (которое округляет к нулю).
+        // Floor-РґРµР»РµРЅРёРµ: РєРѕСЂСЂРµРєС‚РЅРѕ РґР»СЏ РѕС‚СЂРёС†Р°С‚РµР»СЊРЅС‹С… РєРѕРѕСЂРґРёРЅР°С‚ (РѕР±С‹С‡РЅРѕРµ / РѕРєСЂСѓРіР»СЏРµС‚ Рє РЅСѓР»СЋ).
         private static int FloorDiv(int a, int b)
         {
             int q = a / b;
@@ -56,18 +51,14 @@ namespace Shared.World
 
         public void AddChunk(Chunk chunk) => _chunks[Key(chunk.ChunkX, chunk.ChunkY, chunk.Z)] = chunk;
 
-        /// <summary>
-        /// Тайл по абсолютным тайловым координатам. Если чанка нет — космос
-        /// (Tile.Space), а не исключение: запросы за краем карты нормальны
-        /// (FOV, проверка соседей у границы).
-        /// </summary>
+        /// <summary>РўР°Р№Р» РїРѕ Р°Р±СЃРѕР»СЋС‚РЅС‹Рј РєРѕРѕСЂРґРёРЅР°С‚Р°Рј. РќРµС‚ С‡Р°РЅРєР° вЂ” Tile.Space (Р·Р°РїСЂРѕСЃС‹ Р·Р° РєСЂР°Р№ РЅРѕСЂРјР°Р»СЊРЅС‹).</summary>
         public Tile GetTile(int x, int y, int z)
         {
             var c = GetChunk(FloorDiv(x, Chunk.Size), FloorDiv(y, Chunk.Size), z);
             return c == null ? Tile.Space : c[Mod(x, Chunk.Size), Mod(y, Chunk.Size)];
         }
 
-        /// <summary>Записать тайл, создав чанк при необходимости (для редактора/загрузки).</summary>
+        /// <summary>Р—Р°РїРёСЃР°С‚СЊ С‚Р°Р№Р», СЃРѕР·РґР°РІ С‡Р°РЅРє РїСЂРё РЅРµРѕР±С…РѕРґРёРјРѕСЃС‚Рё (РґР»СЏ СЂРµРґР°РєС‚РѕСЂР°/Р·Р°РіСЂСѓР·РєРё).</summary>
         public void SetTile(int x, int y, int z, in Tile tile)
         {
             var c = GetOrCreateChunk(FloorDiv(x, Chunk.Size), FloorDiv(y, Chunk.Size), z);

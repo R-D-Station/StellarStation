@@ -1,24 +1,15 @@
 using UnityEngine;
 using Shared.Messages.Core;
-using Client.Gameplay.Entities; // нужен enum Entity.Direction
+using Shared.Simulation;
+using Client.Gameplay.Entities;
+using Client.Config;
 
 namespace Client.Net.View
 {
-    /// <summary>
-    /// Визуальное представление одной сетевой сущности. Позиция приходит из
-    /// снапшотов и интерполируется. Нет Rigidbody-движения, нет клиентского
-    /// FSM и нет ссылки на Player — это просто отображение состояния сервера.
-    ///
-    /// Маппинг осей: сервер мыслит плоскостью XY (Y = земля), Z = дискретный этаж.
-    /// Unity мыслит XZ (Y = высота). Перевод делается в одной точке — здесь.
-    /// 1 тайл = 1 юнит по X/Y сервера.
-    /// </summary>
+    /// <summary>Р’РёР·СѓР°Р» СЃСѓС‰РЅРѕСЃС‚Рё: РґРІРёР¶РµРЅРёРµ РїРѕ СЃРЅР°РїС€РѕС‚Р°Рј (РёРЅС‚РµСЂРїРѕР»СЏС†РёСЏ) РёР»Рё РїСЂРµРґСЃРєР°Р·Р°РЅРёСЋ (СЃРІРѕР№ РёРіСЂРѕРє).</summary>
     public class NetEntityView : MonoBehaviour
     {
         [SerializeField] private SpriteRenderer _spriteRenderer;
-
-        [Tooltip("Высота этажа в юнитах Unity по оси Y (высота). Для плоского теста = 0.")]
-        [SerializeField] private float FloorHeight = 0f;
 
         [Header("Direction Sprites")]
         [SerializeField] private Sprite _northSprite;
@@ -26,14 +17,18 @@ namespace Client.Net.View
         [SerializeField] private Sprite _eastSprite;
         [SerializeField] private Sprite _westSprite;
 
+        [Header("Move Sprites (РѕРїС†.: РїСѓСЃС‚Рѕ в†’ Р±РµСЂС‘С‚СЃСЏ Stand-РЅР°Р±РѕСЂ РІС‹С€Рµ)")]
+        [SerializeField] private Sprite _northMoveSprite;
+        [SerializeField] private Sprite _southMoveSprite;
+        [SerializeField] private Sprite _eastMoveSprite;
+        [SerializeField] private Sprite _westMoveSprite;
+
         private readonly SnapshotBuffer _buffer = new SnapshotBuffer();
         private byte _lastFacing = 255;
+        private byte _lastState = 255;
         private bool _isLocal;
 
-        // Сглаживание визуальной позиции своего игрока. Логическая (предсказанная)
-        // позиция точная, а спрайт догоняет её плавно — резкие коррекции
-        // reconciliation не видны как телепорт.
-        [Tooltip("Скорость, с которой спрайт догоняет предсказанную позицию. Больше = резче/точнее, меньше = плавнее.")]
+        [Tooltip("РЎРєРѕСЂРѕСЃС‚СЊ, СЃ РєРѕС‚РѕСЂРѕР№ Р»РѕРєР°Р»СЊРЅС‹Р№ РІРёР·СѓР°Р» РґРѕРіРѕРЅСЏРµС‚ РїСЂРµРґСЃРєР°Р·Р°РЅРЅСѓСЋ РїРѕР·РёС†РёСЋ. Р‘РѕР»СЊС€Рµ = СЂРµР·С‡Рµ.")]
         [SerializeField] private float _smoothing = 20f;
         private Vector3 _targetPos;
         private bool _hasTarget;
@@ -46,42 +41,31 @@ namespace Client.Net.View
             if (_spriteRenderer == null) _spriteRenderer = GetComponent<SpriteRenderer>();
         }
 
-        /// <summary>Принять новый снапшот сущности.</summary>
         public void Receive(in EntitySnapshot snap, float now)
         {
             _buffer.Push(now, snap);
         }
 
-        /// <summary>
-        /// Прямая установка позиции для СВОЕГО игрока (предсказание). В обход
-        /// интерполяционного буфера: свой игрок не интерполируется, он ведётся
-        /// предсказанием + reconciliation в NetworkRunner.
-        /// </summary>
-        public void SetPredicted(float x, float y, int z, byte facing, float floorHeight)
+        /// <summary>Р—Р°РґР°С‚СЊ РїСЂРµРґСЃРєР°Р·Р°РЅРЅСѓСЋ РїРѕР·РёС†РёСЋ Р»РѕРєР°Р»СЊРЅРѕРіРѕ РёРіСЂРѕРєР°; State вЂ” Р°РІС‚РѕСЂРёС‚РµС‚РЅС‹Р№ РёР· СЃРЅР°РїС€РѕС‚Р°.</summary>
+        public void SetPredicted(float x, float y, int z, byte facing, byte state)
         {
             _isLocal = true;
-            _targetPos = new Vector3(x, z * floorHeight, y);
+            _targetPos = new Vector3(x, z * RenderConfig.FloorHeight, y);
 
-            // Первый кадр — ставим сразу, без сглаживания (иначе спрайт приедет
-            // из (0,0,0)). Дальше визуал плавно догоняет цель в Update.
+            // РџРµСЂРІС‹Р№ РєР°РґСЂ вЂ” Р¶С‘СЃС‚РєРѕ, Р±РµР· РёРЅС‚РµСЂРїРѕР»СЏС†РёРё РёР· (0,0,0).
             if (!_hasTarget)
             {
                 transform.position = _targetPos;
                 _hasTarget = true;
             }
 
-            if (facing != _lastFacing)
-            {
-                _spriteRenderer.sprite = GetSprite((Entity.Direction)facing);
-                _lastFacing = facing;
-            }
+            ApplySprite(state, facing);
         }
 
         private void Update()
         {
             if (_isLocal)
             {
-                // Свой игрок: визуал плавно догоняет предсказанную цель.
                 if (_hasTarget)
                 {
                     float t = 1f - Mathf.Exp(-_smoothing * Time.deltaTime);
@@ -90,29 +74,35 @@ namespace Client.Net.View
                 return;
             }
 
-            if (!_buffer.HaveSample(Time.time, out float x, out float y, out float z, out byte facing))
+            if (!_buffer.HaveSample(Time.time, out float x, out float y, out float z, out byte facing, out byte state))
                 return;
 
-            // Сервер (X, Y=земля, Z=этаж) -> Unity (X, высота, Y_земля).
-            // Высота: пока Z дискретный, Unity-Y = z * FloorHeight (тест-режим 1:1).
-            transform.position = new Vector3(x, z * FloorHeight, y);
+            // РЎРµСЂРІРµСЂ (X, Y=РіР»СѓР±РёРЅР°, Z=СЌС‚Р°Р¶) -> Unity (X, РІС‹СЃРѕС‚Р°, Z=РіР»СѓР±РёРЅР°).
+            transform.position = new Vector3(x, z * RenderConfig.FloorHeight, y);
 
-            if (facing != _lastFacing)
-            {
-                _spriteRenderer.sprite = GetSprite((Entity.Direction)facing);
-                _lastFacing = facing;
-            }
+            ApplySprite(state, facing);
         }
 
-        private Sprite GetSprite(Entity.Direction dir)
+        /// <summary>РџРµСЂРµРІС‹Р±СЂР°С‚СЊ СЃРїСЂР°Р№С‚ РїСЂРё СЃРјРµРЅРµ State РР›Р Facing (РѕР±Р° РґРёСЃРєСЂРµС‚РЅС‹).</summary>
+        private void ApplySprite(byte state, byte facing)
         {
+            if (facing == _lastFacing && state == _lastState) return;
+            _spriteRenderer.sprite = GetSprite(state, (Entity.Direction)facing);
+            _lastFacing = facing;
+            _lastState = state;
+        }
+
+        private Sprite GetSprite(byte state, Entity.Direction dir)
+        {
+            // Move-РІР°СЂРёР°РЅС‚ РѕРїС†РёРѕРЅР°Р»РµРЅ: РїРѕРєР° РѕРЅ РЅРµ РЅР°Р·РЅР°С‡РµРЅ РІ РїСЂРµС„Р°Р±Рµ, Move РІС‹РіР»СЏРґРёС‚ РєР°Рє Stand.
+            bool moving = state == (byte)PlayerState.Move;
             switch (dir)
             {
-                case Entity.Direction.North: return _northSprite;
-                case Entity.Direction.South: return _southSprite;
-                case Entity.Direction.East: return _eastSprite;
-                case Entity.Direction.West: return _westSprite;
-                default: return _southSprite;
+                case Entity.Direction.North: return moving && _northMoveSprite != null ? _northMoveSprite : _northSprite;
+                case Entity.Direction.South: return moving && _southMoveSprite != null ? _southMoveSprite : _southSprite;
+                case Entity.Direction.East:  return moving && _eastMoveSprite != null ? _eastMoveSprite : _eastSprite;
+                case Entity.Direction.West:  return moving && _westMoveSprite != null ? _westMoveSprite : _westSprite;
+                default:                     return moving && _southMoveSprite != null ? _southMoveSprite : _southSprite;
             }
         }
     }
