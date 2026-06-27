@@ -20,8 +20,9 @@ namespace ServerTests.Shared.World
         public void ClosedDoor_IsNotWalkable()
         {
             var t = Tile.Floor();
-            t.DoorType = 1;
-            t.DoorOpen = false;
+            t.StructureType = 1;
+            t.Openable = true;
+            t.Open = false;
             Assert.False(t.Walkable);
         }
 
@@ -29,8 +30,9 @@ namespace ServerTests.Shared.World
         public void OpenDoor_IsWalkable()
         {
             var t = Tile.Floor();
-            t.DoorType = 1;
-            t.DoorOpen = true;
+            t.StructureType = 1;
+            t.Openable = true;
+            t.Open = true;
             Assert.True(t.Walkable);
         }
 
@@ -39,8 +41,9 @@ namespace ServerTests.Shared.World
         {
             // Дверь без пола под ней: стоять негде даже когда открыта.
             var t = Tile.Space;
-            t.DoorType = 1;
-            t.DoorOpen = true;
+            t.StructureType = 1;
+            t.Openable = true;
+            t.Open = true;
             Assert.False(t.Walkable);
         }
     }

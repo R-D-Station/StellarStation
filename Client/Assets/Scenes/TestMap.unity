@@ -475,6 +475,15 @@ MonoBehaviour:
   _floorSortingOrder: 0
   _wallSortingOrder: 10
   _floorSeamScale: 1.02
+  _floorFadeMaterial: {fileID: 2100000, guid: bf5a4111a65052f46805ff0c528ff9ac, type: 2}
+  _drawCeilingReveal: 1
+  _ceilingSemiTransparent: 0
+  _ceilingXrayAlpha: 0.4
+  _fadeRingOpacity:
+  - 1
+  - 0.9
+  - 0.75
+  - 0.6
   _testMapPath: E:\VS projects\StellarStation\Client\Assets\Map\station.smap
 --- !u!1 &1961795966
 GameObject:

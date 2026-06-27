@@ -27,17 +27,22 @@ MonoBehaviour:
     Support: 0
     BlocksVerticalSight: 0
     SealsVertical: 0
-  _walls:
+  _structures:
   - Type: 1
     DisplayName: "\u0421\u0442\u0435\u043D\u0430"
+    Category: 0
     Sprite: {fileID: 0}
     Prefab: {fileID: 8192654253773008610, guid: b2cee704cd8084e419d91e3aa6d78784, type: 3}
+    OpenSprite: {fileID: 0}
+    OpenPrefab: {fileID: 0}
     BlocksHorizontalSight: 1
     SealsHorizontal: 1
-  _doors:
-  - Type: 1
+  - Type: 2
     DisplayName: Airlock
-    ClosedSprite: {fileID: 0}
-    ClosedPrefab: {fileID: 8192654253773008610, guid: 33e46f13f07430d4c853bb3320880d9c, type: 3}
+    Category: 1
+    Sprite: {fileID: 0}
+    Prefab: {fileID: 8192654253773008610, guid: 33e46f13f07430d4c853bb3320880d9c, type: 3}
     OpenSprite: {fileID: 0}
     OpenPrefab: {fileID: 8192654253773008610, guid: b18890f44c7e22c45bf648c4112dd609, type: 3}
+    BlocksHorizontalSight: 1
+    SealsHorizontal: 1

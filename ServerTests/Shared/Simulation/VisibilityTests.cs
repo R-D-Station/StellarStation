@@ -37,7 +37,7 @@ namespace ServerTests.Shared.Simulation
         public void Wall_BlocksPointBehind()
         {
             var map = new GridMap();
-            map.SetTile(2, 0, 0, new Tile { WallType = 1, Support = true, BlocksHorizontalSight = true });
+            map.SetTile(2, 0, 0, new Tile { StructureType = 1, Support = true, BlocksHorizontalSight = true });
 
             var poly = Visibility.ComputePolygon(map, 0.5f, 0.5f, 0, 10f);
 
@@ -51,9 +51,10 @@ namespace ServerTests.Shared.Simulation
         {
             var map = new GridMap();
             var door = Tile.Floor();
-            door.DoorType = 1;
+            door.StructureType = 1;
+            door.Openable = true;
             door.BlocksHorizontalSight = true; // как у закрытой двери
-            door.DoorOpen = true;              // но открыта
+            door.Open = true;                  // но открыта
             map.SetTile(2, 0, 0, door);
 
             var poly = Visibility.ComputePolygon(map, 0.5f, 0.5f, 0, 10f);

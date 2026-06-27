@@ -91,7 +91,7 @@ namespace Shared.Simulation
         {
             if (map == null) return false;
             var t = map.GetTile(x, y, z);
-            return t.BlocksHorizontalSight && !(t.DoorType != 0 && t.DoorOpen);
+            return t.BlocksHorizontalSight && !(t.Openable && t.Open);
         }
 
         // Ближайшее пересечение луча (origin, угол) с сегментами; не дальше radius.

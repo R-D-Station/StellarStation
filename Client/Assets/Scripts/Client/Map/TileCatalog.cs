@@ -29,51 +29,44 @@ namespace Client.Map
             public bool SealsVertical = true;
         }
 
-        /// <summary>Вид стены: id == значение <see cref="Tile.WallType"/> (0 = стены нет).</summary>
-        [Serializable]
-        public sealed class WallKind
-        {
-            [Tooltip("Значение Tile.WallType. 0 = стены нет.")]
-            public byte Type = 1;
-            public string DisplayName = "Wall";
+        /// <summary>Категория настенного объекта. Дверь/люк — открываемые.</summary>
+        public enum StructureCategory : byte { Wall = 0, Door = 1, Hatch = 2, Window = 3 }
 
+        /// <summary>Вид настенного объекта (стена/дверь/люк/окно): id == значение <see cref="Tile.StructureType"/>.</summary>
+        [Serializable]
+        public sealed class StructureKind
+        {
+            [Tooltip("Значение Tile.StructureType. 0 = объекта нет.")]
+            public byte Type = 1;
+            public string DisplayName = "Structure";
+            [Tooltip("Стена/дверь/люк/окно. Дверь и люк — открываемые (Openable).")]
+            public StructureCategory Category = StructureCategory.Wall;
+
+            [Header("Визуал (у открываемых — закрытый/открытый)")]
             public Sprite Sprite;
             public GameObject Prefab;
-
-            [Header("Флаги симуляции, которые даёт эта стена")]
-            [Tooltip("Держит обзор по горизонтали (FOV на этаже).")]
-            public bool BlocksHorizontalSight = true;
-            [Tooltip("Не пропускает газ по горизонтали (герметичность). Стекло = true, но видно сквозь.")]
-            public bool SealsHorizontal = true;
-        }
-
-        /// <summary>Вид двери: id == значение <see cref="Tile.DoorType"/> (0 = двери нет).</summary>
-        [Serializable]
-        public sealed class DoorKind
-        {
-            [Tooltip("Значение Tile.DoorType. 0 = двери нет.")]
-            public byte Type = 1;
-            public string DisplayName = "Door";
-
-            [Header("Визуал: закрыта / открыта")]
-            public Sprite ClosedSprite;
-            public GameObject ClosedPrefab;
             public Sprite OpenSprite;
             public GameObject OpenPrefab;
+
+            [Header("Флаги симуляции")]
+            [Tooltip("Держит обзор по горизонтали (в закрытом виде). Стекло/окно = false.")]
+            public bool BlocksHorizontalSight = true;
+            [Tooltip("Не пропускает газ по горизонтали (герметичность).")]
+            public bool SealsHorizontal = true;
+
+            /// <summary>Открываемый объект (дверь/люк), а не глухой (стена/окно).</summary>
+            public bool Openable => Category == StructureCategory.Door || Category == StructureCategory.Hatch;
         }
 
         [SerializeField] private FloorKind[] _floors = Array.Empty<FloorKind>();
-        [SerializeField] private WallKind[] _walls = Array.Empty<WallKind>();
-        [SerializeField] private DoorKind[] _doors = Array.Empty<DoorKind>();
+        [SerializeField] private StructureKind[] _structures = Array.Empty<StructureKind>();
 
         public IReadOnlyList<FloorKind> Floors => _floors;
-        public IReadOnlyList<WallKind> Walls => _walls;
-        public IReadOnlyList<DoorKind> Doors => _doors;
+        public IReadOnlyList<StructureKind> Structures => _structures;
 
         // Ленивые индексы id → вид (сброс через InvalidateCache).
         private Dictionary<byte, FloorKind> _floorById;
-        private Dictionary<byte, WallKind> _wallById;
-        private Dictionary<byte, DoorKind> _doorById;
+        private Dictionary<byte, StructureKind> _structureById;
 
         public FloorKind GetFloor(byte type)
         {
@@ -81,51 +74,39 @@ namespace Client.Map
             return _floorById.TryGetValue(type, out var f) ? f : null;
         }
 
-        public WallKind GetWall(byte type)
+        public StructureKind GetStructure(byte type)
         {
             EnsureMaps();
-            return _wallById.TryGetValue(type, out var w) ? w : null;
-        }
-
-        public DoorKind GetDoor(byte type)
-        {
-            EnsureMaps();
-            return _doorById.TryGetValue(type, out var d) ? d : null;
+            return _structureById.TryGetValue(type, out var s) ? s : null;
         }
 
         private void EnsureMaps()
         {
             if (_floorById != null) return;
             _floorById = new Dictionary<byte, FloorKind>();
-            _wallById = new Dictionary<byte, WallKind>();
-            _doorById = new Dictionary<byte, DoorKind>();
+            _structureById = new Dictionary<byte, StructureKind>();
             foreach (var f in _floors)
                 if (f != null && f.Type != 0) _floorById[f.Type] = f;
-            foreach (var w in _walls)
-                if (w != null && w.Type != 0) _wallById[w.Type] = w;
-            foreach (var d in _doors)
-                if (d != null && d.Type != 0) _doorById[d.Type] = d;
+            foreach (var s in _structures)
+                if (s != null && s.Type != 0) _structureById[s.Type] = s;
         }
 
         /// <summary>Сбросить кэш id→вид (после правки списков в инспекторе/редакторе).</summary>
         public void InvalidateCache()
         {
             _floorById = null;
-            _wallById = null;
-            _doorById = null;
+            _structureById = null;
         }
 
-        /// <summary>Собрать Shared-тайл из id слоёв, выводя флаги симуляции (0 = слоя нет).</summary>
-        public Tile Compose(byte floorType, byte wallType, byte doorType = 0)
+        /// <summary>Собрать Shared-тайл из id пола и настенного объекта, выводя флаги симуляции (0 = слоя нет).</summary>
+        public Tile Compose(byte floorType, byte structureType)
         {
             var t = Tile.Space;
             t.FloorType = floorType;
-            t.WallType = wallType;
 
             if (floorType != 0)
             {
-                // Любой пол держит вес; «дыра» — это FloorType==0.
-                t.Support = true;
+                t.Support = true; // любой пол держит вес; «дыра» — это FloorType==0
                 var f = GetFloor(floorType);
                 if (f != null)
                 {
@@ -134,28 +115,29 @@ namespace Client.Map
                 }
             }
 
-            if (wallType != 0)
+            if (structureType != 0)
             {
-                var w = GetWall(wallType);
-                // Сплошная стена: держит обзор/газ по горизонтали и блокирует вертикаль.
-                t.Support = true;
-                t.BlocksVerticalSight = true;
-                t.SealsVertical = true;
-                if (w != null)
+                t.StructureType = structureType;
+                t.Support = true;  // у стены/в проёме стоять можно; стена непроходима через Walkable
+                t.Open = false;    // открываемые стартуют закрытыми (открывает сервер)
+                var s = GetStructure(structureType);
+                if (s != null)
                 {
-                    t.BlocksHorizontalSight |= w.BlocksHorizontalSight;
-                    t.SealsHorizontal |= w.SealsHorizontal;
+                    t.Openable = s.Openable;
+                    t.BlocksHorizontalSight = s.BlocksHorizontalSight;
+                    t.SealsHorizontal = s.SealsHorizontal;
                 }
-            }
-
-            if (doorType != 0)
-            {
-                // Дверь стартует закрытой (открывает сервер); закрытая держит обзор/газ как стена.
-                t.DoorType = doorType;
-                t.DoorOpen = false;
-                t.Support = true;          // в проёме можно стоять
-                t.BlocksHorizontalSight = true;
-                t.SealsHorizontal = true;
+                else
+                {
+                    t.BlocksHorizontalSight = true;
+                    t.SealsHorizontal = true;
+                }
+                if (!t.Openable)
+                {
+                    // Глухой объект (стена/окно) держит вертикаль и герметичен по Z.
+                    t.BlocksVerticalSight = true;
+                    t.SealsVertical = true;
+                }
             }
 
             return t;

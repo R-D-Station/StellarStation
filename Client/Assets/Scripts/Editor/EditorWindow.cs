@@ -6,229 +6,337 @@ using Client.Map;
 
 namespace Client.Editor.MapTools
 {
-    /// <summary>Окно-редактор тайловой карты (Tools → Station → Map Editor): правит один Z-слой через Shared.GridMap.</summary>
+    /// <summary>
+    /// Окно-редактор тайловой карты (Tools → Station → Map Editor): правит один Z-слой
+    /// через Shared.GridMap. UI разложен на зоны: Файл · Слой и вид · Кисть · Сетка.
+    /// </summary>
     public class MapEditorWindow : EditorWindow
     {
         // Пресеты палитры (fallback без каталога).
         private enum Brush { Floor, Wall, Grate, Space }
 
+        // ---- Данные карты ----
         private GridMap _map;
-        private string _currentPath;     // путь последнего save/load, для быстрого пересохранения
+        private string _currentPath;     // путь последнего save/load
         private bool _dirty;             // есть несохранённые правки
 
+        // ---- Слой / вид ----
         private int _activeZ;
-        private Brush _brush = Brush.Floor;
+        private const int CellSize = 24;
+        private int _viewTilesX = 32;
+        private int _viewTilesY = 32;
+        private int _originX;
+        private int _originY;
+        private Vector2 _scroll;
 
-        // Каталог тайлов (id ↔ спрайт/флаги); персист по GUID ассета.
+        // ---- Каталог тайлов ----
         private TileCatalog _catalog;
         private const string CatalogPrefKey = "Station.MapEditor.CatalogGuid";
 
-        // Выбор кисти при каталоге (0 = слой не трогаем).
+        // ---- Кисть ----
+        // Настенный объект (стена/дверь/люк/окно) — один слот StructureType.
         private byte _selFloor = 1;
-        private byte _selWall = 0;
-        private byte _selDoor = 0;
+        private byte _selStructure = 0;
         private TileSpecial _selSpecial = TileSpecial.None;
+        private Brush _brush = Brush.Floor;   // только когда каталога нет
 
-        private GUIStyle _markerStyle; // ленивый стиль для буквы маркера в клетке
+        // Потолок: при включённом флаге краска кладёт пол на z+1 над клеткой (закрытая комната).
+        private bool _withCeiling;
+        private byte _ceilingFloor;          // 0 = «как пол кисти», иначе явный вид пола
 
-        // Advanced: ручное редактирование полей тайла вместо пресета.
-        private bool _advanced;
+        // ---- Эксперт: ручные флаги тайла ----
+        private bool _showExpert;
+        private bool _advanced;          // true → красить ручными флагами, игнорируя палитру
         private byte _advFloorType = 1;
-        private byte _advWallType;
+        private byte _advStructureType;
+        private bool _advOpenable;
         private bool _advSupport = true;
         private bool _advHBlock;
         private bool _advVBlock = true;
         private bool _advSealH;
         private bool _advSealV = true;
 
-        // Вид сетки.
-        private const int CellSize = 24;
-        private int _viewTilesX = 32;    // сколько тайлов рисуем по ширине от origin
-        private int _viewTilesY = 32;
-        private int _originX;            // тайловые координаты левого-нижнего угла вида
-        private int _originY;
-
-        private Vector2 _scroll;
+        // ---- Рантайм UI ----
+        private bool _painting;
+        private bool _hasHover;
+        private int _hoverX, _hoverY;
+        private GUIStyle _markerStyle;
+        private static readonly Color WallSel = Color.cyan;
+        private static readonly Color DoorSel = new Color(0.35f, 0.65f, 0.95f);
 
         [MenuItem("Tools/Station/Map Editor")]
         public static void Open()
         {
             var w = GetWindow<MapEditorWindow>("Map Editor");
-            w.minSize = new Vector2(520, 480);
+            w.minSize = new Vector2(560, 520);
         }
 
         private void OnEnable()
         {
             if (_map == null) _map = new GridMap();
+            wantsMouseMove = true;            // чтобы инфо клетки под курсором обновлялось живо
             LoadCatalogFromPrefs();
         }
 
         private void OnGUI()
         {
-            DrawToolbar();
-            EditorGUILayout.Space(4);
-            DrawPalette();
-            EditorGUILayout.Space(6);
+            DrawFileToolbar();
+            DrawLayerAndView();
+            DrawBrushSection();
             DrawGrid();
+
+            if (Event.current.type == EventType.MouseMove) Repaint();
         }
 
-        // ---- Toolbar: файл, каталог, активный Z, размеры вида --------------
+        // ===== Зона 1: Файл ==================================================
 
-        private void DrawToolbar()
+        private void DrawFileToolbar()
         {
             using (new EditorGUILayout.HorizontalScope(EditorStyles.toolbar))
             {
-                if (GUILayout.Button("New", EditorStyles.toolbarButton, GUILayout.Width(50)))
-                    NewMap();
-                if (GUILayout.Button("Load", EditorStyles.toolbarButton, GUILayout.Width(50)))
-                    Load();
-                if (GUILayout.Button("Save", EditorStyles.toolbarButton, GUILayout.Width(50)))
-                    Save(saveAs: false);
-                if (GUILayout.Button("Save As", EditorStyles.toolbarButton, GUILayout.Width(64)))
-                    Save(saveAs: true);
+                if (GUILayout.Button("New", EditorStyles.toolbarButton, GUILayout.Width(46))) NewMap();
+                if (GUILayout.Button("Load", EditorStyles.toolbarButton, GUILayout.Width(46))) Load();
+                if (GUILayout.Button("Save", EditorStyles.toolbarButton, GUILayout.Width(46))) Save(saveAs: false);
+                if (GUILayout.Button("Save As", EditorStyles.toolbarButton, GUILayout.Width(60))) Save(saveAs: true);
+
+                GUILayout.Space(8);
+                string name = string.IsNullOrEmpty(_currentPath)
+                    ? "<без файла>"
+                    : System.IO.Path.GetFileName(_currentPath);
+                GUILayout.Label((_dirty ? "● " : "") + name, EditorStyles.miniLabel);
 
                 GUILayout.FlexibleSpace();
-
-                GUILayout.Label(_dirty ? "● unsaved" : "saved", GUILayout.Width(70));
+                GUILayout.Label(_dirty ? "unsaved" : "saved", EditorStyles.miniLabel, GUILayout.Width(56));
             }
+        }
 
-            using (new EditorGUILayout.HorizontalScope())
+        // ===== Зона 2: Слой и вид ===========================================
+
+        private void DrawLayerAndView()
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                EditorGUILayout.LabelField("Catalog", GUILayout.Width(54));
-                EditorGUI.BeginChangeCheck();
-                _catalog = (TileCatalog)EditorGUILayout.ObjectField(_catalog, typeof(TileCatalog), false, GUILayout.Width(180));
-                if (EditorGUI.EndChangeCheck())
+                // Этаж, который правим — отдельная строка, не теряется среди параметров вида.
+                using (new EditorGUILayout.HorizontalScope())
                 {
-                    SaveCatalogToPrefs();
-                    _catalog?.InvalidateCache();
+                    EditorGUILayout.LabelField("Этаж Z", GUILayout.Width(56));
+                    if (GUILayout.Button("−", GUILayout.Width(24))) _activeZ--;
+                    _activeZ = EditorGUILayout.IntField(_activeZ, GUILayout.Width(52));
+                    if (GUILayout.Button("+", GUILayout.Width(24))) _activeZ++;
+                    GUILayout.FlexibleSpace();
+                }
+
+                // Окно просмотра — отдельная строка.
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField("Вид", GUILayout.Width(56));
+                    EditorGUILayout.LabelField("origin", GUILayout.Width(40));
+                    _originX = EditorGUILayout.IntField(_originX, GUILayout.Width(46));
+                    _originY = EditorGUILayout.IntField(_originY, GUILayout.Width(46));
+                    GUILayout.Space(10);
+                    EditorGUILayout.LabelField("size", GUILayout.Width(30));
+                    _viewTilesX = Mathf.Clamp(EditorGUILayout.IntField(_viewTilesX, GUILayout.Width(44)), 1, 128);
+                    _viewTilesY = Mathf.Clamp(EditorGUILayout.IntField(_viewTilesY, GUILayout.Width(44)), 1, 128);
+                    GUILayout.Space(10);
+                    if (GUILayout.Button("к 0,0", GUILayout.Width(50))) { _originX = 0; _originY = 0; }
+                    GUILayout.FlexibleSpace();
+                }
+            }
+        }
+
+        // ===== Зона 3: Кисть =================================================
+
+        private void DrawBrushSection()
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
+            {
+                EditorGUILayout.LabelField("Кисть", EditorStyles.boldLabel);
+
+                // Каталог — источник палитры. Лежит здесь, т.к. определяет, чем красим.
+                using (new EditorGUILayout.HorizontalScope())
+                {
+                    EditorGUILayout.LabelField("Каталог", GUILayout.Width(56));
+                    EditorGUI.BeginChangeCheck();
+                    _catalog = (TileCatalog)EditorGUILayout.ObjectField(_catalog, typeof(TileCatalog), false);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        SaveCatalogToPrefs();
+                        _catalog?.InvalidateCache();
+                    }
                 }
                 if (_catalog == null)
-                    GUILayout.Label("— нет: цвета+хардкод кисти", EditorStyles.miniLabel);
-            }
+                    EditorGUILayout.LabelField("нет каталога — пресеты + цвета", EditorStyles.miniLabel);
 
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUILayout.LabelField("Floor (Z)", GUILayout.Width(60));
-                if (GUILayout.Button("−", GUILayout.Width(24))) _activeZ--;
-                _activeZ = EditorGUILayout.IntField(_activeZ, GUILayout.Width(50));
-                if (GUILayout.Button("+", GUILayout.Width(24))) _activeZ++;
+                EditorGUILayout.Space(2);
 
-                GUILayout.Space(16);
-                EditorGUILayout.LabelField("View", GUILayout.Width(34));
-                EditorGUILayout.LabelField("origin", GUILayout.Width(42));
-                _originX = EditorGUILayout.IntField(_originX, GUILayout.Width(44));
-                _originY = EditorGUILayout.IntField(_originY, GUILayout.Width(44));
-                EditorGUILayout.LabelField("size", GUILayout.Width(30));
-                _viewTilesX = Mathf.Clamp(EditorGUILayout.IntField(_viewTilesX, GUILayout.Width(40)), 1, 128);
-                _viewTilesY = Mathf.Clamp(EditorGUILayout.IntField(_viewTilesY, GUILayout.Width(40)), 1, 128);
-            }
-        }
-
-        // ---- Palette: из каталога (или fallback-пресеты) + advanced ---------
-
-        private void DrawPalette()
-        {
-            if (_catalog != null && !_advanced)
-                DrawCatalogPalette();
-            else
-                DrawPresetPalette();
-
-            DrawSpecialRow();
-
-            _advanced = EditorGUILayout.Foldout(_advanced, "Advanced (edit tile flags)", true);
-            if (_advanced)
-            {
-                using (new EditorGUI.IndentLevelScope())
+                if (_catalog != null)
                 {
-                    _advFloorType = (byte)EditorGUILayout.IntSlider("Floor Type", _advFloorType, 0, 255);
-                    _advWallType = (byte)EditorGUILayout.IntSlider("Wall Type", _advWallType, 0, 255);
-                    _advSupport = EditorGUILayout.Toggle("Support (stand)", _advSupport);
-                    _advHBlock = EditorGUILayout.Toggle("Blocks Horizontal Sight (wall)", _advHBlock);
-                    _advVBlock = EditorGUILayout.Toggle("Blocks Vertical Sight (floor/ceiling)", _advVBlock);
-                    _advSealH = EditorGUILayout.Toggle("Seals Horizontal (gas)", _advSealH);
-                    _advSealV = EditorGUILayout.Toggle("Seals Vertical (gas)", _advSealV);
-                    EditorGUILayout.HelpBox(
-                        "Advanced paints this exact tile. Presets/catalog above ignore these fields.",
-                        MessageType.None);
+                    DrawFloorRow();
+                    DrawStructureRow();
                 }
+                else
+                {
+                    DrawPresetRow();
+                }
+
+                DrawSpecialRow();
+                DrawCeilingRow();
+
+                EditorGUILayout.Space(2);
+                DrawBrushPreview();
+
+                EditorGUILayout.Space(2);
+                DrawExpert();
             }
         }
 
-        // Палитра по каталогу: ряд полов + ряд стен, у каждого «None». ЛКМ кладёт
-        // выбранную комбинацию (Compose), ПКМ стирает в космос.
-        private void DrawCatalogPalette()
+        // Пол: «Нет» + виды из каталога.
+        private void DrawFloorRow()
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Floor", GUILayout.Width(40));
-                DrawSelectButton("None", _selFloor == 0, () => _selFloor = 0);
+                EditorGUILayout.LabelField("Пол", GUILayout.Width(56));
+                DrawSelectButton("Нет", _selFloor == 0, () => _selFloor = 0, null);
                 foreach (var f in _catalog.Floors)
                 {
-                    if (f == null) continue;
+                    if (f == null || f.Type == 0) continue;
                     byte id = f.Type;
-                    DrawSelectButton(string.IsNullOrEmpty(f.DisplayName) ? id.ToString() : f.DisplayName,
-                        _selFloor == id, () => _selFloor = id);
-                }
-            }
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUILayout.LabelField("Wall", GUILayout.Width(40));
-                DrawSelectButton("None", _selWall == 0, () => _selWall = 0);
-                foreach (var w in _catalog.Walls)
-                {
-                    if (w == null) continue;
-                    byte id = w.Type;
-                    DrawSelectButton(string.IsNullOrEmpty(w.DisplayName) ? id.ToString() : w.DisplayName,
-                        _selWall == id, () => _selWall = id);
-                }
-            }
-
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUILayout.LabelField("Door", GUILayout.Width(40));
-                DrawSelectButton("None", _selDoor == 0, () => _selDoor = 0);
-                foreach (var d in _catalog.Doors)
-                {
-                    if (d == null) continue;
-                    byte id = d.Type;
-                    DrawSelectButton(string.IsNullOrEmpty(d.DisplayName) ? id.ToString() : d.DisplayName,
-                        _selDoor == id, () => _selDoor = id);
+                    DrawSelectButton(KindLabel(f.DisplayName, id), _selFloor == id, () => _selFloor = id, null);
                 }
             }
         }
 
-        private void DrawPresetPalette()
+        // Настенный объект: стена/дверь/люк/окно — один слот. Открываемые подкрашены иначе.
+        private void DrawStructureRow()
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Brush", GUILayout.Width(40));
-                DrawBrushButton(Brush.Floor, "Floor");
-                DrawBrushButton(Brush.Wall, "Wall");
-                DrawBrushButton(Brush.Grate, "Grate");
-                DrawBrushButton(Brush.Space, "Space");
+                EditorGUILayout.LabelField("Объект", GUILayout.Width(56));
+                DrawSelectButton("Нет", _selStructure == 0, () => _selStructure = 0, null);
+                foreach (var s in _catalog.Structures)
+                {
+                    if (s == null || s.Type == 0) continue;
+                    byte id = s.Type;
+                    DrawSelectButton(KindLabel(s.DisplayName, id), _selStructure == id,
+                        () => _selStructure = id, s.Openable ? DoorSel : WallSel);
+                }
             }
         }
 
-        // Спец-маркер тайла (поверх пола/стены). Пока — точка спавна.
+        // Fallback без каталога: хардкод-кисти.
+        private void DrawPresetRow()
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Кисть", GUILayout.Width(56));
+                DrawBrushButton(Brush.Floor, "Пол");
+                DrawBrushButton(Brush.Wall, "Стена");
+                DrawBrushButton(Brush.Grate, "Решётка");
+                DrawBrushButton(Brush.Space, "Космос");
+            }
+        }
+
+        // Спец-маркер тайла (поверх пола/структуры).
         private void DrawSpecialRow()
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Special", GUILayout.Width(54));
-                DrawSelectButton("None", _selSpecial == TileSpecial.None, () => _selSpecial = TileSpecial.None);
-                DrawSelectButton("Spawn", _selSpecial == TileSpecial.Spawn, () => _selSpecial = TileSpecial.Spawn);
-                DrawSelectButton("Stair Up", _selSpecial == TileSpecial.StairUp, () => _selSpecial = TileSpecial.StairUp);
-                DrawSelectButton("Stair Down", _selSpecial == TileSpecial.StairDown, () => _selSpecial = TileSpecial.StairDown);
+                EditorGUILayout.LabelField("Спец", GUILayout.Width(56));
+                DrawSelectButton("Нет", _selSpecial == TileSpecial.None, () => _selSpecial = TileSpecial.None, null);
+                DrawSelectButton("Спавн", _selSpecial == TileSpecial.Spawn, () => _selSpecial = TileSpecial.Spawn, null);
+                DrawSelectButton("Лестница ▲", _selSpecial == TileSpecial.StairUp, () => _selSpecial = TileSpecial.StairUp, null);
+                DrawSelectButton("Лестница ▼", _selSpecial == TileSpecial.StairDown, () => _selSpecial = TileSpecial.StairDown, null);
             }
             if (_selSpecial == TileSpecial.StairUp || _selSpecial == TileSpecial.StairDown)
-                EditorGUILayout.HelpBox("Лестница: парная авто-ставится на соседнем этаже (та же клетка). Выбери ещё и Floor.", MessageType.None);
+                EditorGUILayout.HelpBox(
+                    "Лестница: парная авто-ставится на соседнем этаже (та же клетка). Выбери ещё и Пол.",
+                    MessageType.None);
         }
 
-        private void DrawSelectButton(string label, bool on, System.Action onClick)
+        // Потолок: краска дополнительно кладёт пол на z+1. «как кисть» — берёт пол текущей кисти,
+        // иначе явный вид. Без каталога потолок всегда = пол кисти.
+        private void DrawCeilingRow()
+        {
+            _withCeiling = EditorGUILayout.ToggleLeft(
+                "Рисовать с потолком (пол на z+1 над клеткой)", _withCeiling);
+            if (!_withCeiling) return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                if (_catalog != null)
+                {
+                    using (new EditorGUILayout.HorizontalScope())
+                    {
+                        EditorGUILayout.LabelField("Потолок", GUILayout.Width(56));
+                        DrawSelectButton("как кисть", _ceilingFloor == 0, () => _ceilingFloor = 0, null);
+                        foreach (var f in _catalog.Floors)
+                        {
+                            if (f == null || f.Type == 0) continue;
+                            byte id = f.Type;
+                            DrawSelectButton(KindLabel(f.DisplayName, id), _ceilingFloor == id, () => _ceilingFloor = id, null);
+                        }
+                    }
+                }
+                else
+                {
+                    EditorGUILayout.LabelField("Потолок = пол кисти (нет каталога).", EditorStyles.miniLabel);
+                }
+                EditorGUILayout.LabelField("ПКМ-стирание также убирает потолок над клеткой.", EditorStyles.miniLabel);
+            }
+        }
+
+        // Превью собранной кисти + текстовая сводка.
+        private void DrawBrushPreview()
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Превью", GUILayout.Width(56));
+                Rect box = GUILayoutUtility.GetRect(CellSize + 8, CellSize + 8,
+                    GUILayout.Width(CellSize + 8), GUILayout.Height(CellSize + 8));
+                var cell = new Rect(box.x + 4, box.y + 4, CellSize, CellSize);
+                Tile t = MakeTile();
+                DrawCell(cell, in t);
+                DrawBorder(cell, new Color(0f, 0f, 0f, 0.45f), 1);
+
+                GUILayout.Space(8);
+                EditorGUILayout.LabelField(TileSummary(in t), EditorStyles.miniLabel);
+            }
+        }
+
+        // Эксперт: ручные флаги под свёрнутой секцией (раньше — открытая панель Advanced).
+        private void DrawExpert()
+        {
+            _showExpert = EditorGUILayout.Foldout(_showExpert, "Эксперт: ручные флаги", true);
+            if (!_showExpert) return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                _advanced = EditorGUILayout.ToggleLeft(
+                    "Красить ручными флагами (игнорировать палитру пола/структуры)", _advanced);
+
+                using (new EditorGUI.DisabledScope(!_advanced))
+                {
+                    _advFloorType = (byte)EditorGUILayout.IntSlider("Floor Type", _advFloorType, 0, 255);
+                    _advStructureType = (byte)EditorGUILayout.IntSlider("Structure Type", _advStructureType, 0, 255);
+                    _advOpenable = EditorGUILayout.Toggle("Openable (door/hatch)", _advOpenable);
+                    _advSupport = EditorGUILayout.Toggle("Support (stand)", _advSupport);
+                    _advHBlock = EditorGUILayout.Toggle("Blocks Horizontal Sight", _advHBlock);
+                    _advVBlock = EditorGUILayout.Toggle("Blocks Vertical Sight", _advVBlock);
+                    _advSealH = EditorGUILayout.Toggle("Seals Horizontal (gas)", _advSealH);
+                    _advSealV = EditorGUILayout.Toggle("Seals Vertical (gas)", _advSealV);
+                }
+
+                EditorGUILayout.HelpBox(
+                    "Ручной режим красит ровно эти поля. Пол/структура из палитры не накладываются; " +
+                    "Special — накладывается.",
+                    MessageType.None);
+            }
+        }
+
+        private void DrawSelectButton(string label, bool on, System.Action onClick, Color? onColor)
         {
             var prev = GUI.backgroundColor;
-            GUI.backgroundColor = on ? Color.cyan : prev;
+            if (on) GUI.backgroundColor = onColor ?? Color.cyan;
             if (GUILayout.Button(label, GUILayout.Height(22)))
                 onClick();
             GUI.backgroundColor = prev;
@@ -238,7 +346,7 @@ namespace Client.Editor.MapTools
         {
             bool on = _brush == b && !_advanced;
             var prev = GUI.backgroundColor;
-            GUI.backgroundColor = on ? Color.cyan : prev;
+            if (on) GUI.backgroundColor = Color.cyan;
             if (GUILayout.Button(label, GUILayout.Height(22)))
             {
                 _brush = b;
@@ -247,20 +355,48 @@ namespace Client.Editor.MapTools
             GUI.backgroundColor = prev;
         }
 
-        // ---- Grid: отрисовка + кисть ---------------------------------------
+        private static string KindLabel(string displayName, byte id)
+            => string.IsNullOrEmpty(displayName) ? id.ToString() : displayName;
+
+        private static string TileSummary(in Tile t)
+        {
+            string spec = t.Special == TileSpecial.None ? "—" : t.Special.ToString();
+            string pass = t.Walkable ? "проходим" : "стоп";
+            string obj = t.StructureType == 0 ? "—" : (t.Openable ? $"{t.StructureType}(откр)" : t.StructureType.ToString());
+            return $"пол {t.FloorType} · объект {obj} · спец {spec} · {pass}";
+        }
+
+        // ===== Зона 4: Сетка =================================================
 
         private void DrawGrid()
         {
+            // Статус-строка: координаты и состав клетки под курсором.
+            using (new EditorGUILayout.HorizontalScope(EditorStyles.helpBox))
+            {
+                if (_hasHover)
+                {
+                    Tile h = _map.GetTile(_hoverX, _hoverY, _activeZ);
+                    EditorGUILayout.LabelField(
+                        $"Курсор ({_hoverX}, {_hoverY}) z{_activeZ}   ·   {TileSummary(in h)}",
+                        EditorStyles.miniLabel);
+                }
+                else
+                {
+                    EditorGUILayout.LabelField(
+                        "ЛКМ — красить · ПКМ — стереть · наведи на клетку для инфо",
+                        EditorStyles.miniLabel);
+                }
+            }
+
             float w = _viewTilesX * CellSize;
-            float h = _viewTilesY * CellSize;
+            float h2 = _viewTilesY * CellSize;
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll);
 
-            // Резервируем прямоугольник под всю сетку.
-            Rect area = GUILayoutUtility.GetRect(w, h, GUILayout.ExpandWidth(false), GUILayout.ExpandHeight(false));
-
+            Rect area = GUILayoutUtility.GetRect(w, h2, GUILayout.ExpandWidth(false), GUILayout.ExpandHeight(false));
             Event e = Event.current;
 
+            _hasHover = false;
             for (int ty = 0; ty < _viewTilesY; ty++)
             {
                 for (int tx = 0; tx < _viewTilesX; tx++)
@@ -268,14 +404,20 @@ namespace Client.Editor.MapTools
                     int worldX = _originX + tx;
                     int worldY = _originY + ty;
 
-                    // Экран: Y растёт вниз, тайловый Y — вверх. Инвертируем, чтобы
-                    // север был сверху (как игрок видит мир).
+                    // Экран: Y вниз, тайловый Y — вверх. Инвертируем, чтобы север был сверху.
                     float px = area.x + tx * CellSize;
                     float py = area.y + (_viewTilesY - 1 - ty) * CellSize;
                     var cell = new Rect(px, py, CellSize, CellSize);
 
                     Tile t = _map.GetTile(worldX, worldY, _activeZ);
                     DrawCell(cell, in t);
+
+                    if (cell.Contains(e.mousePosition))
+                    {
+                        _hasHover = true;
+                        _hoverX = worldX;
+                        _hoverY = worldY;
+                    }
 
                     HandleCellInput(e, cell, worldX, worldY);
                 }
@@ -288,8 +430,6 @@ namespace Client.Editor.MapTools
             if (e.type == EventType.MouseUp)
                 _painting = false;
         }
-
-        private bool _painting;
 
         private void HandleCellInput(Event e, Rect cell, int worldX, int worldY)
         {
@@ -307,12 +447,14 @@ namespace Client.Editor.MapTools
                 Tile painted = MakeTile();
                 _map.SetTile(worldX, worldY, _activeZ, painted);
                 AutoPairStair(worldX, worldY, _activeZ, painted.Special);
+                if (_withCeiling) PaintCeiling(worldX, worldY, _activeZ, in painted);
                 MarkDirty();
                 e.Use();
             }
             else if (e.button == 1)
             {
                 _map.SetTile(worldX, worldY, _activeZ, Tile.Space);
+                if (_withCeiling) _map.SetTile(worldX, worldY, _activeZ + 1, Tile.Space);
                 MarkDirty();
                 e.Use();
             }
@@ -326,7 +468,8 @@ namespace Client.Editor.MapTools
                 t = new Tile
                 {
                     FloorType = _advFloorType,
-                    WallType = _advWallType,
+                    StructureType = _advStructureType,
+                    Openable = _advOpenable,
                     Support = _advSupport,
                     BlocksHorizontalSight = _advHBlock,
                     BlocksVerticalSight = _advVBlock,
@@ -336,25 +479,21 @@ namespace Client.Editor.MapTools
             }
             else if (_catalog != null)
             {
-                // С каталогом флаги выводятся из выбранных видов пола/стены/двери.
-                t = _catalog.Compose(_selFloor, _selWall, _selDoor);
+                // Флаги выводятся из выбранных видов пола и настенного объекта.
+                t = _catalog.Compose(_selFloor, _selStructure);
             }
             else
             {
-                // Fallback-пресеты (без каталога).
                 switch (_brush)
                 {
                     case Brush.Floor:
-                        // Сплошной пол.
-                        t = new Tile { FloorType = 1, WallType = 0, Support = true, BlocksHorizontalSight = false, BlocksVerticalSight = true, SealsHorizontal = false, SealsVertical = true };
+                        t = new Tile { FloorType = 1, Support = true, BlocksVerticalSight = true, SealsVertical = true };
                         break;
                     case Brush.Wall:
-                        // Стена на полу.
-                        t = new Tile { FloorType = 1, WallType = 1, Support = true, BlocksHorizontalSight = true, BlocksVerticalSight = true, SealsHorizontal = true, SealsVertical = true };
+                        t = new Tile { FloorType = 1, StructureType = 1, Support = true, BlocksHorizontalSight = true, BlocksVerticalSight = true, SealsHorizontal = true, SealsVertical = true };
                         break;
                     case Brush.Grate:
-                        // Решётка: видно и газ проходит вниз.
-                        t = new Tile { FloorType = 2, WallType = 0, Support = true, BlocksHorizontalSight = false, BlocksVerticalSight = false, SealsHorizontal = false, SealsVertical = false };
+                        t = new Tile { FloorType = 2, Support = true };
                         break;
                     default:
                         t = Tile.Space;
@@ -362,7 +501,7 @@ namespace Client.Editor.MapTools
                 }
             }
 
-            t.Special = _selSpecial; // спец-маркер (напр. точка спавна) поверх выбранного тайла
+            t.Special = _selSpecial;   // спец-маркер поверх выбранного тайла
             return t;
         }
 
@@ -380,39 +519,50 @@ namespace Client.Editor.MapTools
         {
             byte floor = _selFloor != 0 ? _selFloor : (byte)1;
             Tile t = _catalog != null
-                ? _catalog.Compose(floor, 0, 0)
-                : new Tile { FloorType = floor, WallType = 0, Support = true, BlocksHorizontalSight = false, BlocksVerticalSight = true, SealsHorizontal = false, SealsVertical = true };
+                ? _catalog.Compose(floor, 0)
+                : new Tile { FloorType = floor, Support = true, BlocksVerticalSight = true, SealsVertical = true };
             t.Special = special;
             _map.SetTile(x, y, z, t);
+        }
+
+        // Потолок этажа z — это пол этажа z+1. Кладём выбранный (или «как кисть») пол сверху,
+        // чтобы комната была закрыта. Лестницам потолок не ставим — им нужен вертикальный проём.
+        private void PaintCeiling(int x, int y, int z, in Tile painted)
+        {
+            if (painted.Special == TileSpecial.StairUp || painted.Special == TileSpecial.StairDown)
+                return;
+
+            byte cf = _ceilingFloor != 0 ? _ceilingFloor : painted.FloorType;
+            if (cf == 0) return;   // в кисти нет пола и явный потолок не выбран — класть нечего
+
+            Tile ceiling = _catalog != null
+                ? _catalog.Compose(cf, 0)
+                : new Tile { FloorType = cf, Support = true, BlocksVerticalSight = true, SealsVertical = true };
+            _map.SetTile(x, y, z + 1, ceiling);
         }
 
         // ---- Рисование клетки ----------------------------------------------
 
         private void DrawCell(Rect r, in Tile t)
         {
-            // База — цвет от данных (читается, даже если спрайт не задан).
             EditorGUI.DrawRect(r, CellColor(in t));
 
-            bool wallDrawn = false;
-            bool doorDrawn = false;
+            bool structDrawn = false;
             if (_catalog != null)
             {
                 if (t.FloorType != 0)
                     DrawSprite(r, _catalog.GetFloor(t.FloorType)?.Sprite);
-                if (t.WallType != 0)
-                    wallDrawn = DrawSprite(r, _catalog.GetWall(t.WallType)?.Sprite);
-                if (t.DoorType != 0)
-                    doorDrawn = DrawSprite(r, _catalog.GetDoor(t.DoorType)?.ClosedSprite);
+                if (t.StructureType != 0)
+                {
+                    var s = _catalog.GetStructure(t.StructureType);
+                    var sprite = (s != null && s.Openable && t.Open) ? s.OpenSprite : s?.Sprite;
+                    structDrawn = DrawSprite(r, sprite);
+                }
             }
 
-            // Стена без спрайта — толстая тёмная рамка, чтобы читалась поверх цвета.
-            if (t.WallType != 0 && !wallDrawn)
-                DrawBorder(r, new Color(0.12f, 0.12f, 0.14f), 3);
-            // Дверь без спрайта — синяя рамка, чтобы было видно разметку.
-            if (t.DoorType != 0 && !doorDrawn)
-                DrawBorder(r, new Color(0.20f, 0.50f, 0.70f), 3);
+            if (t.StructureType != 0 && !structDrawn)
+                DrawBorder(r, t.Openable ? new Color(0.20f, 0.50f, 0.70f) : new Color(0.12f, 0.12f, 0.14f), 3);
 
-            // Спец-маркеры (спавн/лестницы/лифт) — подсветка с буквой.
             if (t.Special != TileSpecial.None)
                 DrawSpecialMarker(r, t.Special);
         }
@@ -440,19 +590,15 @@ namespace Client.Editor.MapTools
 
         private static Color CellColor(in Tile t)
         {
-            if (t.WallType != 0)
-                return new Color(0.30f, 0.30f, 0.34f);          // стена — серая
-
+            if (t.StructureType != 0 && !t.Openable)
+                return new Color(0.30f, 0.30f, 0.34f);          // стена/окно — серая
             if (!t.Support)
-                return new Color(0.05f, 0.05f, 0.07f);          // дырка/космос — тёмный провал
-
+                return new Color(0.05f, 0.05f, 0.07f);          // дырка/космос — провал
             if (!t.BlocksVerticalSight)
                 return new Color(0.20f, 0.45f, 0.55f);          // решётка/стекло — сине-зелёная
-
             return new Color(0.55f, 0.52f, 0.45f);              // сплошной пол — песочный
         }
 
-        // Рисует спрайт в клетке (учитывает атлас через texCoords). true, если нарисовал.
         private static bool DrawSprite(Rect r, Sprite s)
         {
             if (s == null || s.texture == null) return false;

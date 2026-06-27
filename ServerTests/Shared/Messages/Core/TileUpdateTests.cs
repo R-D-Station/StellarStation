@@ -9,8 +9,9 @@ namespace ServerTests.Shared.Messages.Core
         public void SerializeDeserialize_RoundTrips()
         {
             var tile = Tile.Floor();
-            tile.DoorType = 2;
-            tile.DoorOpen = true;
+            tile.StructureType = 2;
+            tile.Openable = true;
+            tile.Open = true;
 
             var msg = new TileUpdate { X = -3, Y = 12, Z = 1, Tile = tile };
 
@@ -21,8 +22,8 @@ namespace ServerTests.Shared.Messages.Core
             Assert.Equal(-3, back.X);
             Assert.Equal(12, back.Y);
             Assert.Equal(1, back.Z);
-            Assert.Equal((byte)2, back.Tile.DoorType);
-            Assert.True(back.Tile.DoorOpen);
+            Assert.Equal((byte)2, back.Tile.StructureType);
+            Assert.True(back.Tile.Open);
             Assert.True(back.Tile.Walkable);
         }
     }

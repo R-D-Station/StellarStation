@@ -406,7 +406,7 @@ public class GameServer
             for (int ty = minY; ty <= maxY; ty++)
             {
                 var t = _map.GetTile(tx, ty, client.Z);
-                if (t.DoorType != 0 && !t.DoorOpen)
+                if (t.Openable && !t.Open)
                     TryOpenDoor(tx, ty, client.Z);
             }
     }
@@ -415,14 +415,14 @@ public class GameServer
     /// дверных тайлов (2-широкая дверь = обе створки), иначе игрок упрётся в закрытую соседнюю.</summary>
     private void TryOpenDoor(int x, int y, int z)
     {
-        if (_map.GetTile(x, y, z).DoorType == 0) return; // не дверь
+        if (!_map.GetTile(x, y, z).Openable) return; // не открываемый объект
 
         foreach (var (gx, gy) in DoorGroup(x, y, z))
         {
             var tile = _map.GetTile(gx, gy, z);
-            if (!tile.DoorOpen)
+            if (!tile.Open)
             {
-                tile.DoorOpen = true;
+                tile.Open = true;
                 _map.SetTile(gx, gy, z, in tile);
                 BroadcastTileUpdate(gx, gy, z, in tile);
             }
@@ -441,7 +441,7 @@ public class GameServer
         while (stack.Count > 0)
         {
             var (cx, cy) = stack.Pop();
-            if (_map.GetTile(cx, cy, z).DoorType == 0) continue;
+            if (!_map.GetTile(cx, cy, z).Openable) continue;
             group.Add((cx, cy));
 
             DoorVisit(cx - 1, cy, z, seen, stack);
@@ -454,7 +454,7 @@ public class GameServer
 
     private void DoorVisit(int x, int y, int z, HashSet<(int, int)> seen, Stack<(int, int)> stack)
     {
-        if (seen.Add((x, y)) && _map.GetTile(x, y, z).DoorType != 0)
+        if (seen.Add((x, y)) && _map.GetTile(x, y, z).Openable)
             stack.Push((x, y));
     }
 
@@ -476,9 +476,9 @@ public class GameServer
             }
 
             var tile = _map.GetTile(key.x, key.y, key.z);
-            if (tile.DoorType != 0 && tile.DoorOpen)
+            if (tile.Openable && tile.Open)
             {
-                tile.DoorOpen = false;
+                tile.Open = false;
                 _map.SetTile(key.x, key.y, key.z, in tile);
                 BroadcastTileUpdate(key.x, key.y, key.z, in tile);
             }

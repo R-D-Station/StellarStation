@@ -6,12 +6,12 @@ namespace Shared.World
     /// <summary>
     /// Бинарная сериализация GridMap (один формат для файла .smap и сетевой передачи).
     /// Формат (little-endian): [magic 'SMAP'][version uint16][chunkCount int32],
-    /// далее на чанк: [cx][cy][z] + TileCount тайлов (по 5 байт, см. WriteTile).
+    /// далее на чанк: [cx][cy][z] + TileCount тайлов (v3 — по 4 байта, см. WriteTile).
     /// </summary>
     public static class MapSerializer
     {
         public const int Magic = ('S') | ('M' << 8) | ('A' << 16) | ('P' << 24);
-        public const ushort Version = 2;
+        public const ushort Version = 3;
 
         // Битовые флаги тайла (упакованы в один байт).
         private const byte FlagSupport = 1 << 0;
@@ -19,7 +19,8 @@ namespace Shared.World
         private const byte FlagVertBlock = 1 << 2;
         private const byte FlagSealHoriz = 1 << 3;
         private const byte FlagSealVert = 1 << 4;
-        private const byte FlagDoorOpen = 1 << 5;
+        private const byte FlagOpen = 1 << 5;
+        private const byte FlagOpenable = 1 << 6;
 
         public static void Write(Stream stream, GridMap map)
         {
@@ -74,12 +75,11 @@ namespace Shared.World
             return map;
         }
 
-        /// <summary>Записать один тайл в текущем формате (v2). Публично — переиспользует TileUpdate.</summary>
+        /// <summary>Записать один тайл в текущем формате (v3). Публично — переиспользует TileUpdate.</summary>
         public static void WriteTile(BinaryWriter w, in Tile t)
         {
             w.Write(t.FloorType);
-            w.Write(t.WallType);
-            w.Write(t.DoorType);
+            w.Write(t.StructureType);
             w.Write((byte)t.Special);
 
             byte flags = 0;
@@ -88,36 +88,59 @@ namespace Shared.World
             if (t.BlocksVerticalSight) flags |= FlagVertBlock;
             if (t.SealsHorizontal) flags |= FlagSealHoriz;
             if (t.SealsVertical) flags |= FlagSealVert;
-            if (t.DoorOpen) flags |= FlagDoorOpen;
+            if (t.Open) flags |= FlagOpen;
+            if (t.Openable) flags |= FlagOpenable;
             w.Write(flags);
         }
 
-        /// <summary>Прочитать один тайл текущего формата (v2).</summary>
+        /// <summary>Прочитать один тайл текущего формата (v3).</summary>
         public static Tile ReadTile(BinaryReader r) => ReadTile(r, Version);
 
-        /// <summary>Прочитать тайл с учётом версии файла (v1 — без двери/спец-тайла).</summary>
+        /// <summary>Прочитать тайл с учётом версии файла. Старые v1/v2 (слои стены+двери)
+        /// сводятся к StructureType: дверь → id 2 (открываемая), стена → свой id.</summary>
         public static Tile ReadTile(BinaryReader r, ushort version)
         {
-            var t = new Tile
-            {
-                FloorType = r.ReadByte(),
-                WallType = r.ReadByte()
-            };
+            var t = new Tile { FloorType = r.ReadByte() };
 
-            if (version >= 2)
+            if (version >= 3)
             {
-                t.DoorType = r.ReadByte();
+                t.StructureType = r.ReadByte();
                 t.Special = (TileSpecial)r.ReadByte();
+                byte flags = r.ReadByte();
+                t.Support = (flags & FlagSupport) != 0;
+                t.BlocksHorizontalSight = (flags & FlagHorizBlock) != 0;
+                t.BlocksVerticalSight = (flags & FlagVertBlock) != 0;
+                t.SealsHorizontal = (flags & FlagSealHoriz) != 0;
+                t.SealsVertical = (flags & FlagSealVert) != 0;
+                t.Open = (flags & FlagOpen) != 0;
+                t.Openable = (flags & FlagOpenable) != 0;
+                return t;
             }
 
-            byte flags = r.ReadByte();
-            t.Support = (flags & FlagSupport) != 0;
-            t.BlocksHorizontalSight = (flags & FlagHorizBlock) != 0;
-            t.BlocksVerticalSight = (flags & FlagVertBlock) != 0;
-            t.SealsHorizontal = (flags & FlagSealHoriz) != 0;
-            t.SealsVertical = (flags & FlagSealVert) != 0;
+            // Legacy v1/v2: FloorType, WallType, [DoorType, Special], flags.
+            byte wall = r.ReadByte();
+            byte door = 0;
             if (version >= 2)
-                t.DoorOpen = (flags & FlagDoorOpen) != 0;
+            {
+                door = r.ReadByte();
+                t.Special = (TileSpecial)r.ReadByte();
+            }
+            byte lflags = r.ReadByte();
+            t.Support = (lflags & FlagSupport) != 0;
+            t.BlocksHorizontalSight = (lflags & FlagHorizBlock) != 0;
+            t.BlocksVerticalSight = (lflags & FlagVertBlock) != 0;
+            t.SealsHorizontal = (lflags & FlagSealHoriz) != 0;
+            t.SealsVertical = (lflags & FlagSealVert) != 0;
+            if (door != 0)
+            {
+                t.StructureType = 2;
+                t.Openable = true;
+                t.Open = version >= 2 && (lflags & FlagOpen) != 0;
+            }
+            else if (wall != 0)
+            {
+                t.StructureType = wall;
+            }
             return t;
         }
 

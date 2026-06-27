@@ -12,8 +12,9 @@ namespace ServerTests.Shared.World
             var map = new GridMap();
 
             var door = Tile.Floor();
-            door.DoorType = 3;
-            door.DoorOpen = true;
+            door.StructureType = 3;
+            door.Openable = true;
+            door.Open = true;
             map.SetTile(5, 7, 1, door);
 
             var stair = Tile.Floor();
@@ -26,8 +27,8 @@ namespace ServerTests.Shared.World
             var loaded = MapSerializer.Read(ms);
 
             var d = loaded.GetTile(5, 7, 1);
-            Assert.Equal((byte)3, d.DoorType);
-            Assert.True(d.DoorOpen);
+            Assert.Equal((byte)3, d.StructureType);
+            Assert.True(d.Open);
             Assert.True(d.Walkable);
 
             var s = loaded.GetTile(2, 2, 0);
@@ -67,7 +68,7 @@ namespace ServerTests.Shared.World
             var t = map.GetTile(0, 0, 0);
             Assert.Equal((byte)1, t.FloorType);
             Assert.True(t.Support);
-            Assert.Equal((byte)0, t.DoorType);          // двери нет — дефолт
+            Assert.Equal((byte)0, t.StructureType);     // объекта нет — дефолт
             Assert.Equal(TileSpecial.None, t.Special);  // спец-тайла нет — дефолт
             Assert.True(t.Walkable);
         }

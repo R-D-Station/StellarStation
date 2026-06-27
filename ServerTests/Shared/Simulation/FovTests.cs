@@ -15,7 +15,7 @@ namespace ServerTests.Shared.Simulation
         }
 
         private static Tile Wall()
-            => new Tile { WallType = 1, Support = true, BlocksHorizontalSight = true };
+            => new Tile { StructureType = 1, Support = true, BlocksHorizontalSight = true };
 
         [Fact]
         public void Origin_AlwaysVisible()
@@ -48,7 +48,8 @@ namespace ServerTests.Shared.Simulation
             var map = FloorRegion(6);
 
             var door = Tile.Floor();
-            door.DoorType = 1;
+            door.StructureType = 1;
+            door.Openable = true;
             door.BlocksHorizontalSight = true; // как кладёт редактор для закрытой двери
             map.SetTile(2, 0, 0, door);
 
@@ -60,7 +61,7 @@ namespace ServerTests.Shared.Simulation
             Assert.Equal(0f, light[3 + r, 0 + r]);
 
             // Открыто — видно сквозь.
-            door.DoorOpen = true;
+            door.Open = true;
             map.SetTile(2, 0, 0, door);
             Fov.Compute(map, 0, 0, 0, r, light);
             Assert.True(light[3 + r, 0 + r] > 0f);

@@ -85,12 +85,12 @@ namespace Shared.Simulation
             }
         }
 
-        /// <summary>Держит ли тайл обзор. Открытая дверь — НЕ держит (сквозь неё видно).</summary>
+        /// <summary>Держит ли тайл обзор. Открытый объект (дверь/люк) — НЕ держит (видно сквозь).</summary>
         private static bool BlocksSight(GridMap map, int x, int y, int z)
         {
             if (map == null) return false;
             var t = map.GetTile(x, y, z);
-            return t.BlocksHorizontalSight && !(t.DoorType != 0 && t.DoorOpen);
+            return t.BlocksHorizontalSight && !(t.Openable && t.Open);
         }
     }
 }

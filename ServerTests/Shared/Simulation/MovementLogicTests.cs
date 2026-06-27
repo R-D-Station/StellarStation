@@ -6,7 +6,7 @@ namespace ServerTests.Shared.Simulation
 {
     public class MovementLogicTests
     {
-        private static Tile Wall() => new Tile { WallType = 1, Support = true };
+        private static Tile Wall() => new Tile { StructureType = 1, Support = true };
 
         [Fact]
         public void SlipsThroughOneWideGap_WhenOffCenter()
@@ -50,7 +50,8 @@ namespace ServerTests.Shared.Simulation
             map.SetTile(0, 2, 0, Tile.Floor());
 
             var door = Tile.Floor();
-            door.DoorType = 1; // закрытая дверь между (0,0) и (0,2)
+            door.StructureType = 1; // закрытая дверь между (0,0) и (0,2)
+            door.Openable = true;
             map.SetTile(0, 1, 0, door);
 
             // Закрыто — не проходим.
@@ -60,7 +61,7 @@ namespace ServerTests.Shared.Simulation
             Assert.True(y < 1.0f, $"закрытая дверь должна блокировать, y={y}");
 
             // Открыли — проходим.
-            door.DoorOpen = true;
+            door.Open = true;
             map.SetTile(0, 1, 0, door);
             for (int i = 0; i < 30; i++)
                 MovementLogic.Apply(map, 0, ref x, ref y, IntentDirection.North, false);
