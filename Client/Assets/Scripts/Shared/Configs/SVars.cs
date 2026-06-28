@@ -12,33 +12,28 @@ public class SVars
     public static SVars Instance { get; private set; } = new SVars();
 
     public string Ip = "0.0.0.0";
-
     public int Port = 7777;
-
     public int MaxPlayers = 100;
-
+    public int SoftMaxPlayers = 80;
     public int TickRate = 30;
-
     public string ConnectionKey = string.Empty;
-
-    /// <summary>Путь к файлу карты (.smap), грузится на старте. Нет файла — сервер поднимется без коллизии.</summary>
     public string MapPath = "station.smap";
 
-    /// <summary>Загрузка настроек из JSON. Любая ошибка → дефолты, сервер не падает.</summary>
+    // Настройки авторизации
+    public string AuthApiUrl = "http://127.0.0.1:45607/api/v2/auth/check_player";
+    public int AuthTimeoutSeconds = 5;
+    public int AuthSessionLifetimeSeconds = 7;
+
+    /// <summary>
+    /// Загрузка настроек из JSON.
+    /// </summary>
     public static void LoadFromJson(string path)
     {
         try
         {
             string json = File.ReadAllText(path);
-
             var loaded = JsonConvert.DeserializeObject<SVars>(json);
             Instance = loaded ?? new SVars();
-
-            if (Instance == null)
-            {
-                Console.WriteLine($"Failed to deserialize JSON from path: {path}");
-                Instance = new SVars();
-            }
         }
         catch (Exception e)
         {

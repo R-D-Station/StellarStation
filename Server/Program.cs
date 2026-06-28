@@ -8,7 +8,9 @@ using Server.Services;
 
 namespace Server
 {
-    /// <summary>Точка входа сервера: загрузка конфига и карты, запуск и graceful shutdown.</summary>
+    /// <summary>
+    /// Точка входа сервера: загрузка конфига и карты, запуск и graceful shutdown.
+    /// </summary>
     class Program
     {
         private static GameServer? _server;
@@ -24,7 +26,7 @@ namespace Server
 
             try
             {
-                Console.WriteLine("=== Stellar Station v.0 ===");
+                Console.WriteLine("=== Stellar Station version 0.1.0 ===");
                 Console.WriteLine("Loading configuration...");
 
                 SVars.LoadFromJson("config.json");
@@ -38,7 +40,9 @@ namespace Server
 
                 Console.WriteLine($"Server started on {config.Ip}:{config.Port}");
                 Console.WriteLine($"Max players: {config.MaxPlayers}");
+                Console.WriteLine($"Soft max players: {config.SoftMaxPlayers}");
                 Console.WriteLine($"Tick rate: {config.TickRate} TPS");
+                Console.WriteLine($"Auth API: {config.AuthApiUrl}");
                 Console.WriteLine("Press Ctrl+C to stop");
 
                 while (_isRunning)
@@ -50,7 +54,6 @@ namespace Server
             {
                 Console.WriteLine($"[FATAL] Failed to start server: {ex.Message}");
                 Console.WriteLine($"Stack trace: {ex.StackTrace}");
-
                 Console.WriteLine("Press any key to exit...");
                 Console.ReadKey();
             }

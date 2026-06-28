@@ -6,14 +6,19 @@ using Shared.Messages;
 using Shared.Messages.Core;
 using Shared.Simulation;
 using Shared.World;
+using Shared.Messages.Auth;
+using Server.Services;
 
 namespace Server.Network;
 
-/// <summary>Сетевой сервер: приём подключений, game-loop, симуляция и рассылка снапшотов мира.</summary>
+/// <summary>
+/// Сетевой сервер: приём подключений, game-loop, симуляция и рассылка снапшотов мира.
+/// </summary>
 public class GameServer
 {
     private readonly SVars _config;
     private readonly GridMap _map;
+    private readonly AuthService _authService;
     private readonly float _spawnX;
     private readonly float _spawnY;
     private readonly int _spawnZ;
@@ -22,6 +27,7 @@ public class GameServer
     private readonly Dictionary<(int x, int y, int z), uint> _openDoors = new();
     private readonly List<(int x, int y, int z)> _doorsToClose = new();
     private uint DoorOpenTicks => (uint)(_config.TickRate * 5); // автозакрытие ~5 секунд
+
     private NetManager? _server;
     private readonly Dictionary<NetPeer, ClientConnection> _clients;
     private readonly ConcurrentQueue<Action> _mainThreadActions;
@@ -45,9 +51,14 @@ public class GameServer
         _config = config;
         _map = map ?? new GridMap(); // пустая карта = мир без коллизии
         (_spawnX, _spawnY, _spawnZ) = FindSpawn(_map);
-        Console.WriteLine($"[Map] Spawn at ({_spawnX}, {_spawnY}, z{_spawnZ})");
         _clients = new Dictionary<NetPeer, ClientConnection>();
         _mainThreadActions = new ConcurrentQueue<Action>();
+
+        _authService = new AuthService(config);
+        _authService.OnAuthSuccess += OnAuthSuccess;
+        _authService.OnAuthFailed += OnAuthFailed;
+
+        Console.WriteLine($"[Map] Spawn at ({_spawnX}, {_spawnY}, z{_spawnZ})");
     }
 
     public void Start()
@@ -64,6 +75,7 @@ public class GameServer
 
         Console.WriteLine($"[Server] Started on port {_config.Port}");
         Console.WriteLine($"[Server] Max players: {_config.MaxPlayers}");
+        Console.WriteLine($"[Server] Soft max players: {_config.SoftMaxPlayers}");
         Console.WriteLine($"[Server] Tick rate: {_config.TickRate} TPS");
 
         Task.Run(GameLoop);
@@ -120,42 +132,240 @@ public class GameServer
         }
     }
 
-    /// <summary>Приём сообщения от клиента: разбор типа и постановка в очередь обработки.</summary>
+    /// <summary>Приём сообщения от клиента.</summary>
     private void OnNetworkReceive(NetPeer peer, NetDataReader reader, byte channel, DeliveryMethod method)
     {
         try
         {
-            if (!_clients.TryGetValue(peer, out var client))
-                return;
-
-            client.LastActivity = DateTime.UtcNow;
-
+            bool isAuthorized = _clients.ContainsKey(peer);
             MessageType type = (MessageType)reader.GetUShort();
             byte[] data = reader.GetBytesWithLength();
 
+            // Если клиент не авторизован - разрешаем только AuthRequest
+            if (!isAuthorized && type != MessageType.AuthRequest)
+            {
+                Console.WriteLine($"[Server] Unauthorized message from {peer.Address}: {type}");
+                peer.Disconnect();
+                return;
+            }
+
             switch (type)
             {
-                case MessageType.UseIntent:
-                    // Действуем по текущему тайлу игрока в game-loop.
-                    client.UseRequested = true;
+                case MessageType.AuthRequest:
+                    HandleAuthRequest(peer, data);
                     break;
 
                 case MessageType.MoveIntent:
-                    var intent = new MoveIntent();
-                    intent.Deserialize(data);
-                    client.IntentQueue.Enqueue(intent);
+                    if (_clients.TryGetValue(peer, out var moveClient))
+                    {
+                        var intent = new MoveIntent();
+                        intent.Deserialize(data);
+                        moveClient.IntentQueue.Enqueue(intent);
+                        moveClient.LastActivity = DateTime.UtcNow;
+                    }
+                    break;
+
+                case MessageType.UseIntent:
+                    if (_clients.TryGetValue(peer, out var useClient))
+                    {
+                        useClient.UseRequested = true;
+                        useClient.LastActivity = DateTime.UtcNow;
+                    }
                     break;
 
                 default:
-                    Console.WriteLine($"[Server] Unknown message type from #{client.ConnectionId}: {type}");
+                    Console.WriteLine($"[Server] Unknown message type: {type}");
                     break;
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[Server] Error processing message from #{peer.Address}: {ex.Message}");
+            Console.WriteLine($"[Server] Error processing message: {ex.Message}");
+        }
+    }
 
-            // TODO: возможно, стоит дисконнектить клиента при битых данных
+    /// <summary>Обработка запроса на авторизацию.</summary>
+    private void HandleAuthRequest(NetPeer peer, byte[] data)
+    {
+        try
+        {
+            var request = new ClientAuthRequest();
+            request.Deserialize(data);
+
+            Console.WriteLine($"[Auth] Received auth request from {peer.Address} for '{request.Login}'");
+
+            // Проверяем, не авторизован ли уже этот пользователь
+            if (_clients.Values.Any(c => c.Peer == peer))
+            {
+                SendAuthResponse(peer, new AuthResponse
+                {
+                    Status = AuthResponseStatus.Pending,
+                    Message = "Already authenticated"
+                });
+                return;
+            }
+
+            // Проверяем soft лимит
+            if (_clients.Count >= _config.SoftMaxPlayers)
+            {
+                int queuePosition = _clients.Count - _config.SoftMaxPlayers + 1;
+                SendAuthResponse(peer, new AuthResponse
+                {
+                    Status = AuthResponseStatus.Queued,
+                    Message = $"Server is full. Position in queue: {queuePosition}",
+                    QueuePosition = queuePosition
+                });
+                return;
+            }
+
+            // Запускаем процесс авторизации
+            _ = ProcessAuthAsync(peer, request);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Auth] Error handling auth request: {ex.Message}");
+            SendAuthResponse(peer, new AuthResponse
+            {
+                Status = AuthResponseStatus.Error,
+                Message = "Invalid request format"
+            });
+        }
+    }
+
+    /// <summary>Асинхронный процесс авторизации.</summary>
+    private async Task ProcessAuthAsync(NetPeer peer, ClientAuthRequest request)
+    {
+        try
+        {
+            var session = await _authService.AuthenticateAsync(request, peer);
+
+            // Если авторизация успешна - сессия будет обработана в OnAuthSuccess
+            // Если нет - в OnAuthFailed
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Auth] Error in auth process: {ex.Message}");
+            SendAuthResponse(peer, new AuthResponse
+            {
+                Status = AuthResponseStatus.Error,
+                Message = "Internal server error"
+            });
+        }
+    }
+
+    /// <summary>Обработчик успешной авторизации.</summary>
+    private void OnAuthSuccess(AuthSession session)
+    {
+        try
+        {
+            var peer = session.Peer;
+            if (peer == null || peer.ConnectionState != ConnectionState.Connected)
+            {
+                Console.WriteLine($"[Auth] Peer disconnected during auth");
+                return;
+            }
+
+            // Проверяем жесткий лимит
+            if (_clients.Count >= _config.MaxPlayers)
+            {
+                SendAuthResponse(peer, new AuthResponse
+                {
+                    Status = AuthResponseStatus.Rejected,
+                    Message = "Server is full"
+                });
+                return;
+            }
+
+            // Создаем клиента
+            var client = new ClientConnection(peer, _nextConnectionId++);
+            client.X = _spawnX;
+            client.Y = _spawnY;
+            client.Z = _spawnZ;
+            client.Facing = 0;
+
+            _clients[peer] = client;
+
+            // Отправляем успешный ответ
+            SendAuthResponse(peer, new AuthResponse
+            {
+                Status = AuthResponseStatus.Success,
+                Message = "Authenticated successfully",
+                PlayerNetId = client.PlayerNetId,
+                SpawnX = _spawnX,
+                SpawnY = _spawnY,
+                SpawnZ = _spawnZ
+            });
+
+            // Вызываем событие подключения
+            _mainThreadActions.Enqueue(() => OnClientConnected?.Invoke(client));
+
+            Console.WriteLine($"[Auth] Player '{session.Login}' authenticated as #{client.ConnectionId}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Auth] Error in OnAuthSuccess: {ex.Message}");
+        }
+    }
+
+    /// <summary>Обработчик неудачной авторизации.</summary>
+    private void OnAuthFailed(AuthSession session)
+    {
+        try
+        {
+            var peer = session.Peer;
+            if (peer == null || peer.ConnectionState != ConnectionState.Connected)
+                return;
+
+            AuthResponseStatus status;
+            string message;
+
+            switch (session.Status)
+            {
+                case AuthSessionStatus.Rejected:
+                    status = AuthResponseStatus.Rejected;
+                    message = "Authentication rejected";
+                    break;
+                case AuthSessionStatus.Expired:
+                    status = AuthResponseStatus.Timeout;
+                    message = "Authentication timed out";
+                    break;
+                case AuthSessionStatus.Error:
+                    status = AuthResponseStatus.Error;
+                    message = "Authentication error";
+                    break;
+                default:
+                    status = AuthResponseStatus.Rejected;
+                    message = "Authentication failed";
+                    break;
+            }
+
+            SendAuthResponse(peer, new AuthResponse
+            {
+                Status = status,
+                Message = message
+            });
+
+            Console.WriteLine($"[Auth] Auth failed for '{session.Login}': {session.Status}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Auth] Error in OnAuthFailed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Отправка ответа авторизации.</summary>
+    private void SendAuthResponse(NetPeer peer, AuthResponse response)
+    {
+        try
+        {
+            var writer = new NetDataWriter();
+            writer.Put((ushort)MessageType.AuthResponse);
+            writer.PutBytesWithLength(response.Serialize());
+            peer.Send(writer, DeliveryMethod.ReliableOrdered);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Auth] Error sending response: {ex.Message}");
         }
     }
 

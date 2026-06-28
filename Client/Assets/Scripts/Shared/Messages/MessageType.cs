@@ -11,14 +11,15 @@ public enum MessageType : ushort
     EntitySnapshot = 3,
     MapData = 4,
     TileUpdate = 5,
+    UseIntent = 6,
+    AuthRequest = 7,
+    AuthResponse = 8,
 
     // Player (100-199)
     LoginRequest = 100,
     LoginResponse = 101,
     PlayerJoined = 102,
     PlayerLeft = 103,
-
-    UseIntent = 6,
 
     // Interaction (200-299)
     ClickIntent = 200,

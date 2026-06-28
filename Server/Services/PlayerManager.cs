@@ -4,7 +4,9 @@ using Shared.Messages.Player;
 
 namespace Server.Services
 {
-    /// <summary>Управляет жизненным циклом игроков: спавн при входе, очистка при выходе.</summary>
+    /// <summary>
+    /// Управляет жизненным циклом игроков: спавн при входе, очистка при выходе.
+    /// </summary>
     public class PlayerManager
     {
         private readonly GameServer _server;

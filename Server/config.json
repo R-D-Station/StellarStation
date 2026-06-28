@@ -2,7 +2,11 @@
   "ip": "0.0.0.0",
   "port": 7777,
   "maxPlayers": 100,
+  "softMaxPlayers": 80,
   "tickRate": 30,
   "connectionKey": "VGVzdF9zZXJ2ZXIx",
-  "mapPath": "Map/station.smap"
+  "mapPath": "Map/station.smap",
+  "authApiUrl": "http://127.0.0.1:45607/api/v2/auth/check_player",
+  "authTimeoutSeconds": 5,
+  "authSessionLifetimeSeconds": 7
 }
