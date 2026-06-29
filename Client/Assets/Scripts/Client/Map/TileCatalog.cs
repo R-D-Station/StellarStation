@@ -5,76 +5,28 @@ using Shared.World;
 
 namespace Client.Map
 {
-    /// <summary>Каталог тайлов: id из Tile → визуал (префаб/спрайт) и флаги симуляции. Только клиент.</summary>
+    /// <summary>Каталог тайлов: id из Tile → визуал (префаб/спрайт) и флаги симуляции. Только клиент.
+    /// Виды — отдельные SO-ассеты (<see cref="FloorDefinition"/>/<see cref="StructureDefinition"/>).</summary>
     [CreateAssetMenu(menuName = "Station/Tile Catalog", fileName = "TileCatalog")]
     public sealed class TileCatalog : ScriptableObject
     {
-        /// <summary>Вид пола: id == значение <see cref="Tile.FloorType"/> (0 = пола нет).</summary>
-        [Serializable]
-        public sealed class FloorKind
-        {
-            [Tooltip("Значение Tile.FloorType. 0 зарезервирован под «нет пола».")]
-            public byte Type = 1;
-            public string DisplayName = "Floor";
+        [SerializeField] private FloorDefinition[] _floors = Array.Empty<FloorDefinition>();
+        [SerializeField] private StructureDefinition[] _structures = Array.Empty<StructureDefinition>();
 
-            [Tooltip("Спрайт для клетки редактора. Если префаб пуст — рисуется и в игре на SpriteRenderer.")]
-            public Sprite Sprite;
-            [Tooltip("Префаб пола, инстансится в игре. Пусто → fallback на Sprite.")]
-            public GameObject Prefab;
-
-            [Header("Флаги симуляции, которые даёт этот пол")]
-            [Tooltip("Сплошной пол не просвечивает на этаж ниже (FOV). Решётка/стекло = false.")]
-            public bool BlocksVerticalSight = true;
-            [Tooltip("Не пропускает газ вниз. Решётка = false.")]
-            public bool SealsVertical = true;
-        }
-
-        /// <summary>Категория настенного объекта. Дверь/люк — открываемые.</summary>
-        public enum StructureCategory : byte { Wall = 0, Door = 1, Hatch = 2, Window = 3 }
-
-        /// <summary>Вид настенного объекта (стена/дверь/люк/окно): id == значение <see cref="Tile.StructureType"/>.</summary>
-        [Serializable]
-        public sealed class StructureKind
-        {
-            [Tooltip("Значение Tile.StructureType. 0 = объекта нет.")]
-            public byte Type = 1;
-            public string DisplayName = "Structure";
-            [Tooltip("Стена/дверь/люк/окно. Дверь и люк — открываемые (Openable).")]
-            public StructureCategory Category = StructureCategory.Wall;
-
-            [Header("Визуал (у открываемых — закрытый/открытый)")]
-            public Sprite Sprite;
-            public GameObject Prefab;
-            public Sprite OpenSprite;
-            public GameObject OpenPrefab;
-
-            [Header("Флаги симуляции")]
-            [Tooltip("Держит обзор по горизонтали (в закрытом виде). Стекло/окно = false.")]
-            public bool BlocksHorizontalSight = true;
-            [Tooltip("Не пропускает газ по горизонтали (герметичность).")]
-            public bool SealsHorizontal = true;
-
-            /// <summary>Открываемый объект (дверь/люк), а не глухой (стена/окно).</summary>
-            public bool Openable => Category == StructureCategory.Door || Category == StructureCategory.Hatch;
-        }
-
-        [SerializeField] private FloorKind[] _floors = Array.Empty<FloorKind>();
-        [SerializeField] private StructureKind[] _structures = Array.Empty<StructureKind>();
-
-        public IReadOnlyList<FloorKind> Floors => _floors;
-        public IReadOnlyList<StructureKind> Structures => _structures;
+        public IReadOnlyList<FloorDefinition> Floors => _floors;
+        public IReadOnlyList<StructureDefinition> Structures => _structures;
 
         // Ленивые индексы id → вид (сброс через InvalidateCache).
-        private Dictionary<byte, FloorKind> _floorById;
-        private Dictionary<byte, StructureKind> _structureById;
+        private Dictionary<byte, FloorDefinition> _floorById;
+        private Dictionary<byte, StructureDefinition> _structureById;
 
-        public FloorKind GetFloor(byte type)
+        public FloorDefinition GetFloor(byte type)
         {
             EnsureMaps();
             return _floorById.TryGetValue(type, out var f) ? f : null;
         }
 
-        public StructureKind GetStructure(byte type)
+        public StructureDefinition GetStructure(byte type)
         {
             EnsureMaps();
             return _structureById.TryGetValue(type, out var s) ? s : null;
@@ -83,12 +35,22 @@ namespace Client.Map
         private void EnsureMaps()
         {
             if (_floorById != null) return;
-            _floorById = new Dictionary<byte, FloorKind>();
-            _structureById = new Dictionary<byte, StructureKind>();
+            _floorById = new Dictionary<byte, FloorDefinition>();
+            _structureById = new Dictionary<byte, StructureDefinition>();
             foreach (var f in _floors)
-                if (f != null && f.Type != 0) _floorById[f.Type] = f;
+            {
+                if (f == null || f.Type == 0) continue;
+                if (_floorById.ContainsKey(f.Type))
+                    Debug.LogWarning($"[TileCatalog] дубль Floor Type={f.Type} ('{f.DisplayName}') — перезапись (last-wins)", this);
+                _floorById[f.Type] = f;
+            }
             foreach (var s in _structures)
-                if (s != null && s.Type != 0) _structureById[s.Type] = s;
+            {
+                if (s == null || s.Type == 0) continue;
+                if (_structureById.ContainsKey(s.Type))
+                    Debug.LogWarning($"[TileCatalog] дубль Structure Type={s.Type} ('{s.DisplayName}') — перезапись (last-wins)", this);
+                _structureById[s.Type] = s;
+            }
         }
 
         /// <summary>Сбросить кэш id→вид (после правки списков в инспекторе/редакторе).</summary>

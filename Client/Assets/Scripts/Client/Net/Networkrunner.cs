@@ -112,6 +112,10 @@ namespace Client.Net
             if (_fov != null && _predictor.IsInitialized)
                 _fov.UpdateFov(_predictor.X, _predictor.Y, _predictor.Z);
 
+            // Динамический потолочный просвет (R1): радиус кольца у проёма растёт по близости игрока.
+            if (_mapRenderer != null && _predictor.IsInitialized)
+                _mapRenderer.UpdateCeilingReveal(_predictor.X, _predictor.Y);
+
             if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
                 _net.SendUse();
         }

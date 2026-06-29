@@ -29,6 +29,9 @@ namespace Client.Editor.MapTools
         private int _originY;
         private Vector2 _scroll;
 
+        // Превью autotiling-соединений стен и пола (W4b/F-editor): оверлей поверх клетки, данные не трогает.
+        private bool _showConnections;
+
         // ---- Каталог тайлов ----
         private TileCatalog _catalog;
         private const string CatalogPrefKey = "Station.MapEditor.CatalogGuid";
@@ -61,8 +64,15 @@ namespace Client.Editor.MapTools
         private bool _hasHover;
         private int _hoverX, _hoverY;
         private GUIStyle _markerStyle;
+        private GUIStyle _shapeStyle;
         private static readonly Color WallSel = Color.cyan;
         private static readonly Color DoorSel = new Color(0.35f, 0.65f, 0.95f);
+        private static readonly Color ConnStub = new Color(1f, 0.82f, 0.20f, 0.95f);
+        private static readonly Color FloorStub = new Color(0.25f, 0.85f, 0.70f, 0.90f);
+        private static readonly GUIContent CeilingToggle = new GUIContent("Потолок (пол z+1)",
+            "Дополнительно кладёт пол выбранного типа на этаж z+1 над каждой закрашенной клеткой.");
+        private static readonly GUIContent ManualFlagsToggle = new GUIContent("Ручные флаги",
+            "Игнорировать палитру пола/структуры, выставлять флаги тайла напрямую.");
 
         [MenuItem("Tools/Station/Map Editor")]
         public static void Open()
@@ -141,6 +151,10 @@ namespace Client.Editor.MapTools
                     if (GUILayout.Button("к 0,0", GUILayout.Width(50))) { _originX = 0; _originY = 0; }
                     GUILayout.FlexibleSpace();
                 }
+
+                // Превью формы autotiling поверх грида — только вид, краску/данные не меняет.
+                _showConnections = EditorGUILayout.ToggleLeft(
+                    "Показывать соединения (стены/пол)", _showConnections);
             }
         }
 
@@ -257,8 +271,7 @@ namespace Client.Editor.MapTools
         // иначе явный вид. Без каталога потолок всегда = пол кисти.
         private void DrawCeilingRow()
         {
-            _withCeiling = EditorGUILayout.ToggleLeft(
-                "Рисовать с потолком (пол на z+1 над клеткой)", _withCeiling);
+            _withCeiling = EditorGUILayout.ToggleLeft(CeilingToggle, _withCeiling);
             if (!_withCeiling) return;
 
             using (new EditorGUI.IndentLevelScope())
@@ -311,8 +324,7 @@ namespace Client.Editor.MapTools
 
             using (new EditorGUI.IndentLevelScope())
             {
-                _advanced = EditorGUILayout.ToggleLeft(
-                    "Красить ручными флагами (игнорировать палитру пола/структуры)", _advanced);
+                _advanced = EditorGUILayout.ToggleLeft(ManualFlagsToggle, _advanced);
 
                 using (new EditorGUI.DisabledScope(!_advanced))
                 {
@@ -411,6 +423,7 @@ namespace Client.Editor.MapTools
 
                     Tile t = _map.GetTile(worldX, worldY, _activeZ);
                     DrawCell(cell, in t);
+                    if (_showConnections) DrawConnectionStubs(cell, worldX, worldY, in t);
 
                     if (cell.Contains(e.mousePosition))
                     {
@@ -566,6 +579,89 @@ namespace Client.Editor.MapTools
             if (t.Special != TileSpecial.None)
                 DrawSpecialMarker(r, t.Special);
         }
+
+        // Превью autotiling (W4b + F-editor): для стены и/или пола с UseConnections рисует стабы из центра
+        // к каждой соединённой стороне (соседство — из WallConnectivity/FloorConnectivity, та же логика, что
+        // у рантайм-рендера) + букву базовой формы. Пол — своим цветом и тоньше, буква в нижнем углу, чтобы
+        // не сливаться со стеной (клетка-стена обычно несёт и пол). Чистый оверлей: ни Tile, ни карту не
+        // меняет. Без каталога/карты — тихо выходит (без падений).
+        private void DrawConnectionStubs(Rect cell, int worldX, int worldY, in Tile t)
+        {
+            if (_catalog == null || _map == null) return;
+
+            // Стена: жёлтые стабы, буква в верхнем-левом углу.
+            if (t.StructureType != 0)
+            {
+                var def = _catalog.GetStructure(t.StructureType);
+                if (def != null && def.Category == StructureCategory.Wall
+                    && def.Connection != null && def.Connection.UseConnections)
+                {
+                    bool n = WallConnectivity.Connects(_catalog, _map, def, worldX, worldY + 1, _activeZ);
+                    bool e = WallConnectivity.Connects(_catalog, _map, def, worldX + 1, worldY, _activeZ);
+                    bool s = WallConnectivity.Connects(_catalog, _map, def, worldX, worldY - 1, _activeZ);
+                    bool w = WallConnectivity.Connects(_catalog, _map, def, worldX - 1, worldY, _activeZ);
+                    DrawStubs(cell, n, e, s, w, ConnStub, 2f);
+                    var (shape, _) = WallConnection.Resolve(n, e, s, w);
+                    DrawShapeLetter(new Rect(cell.x + 2, cell.y + 1, cell.width, 12), shape, ConnStub);
+                }
+            }
+
+            // Пол: бирюзовые стабы тоньше, буква в нижнем-левом углу.
+            if (t.FloorType != 0)
+            {
+                var f = _catalog.GetFloor(t.FloorType);
+                if (f != null && f.Connection != null && f.Connection.UseConnections)
+                {
+                    bool n = FloorConnectivity.Connects(_catalog, _map, f, worldX, worldY + 1, _activeZ);
+                    bool e = FloorConnectivity.Connects(_catalog, _map, f, worldX + 1, worldY, _activeZ);
+                    bool s = FloorConnectivity.Connects(_catalog, _map, f, worldX, worldY - 1, _activeZ);
+                    bool w = FloorConnectivity.Connects(_catalog, _map, f, worldX - 1, worldY, _activeZ);
+                    DrawStubs(cell, n, e, s, w, FloorStub, 1f);
+                    var (shape, _) = WallConnection.Resolve(n, e, s, w);
+                    DrawShapeLetter(new Rect(cell.x + 2, cell.yMax - 13, cell.width, 12), shape, FloorStub);
+                }
+            }
+        }
+
+        // Стабы из центра к соединённым сторонам. Грид рисуется севером вверх (Y инвертирован):
+        // N=вверх клетки, S=вниз, E=вправо, W=влево. new Rect — struct, без GC.
+        private static void DrawStubs(Rect cell, bool n, bool e, bool s, bool w, Color color, float th)
+        {
+            float cx = cell.center.x;
+            float cy = cell.center.y;
+            float half = th * 0.5f;
+            if (n) EditorGUI.DrawRect(new Rect(cx - half, cell.y, th, cy - cell.y), color);
+            if (s) EditorGUI.DrawRect(new Rect(cx - half, cy, th, cell.yMax - cy), color);
+            if (e) EditorGUI.DrawRect(new Rect(cx, cy - half, cell.xMax - cx, th), color);
+            if (w) EditorGUI.DrawRect(new Rect(cell.x, cy - half, cx - cell.x, th), color);
+            EditorGUI.DrawRect(new Rect(cx - half, cy - half, th, th), color); // узел в центре (виден и Single)
+        }
+
+        // Буква базовой формы (сверка с рантайм-WallConnection.Resolve). Цвет — через contentColor,
+        // стиль кэшируется один раз (без аллокаций на repaint).
+        private void DrawShapeLetter(Rect rect, WallShape shape, Color color)
+        {
+            _shapeStyle ??= new GUIStyle(EditorStyles.miniBoldLabel)
+            {
+                alignment = TextAnchor.UpperLeft,
+                normal = { textColor = Color.white }
+            };
+            var prev = GUI.contentColor;
+            GUI.contentColor = color;
+            GUI.Label(rect, ShapeLetter(shape), _shapeStyle);
+            GUI.contentColor = prev;
+        }
+
+        private static string ShapeLetter(WallShape shape) => shape switch
+        {
+            WallShape.Single => "S",
+            WallShape.End => "E",
+            WallShape.Straight => "I",
+            WallShape.Corner => "C",
+            WallShape.T => "T",
+            WallShape.Cross => "X",
+            _ => "?"
+        };
 
         private void DrawSpecialMarker(Rect r, TileSpecial s)
         {

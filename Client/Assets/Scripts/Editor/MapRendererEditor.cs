@@ -20,6 +20,14 @@ namespace Client.Editor.Inspectors
     [CustomEditor(typeof(MapRenderer))]
     public sealed class MapRendererEditor : UnityEditor.Editor
     {
+        // Подписи R1-полей — static readonly, без аллокаций на repaint.
+        private static readonly GUIContent LRevealBase = new GUIContent("Радиус кольца (далеко)", "Базовый радиус кольца просвета вдали от проёма.");
+        private static readonly GUIContent LRevealMax = new GUIContent("Радиус у проёма (макс)", "Максимальный радиус кольца вплотную к проёму.");
+        private static readonly GUIContent LRevealProximity = new GUIContent("Дистанция роста", "Дистанция до проёма, на которой радиус растёт от базового к максимуму.");
+        private static readonly GUIContent LWallRevealAlpha = new GUIContent("Непрозрачность стен (reveal)", "Единая альфа стен reveal-уровня (без cheb/глубины), 0..1.");
+        private static readonly GUIContent LRevealMaxFloors = new GUIContent("Глубина этажей", "Макс число этажей просвета вверх/вниз.");
+        private static readonly GUIContent LRevealDepthDim = new GUIContent("Затемнение/этаж", "Множитель яркости на этаж глубже, 0..1.");
+
         private SerializedProperty _catalog;
         private SerializedProperty _activeZ;
         private SerializedProperty _floorYOffset;
@@ -32,6 +40,12 @@ namespace Client.Editor.Inspectors
         private SerializedProperty _ceilingSemiTransparent;
         private SerializedProperty _ceilingXrayAlpha;
         private SerializedProperty _fadeRingOpacity;
+        private SerializedProperty _revealBaseRadius;
+        private SerializedProperty _revealMaxRadius;
+        private SerializedProperty _revealProximityDistance;
+        private SerializedProperty _wallRevealAlpha;
+        private SerializedProperty _revealMaxFloors;
+        private SerializedProperty _revealDepthDim;
         private SerializedProperty _testMapPath;
 
         // Состояние сворачивания живёт между выборами объекта.
@@ -54,6 +68,12 @@ namespace Client.Editor.Inspectors
             _ceilingSemiTransparent = serializedObject.FindProperty("_ceilingSemiTransparent");
             _ceilingXrayAlpha = serializedObject.FindProperty("_ceilingXrayAlpha");
             _fadeRingOpacity = serializedObject.FindProperty("_fadeRingOpacity");
+            _revealBaseRadius = serializedObject.FindProperty("_revealBaseRadius");
+            _revealMaxRadius = serializedObject.FindProperty("_revealMaxRadius");
+            _revealProximityDistance = serializedObject.FindProperty("_revealProximityDistance");
+            _wallRevealAlpha = serializedObject.FindProperty("_wallRevealAlpha");
+            _revealMaxFloors = serializedObject.FindProperty("_revealMaxFloors");
+            _revealDepthDim = serializedObject.FindProperty("_revealDepthDim");
             _testMapPath = serializedObject.FindProperty("_testMapPath");
 
             _showTuning = EditorPrefs.GetBool(TuningPrefKey, false);
@@ -116,6 +136,14 @@ namespace Client.Editor.Inspectors
                 using (new EditorGUI.DisabledScope(!_ceilingSemiTransparent.boolValue))
                     EditorGUILayout.PropertyField(_ceilingXrayAlpha, new GUIContent("Непрозрачность рентгена"));
                 EditorGUILayout.PropertyField(_fadeRingOpacity, new GUIContent("Кольца верхнего этажа"), true);
+
+                EditorGUILayout.LabelField("Динамический просвет (R1)", EditorStyles.miniBoldLabel);
+                EditorGUILayout.PropertyField(_revealBaseRadius, LRevealBase);
+                EditorGUILayout.PropertyField(_revealMaxRadius, LRevealMax);
+                EditorGUILayout.PropertyField(_revealProximityDistance, LRevealProximity);
+                EditorGUILayout.PropertyField(_wallRevealAlpha, LWallRevealAlpha);
+                EditorGUILayout.PropertyField(_revealMaxFloors, LRevealMaxFloors);
+                EditorGUILayout.PropertyField(_revealDepthDim, LRevealDepthDim);
             }
 
             EditorGUILayout.Space(8);

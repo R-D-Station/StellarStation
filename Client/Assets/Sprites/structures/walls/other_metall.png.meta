@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: 38ad1317478eb1e4bb14866b189e54f9
+guid: 36e995cc6af84e842b4d6a366b000961
 TextureImporter:
   internalIDToNameTable: []
   externalObjects: {}
@@ -110,57 +110,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: neutral_0
-      rect:
-        serializedVersion: 2
-        x: 0
-        y: 64
-        width: 32
-        height: 32
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      customData: 
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 4226547a17ab78a4b875b6ed2cfd8fd7
-      internalID: 2038101664
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: neutral_1
-      rect:
-        serializedVersion: 2
-        x: 32
-        y: 64
-        width: 32
-        height: 32
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      customData: 
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 5b96c3a79128fe446881cf7b840ec4e8
-      internalID: -705550082
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: neutral_2
+      name: other_metall_0
       rect:
         serializedVersion: 2
         x: 64
-        y: 64
+        y: 24
         width: 32
-        height: 32
+        height: 24
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -169,20 +125,20 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: d34f04ef77dfa43409763a9547235f6a
-      internalID: 472745146
+      spriteID: cd074200180e5804a9da65355340ee96
+      internalID: -155860222
       vertices: []
       indices: 
       edges: []
       weights: []
     - serializedVersion: 2
-      name: neutral_3
+      name: other_metall_1
       rect:
         serializedVersion: 2
-        x: 0
-        y: 32
+        x: 224
+        y: 24
         width: 32
-        height: 32
+        height: 24
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -191,20 +147,20 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 900d6822bc4d04a43acb647985fcff33
-      internalID: -920343527
+      spriteID: b79c3349a4a93fb4f9d03c6a85c66d9f
+      internalID: 1230901198
       vertices: []
       indices: 
       edges: []
       weights: []
     - serializedVersion: 2
-      name: neutral_4
+      name: other_metall_2
       rect:
         serializedVersion: 2
-        x: 32
-        y: 32
+        x: 256
+        y: 24
         width: 32
-        height: 32
+        height: 24
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -213,42 +169,20 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 787a7c95c0c80d547b1dd0d1e64d7483
-      internalID: -2026902078
+      spriteID: aa778d665e3abf84c8b3d977cd6c0761
+      internalID: 218316023
       vertices: []
       indices: 
       edges: []
       weights: []
     - serializedVersion: 2
-      name: neutral_5
-      rect:
-        serializedVersion: 2
-        x: 64
-        y: 32
-        width: 32
-        height: 32
-      alignment: 0
-      pivot: {x: 0.5, y: 0.5}
-      border: {x: 0, y: 0, z: 0, w: 0}
-      customData: 
-      outline: []
-      physicsShape: []
-      tessellationDetail: 0
-      bones: []
-      spriteID: 13f66c2ab534a294d85ca2f85d8beeb6
-      internalID: 1145707474
-      vertices: []
-      indices: 
-      edges: []
-      weights: []
-    - serializedVersion: 2
-      name: neutral_6
+      name: other_metall_3
       rect:
         serializedVersion: 2
         x: 0
         y: 0
         width: 32
-        height: 32
+        height: 24
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -257,20 +191,20 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: 330cd5f279a79ec4692aff4b1c5a978c
-      internalID: 159094495
+      spriteID: 91c769825f8482c469bdf3d528b9f6a2
+      internalID: 1615660076
       vertices: []
       indices: 
       edges: []
       weights: []
     - serializedVersion: 2
-      name: neutral_7
+      name: other_metall_4
       rect:
         serializedVersion: 2
         x: 32
         y: 0
         width: 32
-        height: 32
+        height: 24
       alignment: 0
       pivot: {x: 0.5, y: 0.5}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -279,8 +213,162 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: 0
       bones: []
-      spriteID: df00de8331cde3e41a6927109f84aa75
-      internalID: 643592574
+      spriteID: 18778bee05bbbc1438f7e2a03ba4a829
+      internalID: 1779159489
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: other_metall_5
+      rect:
+        serializedVersion: 2
+        x: 64
+        y: 0
+        width: 32
+        height: 24
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 612620abe1fb3c14a9eb0f5abe0a5569
+      internalID: 1663316793
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: other_metall_6
+      rect:
+        serializedVersion: 2
+        x: 96
+        y: 0
+        width: 32
+        height: 24
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: f0db5b9d2f4070e40b2f41fe54ef4c15
+      internalID: 1834504108
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: other_metall_7
+      rect:
+        serializedVersion: 2
+        x: 128
+        y: 0
+        width: 32
+        height: 24
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: ff7bc4f7d0899a148a3a833d45efe5de
+      internalID: -312021214
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: other_metall_8
+      rect:
+        serializedVersion: 2
+        x: 160
+        y: 0
+        width: 32
+        height: 24
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 45d01b53a5580574ea97257db8d351a1
+      internalID: 109292163
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: other_metall_9
+      rect:
+        serializedVersion: 2
+        x: 192
+        y: 0
+        width: 32
+        height: 24
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 6a4ef962700409e438a3ffc9e466c963
+      internalID: 111172624
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: other_metall_10
+      rect:
+        serializedVersion: 2
+        x: 224
+        y: 0
+        width: 32
+        height: 24
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 813a82c64b1ebb74c886faab383864a8
+      internalID: -693714221
+      vertices: []
+      indices: 
+      edges: []
+      weights: []
+    - serializedVersion: 2
+      name: other_metall_11
+      rect:
+        serializedVersion: 2
+        x: 256
+        y: 0
+        width: 32
+        height: 24
+      alignment: 0
+      pivot: {x: 0.5, y: 0.5}
+      border: {x: 0, y: 0, z: 0, w: 0}
+      customData: 
+      outline: []
+      physicsShape: []
+      tessellationDetail: 0
+      bones: []
+      spriteID: 8841c5d87a812f045b12b0c69692025f
+      internalID: 226974167
       vertices: []
       indices: 
       edges: []
@@ -289,7 +377,7 @@ TextureImporter:
     customData: 
     physicsShape: []
     bones: []
-    spriteID: 507ccf05c8c2ee24fadef14f7c8e73d8
+    spriteID: da65a5997d2420d40b9fb0f7837d4431
     internalID: 0
     vertices: []
     indices: 
@@ -299,16 +387,20 @@ TextureImporter:
     spriteCustomMetadata:
       entries:
       - key: SpriteEditor.SliceSettings
-        value: '{"sliceOnImport":false,"gridCellCount":{"x":3.0,"y":3.0},"gridSpriteSize":{"x":32.0,"y":32.0},"gridSpriteOffset":{"x":0.0,"y":0.0},"gridSpritePadding":{"x":0.0,"y":0.0},"pivot":{"x":0.5,"y":0.5},"pivotPixels":{"x":0.0,"y":0.0},"autoSlicingMethod":0,"spriteAlignment":0,"pivotUnitMode":0,"slicingType":2,"keepEmptyRects":false,"isAlternate":false}'
+        value: '{"sliceOnImport":false,"gridCellCount":{"x":9.0,"y":2.0},"gridSpriteSize":{"x":32.0,"y":24.0},"gridSpriteOffset":{"x":0.0,"y":0.0},"gridSpritePadding":{"x":0.0,"y":0.0},"pivot":{"x":0.5,"y":0.5},"pivotPixels":{"x":0.0,"y":0.0},"autoSlicingMethod":0,"spriteAlignment":0,"pivotUnitMode":0,"slicingType":2,"keepEmptyRects":false,"isAlternate":false}'
     nameFileIdTable:
-      neutral_0: 2038101664
-      neutral_1: -705550082
-      neutral_2: 472745146
-      neutral_3: -920343527
-      neutral_4: -2026902078
-      neutral_5: 1145707474
-      neutral_6: 159094495
-      neutral_7: 643592574
+      other_metall_0: -155860222
+      other_metall_1: 1230901198
+      other_metall_10: -693714221
+      other_metall_11: 226974167
+      other_metall_2: 218316023
+      other_metall_3: 1615660076
+      other_metall_4: 1779159489
+      other_metall_5: 1663316793
+      other_metall_6: 1834504108
+      other_metall_7: -312021214
+      other_metall_8: 109292163
+      other_metall_9: 111172624
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 
