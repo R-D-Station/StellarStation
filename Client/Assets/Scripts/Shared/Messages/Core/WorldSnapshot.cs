@@ -18,19 +18,34 @@ namespace Shared.Messages.Core
         {
             using var ms = new MemoryStream();
             using var writer = new BinaryWriter(ms);
+            WriteTo(writer);
+            return ms.ToArray();
+        }
 
+        /// <summary>Пишет снапшот в writer БЕЗ per-entity аллокаций (горячий broadcast-путь). Layout (2.5-A): хедер
+        /// 12 байт (ServerTick u32 + LastProcessedInput u32 + count i32), затем count × EntitySnapshot.SerializedSize
+        /// байт БЕЗ per-entity len-prefix (сущность фикс-размера → префикс избыточен). Итого 12 + count·23.</summary>
+        public void WriteTo(BinaryWriter writer)
+        {
             writer.Write(ServerTick);
             writer.Write(LastProcessedInput);
             writer.Write(Entities.Length);
 
             foreach (var entity in Entities)
-            {
-                byte[] entityData = entity.Serialize();
-                writer.Write(entityData.Length);
-                writer.Write(entityData);
-            }
+                entity.WriteTo(writer);
+        }
 
-            return ms.ToArray();
+        /// <summary>Как WriteTo(writer), но сущности берутся из ВНЕШНЕГО буфера — пишутся только первые count
+        /// (entity-PVS: per-client отфильтрованный набор в переиспользуемом массиве). Формат идентичен: хедер (Server-
+        /// Tick/LastProcessedInput из этого снапшота) + count + count×SerializedSize. Не аллоцирует; Entities не читает.</summary>
+        public void WriteTo(BinaryWriter writer, EntitySnapshot[] entities, int count)
+        {
+            writer.Write(ServerTick);
+            writer.Write(LastProcessedInput);
+            writer.Write(count);
+
+            for (int i = 0; i < count; i++)
+                entities[i].WriteTo(writer);
         }
 
         public void Deserialize(byte[] data)
@@ -54,27 +69,17 @@ namespace Shared.Messages.Core
                 if (count < 0 || count > 10000)
                     throw new InvalidOperationException($"Invalid entity count: {count}");
 
+                // Фикс-размер сущности → нет per-entity len-prefix. Валидируем весь блок разом (защита от битой длины
+                // до чтения; count уже капнут ≤10000, произведение влезает в long).
+                long need = (long)count * EntitySnapshot.SerializedSize;
+                if (ms.Position + need > ms.Length)
+                    throw new InvalidOperationException($"Snapshot data too short for {count} entities");
+
                 Entities = new EntitySnapshot[count];
 
+                // Читаем сущности НАПРЯМУЮ из reader — без per-entity byte[]/вложенного MemoryStream (zero-alloc).
                 for (int i = 0; i < count; i++)
-                {
-                    if (ms.Position + 4 > ms.Length)
-                        throw new InvalidOperationException($"Unexpected end of data while reading entity {i}");
-
-                    int entitySize = reader.ReadInt32();
-
-                    if (entitySize < 0 || entitySize > 1024 * 1024)
-                        throw new InvalidOperationException($"Invalid entity size: {entitySize}");
-
-                    if (ms.Position + entitySize > ms.Length)
-                        throw new InvalidOperationException($"Entity {i} data exceeds available data");
-
-                    byte[] entityData = reader.ReadBytes(entitySize);
-
-                    var entity = new EntitySnapshot();
-                    entity.Deserialize(entityData);
-                    Entities[i] = entity;
-                }
+                    Entities[i] = EntitySnapshot.ReadFrom(reader);
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {

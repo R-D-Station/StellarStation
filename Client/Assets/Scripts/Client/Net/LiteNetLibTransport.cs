@@ -19,6 +19,10 @@ namespace Client.Net
         public event Action<LoginResponse> OnLoginResponse;
         public event Action<MapDataMessage> OnMapData;
         public event Action<TileUpdate> OnTileUpdate;
+        public event Action<PlayerJoined> OnPlayerJoined;
+        public event Action<PlayerLeft> OnPlayerLeft;
+        public event Action<ChunkData> OnChunkData;
+        public event Action<ChunkUnload> OnChunkUnload;
 
 
         public bool IsConnected { get; private set; }
@@ -36,6 +40,10 @@ namespace Client.Net
             { MessageType.LoginResponse, () => new LoginResponse() },
             { MessageType.MapData, () => new MapDataMessage() },
             { MessageType.TileUpdate, () => new TileUpdate() },
+            { MessageType.PlayerJoined, () => new PlayerJoined() },
+            { MessageType.PlayerLeft, () => new PlayerLeft() },
+            { MessageType.MapChunk, () => new ChunkData() },
+            { MessageType.MapChunkUnload, () => new ChunkUnload() },
         };
 
         public void Connect(string address, int port)
@@ -123,6 +131,22 @@ namespace Client.Net
 
                 case TileUpdate tu:
                     OnTileUpdate?.Invoke(tu);
+                    break;
+
+                case PlayerJoined pj:
+                    OnPlayerJoined?.Invoke(pj);
+                    break;
+
+                case PlayerLeft pl:
+                    OnPlayerLeft?.Invoke(pl);
+                    break;
+
+                case ChunkData cd:
+                    OnChunkData?.Invoke(cd);
+                    break;
+
+                case ChunkUnload cu:
+                    OnChunkUnload?.Invoke(cu);
                     break;
 
                 default:

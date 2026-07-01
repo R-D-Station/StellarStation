@@ -22,6 +22,7 @@ namespace Client.Editor.Inspectors
         private static readonly GUIContent LPrefab = new GUIContent("Префаб", "Инстансится в игре. Пусто → fallback на Sprite.");
         private static readonly GUIContent LSideSprite = new GUIContent("Спрайт боков", "Боковые грани меша пола. MapRenderer кладёт в _SideTex материала.");
         private static readonly GUIContent LTopSprite = new GUIContent("Спрайт верха", "Верх при выключенном autotiling. При UseConnections верх берётся по форме.");
+        private static readonly GUIContent LTopMap = new GUIContent("Грид верха (TileView)", "Грид-текстура этого типа пола. MapRenderer кладёт в _TopMap материала TileView; форму выбирает _i.");
         private static readonly GUIContent LBlocksSight = new GUIContent("Держит обзор ↓", "Сплошной пол не просвечивает на этаж ниже (FOV). Решётка/стекло = false.");
         private static readonly GUIContent LSeals = new GUIContent("Герметичен ↓", "Не пропускает газ вниз. Решётка = false.");
         private static readonly GUIContent LUseConnections = new GUIContent("Автотайлинг", "Выбирать меш по 4 соседям.");
@@ -41,6 +42,7 @@ namespace Client.Editor.Inspectors
         private SerializedProperty _prefab;
         private SerializedProperty _sideSprite;
         private SerializedProperty _topSprite;
+        private SerializedProperty _topMap;
         private SerializedProperty _blocksVerticalSight;
         private SerializedProperty _sealsVertical;
 
@@ -56,12 +58,6 @@ namespace Client.Editor.Inspectors
         private SerializedProperty _meshCorner;
         private SerializedProperty _meshT;
         private SerializedProperty _meshCross;
-        private SerializedProperty _topSingle;
-        private SerializedProperty _topEnd;
-        private SerializedProperty _topStraight;
-        private SerializedProperty _topCorner;
-        private SerializedProperty _topT;
-        private SerializedProperty _topCross;
 
         private void OnEnable()
         {
@@ -71,6 +67,7 @@ namespace Client.Editor.Inspectors
             _prefab = serializedObject.FindProperty("Prefab");
             _sideSprite = serializedObject.FindProperty("SideSprite");
             _topSprite = serializedObject.FindProperty("TopSprite");
+            _topMap = serializedObject.FindProperty("TopMap");
             _blocksVerticalSight = serializedObject.FindProperty("BlocksVerticalSight");
             _sealsVertical = serializedObject.FindProperty("SealsVertical");
 
@@ -89,12 +86,6 @@ namespace Client.Editor.Inspectors
                 _meshCorner = _connection.FindPropertyRelative("MeshCorner");
                 _meshT = _connection.FindPropertyRelative("MeshT");
                 _meshCross = _connection.FindPropertyRelative("MeshCross");
-                _topSingle = _connection.FindPropertyRelative("TopSingle");
-                _topEnd = _connection.FindPropertyRelative("TopEnd");
-                _topStraight = _connection.FindPropertyRelative("TopStraight");
-                _topCorner = _connection.FindPropertyRelative("TopCorner");
-                _topT = _connection.FindPropertyRelative("TopT");
-                _topCross = _connection.FindPropertyRelative("TopCross");
             }
         }
 
@@ -121,6 +112,12 @@ namespace Client.Editor.Inspectors
             if (_connection != null)
             {
                 EditorGUILayout.Space(8);
+                EditorGUILayout.LabelField("Верх пола (TileView)", EditorStyles.boldLabel);
+                // null-гард: если поле TopMap ещё не в рантайме (зона AuxCoder) — не падаем (PropertyField(null) бросает).
+                if (_topMap != null)
+                    EditorGUILayout.PropertyField(_topMap, LTopMap);
+
+                EditorGUILayout.Space(8);
                 EditorGUILayout.LabelField("Соединение пола (autotiling)", EditorStyles.boldLabel);
                 EditorGUILayout.LabelField(
                     "Форма пола по 4 соседям — читается рендером. 6 мешей нужны при UseConnections.",
@@ -141,14 +138,6 @@ namespace Client.Editor.Inspectors
                         EditorGUILayout.PropertyField(_meshCorner, LMeshCorner);
                         EditorGUILayout.PropertyField(_meshT, LMeshT);
                         EditorGUILayout.PropertyField(_meshCross, LMeshCross);
-
-                        EditorGUILayout.LabelField("Top-спрайты граней (по форме)", EditorStyles.miniLabel);
-                        EditorGUILayout.PropertyField(_topSingle, LMeshSingle);
-                        EditorGUILayout.PropertyField(_topEnd, LMeshEnd);
-                        EditorGUILayout.PropertyField(_topStraight, LMeshStraight);
-                        EditorGUILayout.PropertyField(_topCorner, LMeshCorner);
-                        EditorGUILayout.PropertyField(_topT, LMeshT);
-                        EditorGUILayout.PropertyField(_topCross, LMeshCross);
                     }
                 }
             }

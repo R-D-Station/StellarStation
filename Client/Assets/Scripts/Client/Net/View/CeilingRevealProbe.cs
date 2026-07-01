@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Client.Net.View
 {
     /// <summary>Editor-only диагностика reveal: повесь на GameObject тайла (стену, что не рисуется) — компонент
-    /// выводит ПРИЧИНУ, почему рендерер reveal скрыт (не кандидат / Occluded / cheb&gt;radius / кластер далеко).
+    /// выводит ПРИЧИНУ, почему рендерер reveal скрыт (не кандидат / cheb&gt;radius / кластер далеко).
     /// ПКМ по компоненту → «Reveal: Dump в консоль»; или выдели объект в сцене — метка-сводка у тайла.
     /// Весь файл под UNITY_EDITOR — в билд не входит (только инструмент маппера).</summary>
     public class CeilingRevealProbe : MonoBehaviour
@@ -12,7 +12,7 @@ namespace Client.Net.View
         private MapRenderer _mr;
         private Renderer _renderer;
 
-        private MapRenderer Mr => _mr != null ? _mr : (_mr = FindObjectOfType<MapRenderer>());
+        private MapRenderer Mr => _mr != null ? _mr : (_mr = FindFirstObjectByType<MapRenderer>());
         private Renderer Rend => _renderer != null ? _renderer : (_renderer = GetComponentInChildren<Renderer>(true));
 
         [ContextMenu("Reveal: Dump в консоль")]
@@ -39,8 +39,7 @@ namespace Client.Net.View
         {
             var sb = new System.Text.StringBuilder();
             foreach (var line in full.Split('\n'))
-                if (line.Contains("ВЕРДИКТ") || line.Contains("gate(live)") || line.Contains("candidate:")
-                    || line.Contains("причина окклюзии") || line.Contains("tileVis=") || line.Contains("holeVis="))
+                if (line.Contains("ВЕРДИКТ") || line.Contains("gate(live)") || line.Contains("candidate:"))
                     sb.AppendLine(line.Trim());
             return sb.Length > 0 ? sb.ToString() : full;
         }

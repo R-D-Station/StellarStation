@@ -1,0 +1,42 @@
+using System;
+using Shared.Messages.Player;
+
+namespace ServerTests.Shared.Messages.Player
+{
+    public class LoginResponseTests
+    {
+        [Fact]
+        public void LoginResponse_SerializeAndDeserialize_RoundTrips()
+        {
+            var original = new LoginResponse { NetId = 12345, TickRate = 40 };
+
+            var deserialized = new LoginResponse();
+            deserialized.Deserialize(original.Serialize());
+
+            Assert.Equal(original.NetId, deserialized.NetId);
+            Assert.Equal(original.TickRate, deserialized.TickRate);
+        }
+
+        [Fact]
+        public void LoginResponse_SerializedSize_IsFiveBytes()
+        {
+            var data = new LoginResponse { NetId = 1, TickRate = 30 }.Serialize();
+            Assert.Equal(5, data.Length); // NetId(4) + TickRate(1)
+        }
+
+        [Fact]
+        public void Deserialize_NullData_ThrowsArgumentNullException()
+        {
+            var r = new LoginResponse();
+            Assert.Throws<ArgumentNullException>(() => r.Deserialize(null!));
+        }
+
+        [Fact]
+        public void Deserialize_WrongSize_ThrowsArgumentException()
+        {
+            var r = new LoginResponse();
+            // Старый размер 4 байта ≠ 5 → mixed-build (старый пир) отлавливается строгой проверкой длины.
+            Assert.Throws<ArgumentException>(() => r.Deserialize(new byte[4]));
+        }
+    }
+}

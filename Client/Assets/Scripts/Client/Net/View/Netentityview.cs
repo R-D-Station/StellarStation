@@ -23,9 +23,40 @@ namespace Client.Net.View
         [SerializeField] private Sprite _eastMoveSprite;
         [SerializeField] private Sprite _westMoveSprite;
 
+        [Header("Stun Sprites (опц.: пусто → Stand-набор)")]
+        [SerializeField] private Sprite _northStunSprite;
+        [SerializeField] private Sprite _southStunSprite;
+        [SerializeField] private Sprite _eastStunSprite;
+        [SerializeField] private Sprite _westStunSprite;
+
+        [Header("Laying Sprites — добровольное (опц.: пусто → Stand-набор)")]
+        [SerializeField] private Sprite _northLayingSprite;
+        [SerializeField] private Sprite _southLayingSprite;
+        [SerializeField] private Sprite _eastLayingSprite;
+        [SerializeField] private Sprite _westLayingSprite;
+
+        [Header("Laying KnockedDown Sprites (опц.: пусто → общий Laying → Stand)")]
+        [SerializeField] private Sprite _northKnockedDownSprite;
+        [SerializeField] private Sprite _southKnockedDownSprite;
+        [SerializeField] private Sprite _eastKnockedDownSprite;
+        [SerializeField] private Sprite _westKnockedDownSprite;
+
+        [Header("Unconscious Sprites (опц.: пусто → Stand-набор)")]
+        [SerializeField] private Sprite _northUnconsciousSprite;
+        [SerializeField] private Sprite _southUnconsciousSprite;
+        [SerializeField] private Sprite _eastUnconsciousSprite;
+        [SerializeField] private Sprite _westUnconsciousSprite;
+
+        [Header("Dead Sprites (ОБЯЗАТЕЛЬНО назначить в префабе — иначе труп выглядит живым)")]
+        [SerializeField] private Sprite _northDeadSprite;
+        [SerializeField] private Sprite _southDeadSprite;
+        [SerializeField] private Sprite _eastDeadSprite;
+        [SerializeField] private Sprite _westDeadSprite;
+
         private readonly SnapshotBuffer _buffer = new SnapshotBuffer();
         private byte _lastFacing = 255;
         private byte _lastState = 255;
+        private byte _lastReason = 255;
         private bool _isLocal;
 
         [Tooltip("Скорость, с которой локальный визуал догоняет предсказанную позицию. Больше = резче.")]
@@ -46,8 +77,8 @@ namespace Client.Net.View
             _buffer.Push(now, snap);
         }
 
-        /// <summary>Задать предсказанную позицию локального игрока; State — авторитетный из снапшота.</summary>
-        public void SetPredicted(float x, float y, int z, byte facing, byte state)
+        /// <summary>Задать предсказанную позицию локального игрока; State/Reason — авторитетные из снапшота.</summary>
+        public void SetPredicted(float x, float y, int z, byte facing, byte state, byte reason)
         {
             _isLocal = true;
             _targetPos = new Vector3(x, z * RenderConfig.FloorHeight, y);
@@ -59,7 +90,7 @@ namespace Client.Net.View
                 _hasTarget = true;
             }
 
-            ApplySprite(state, facing);
+            ApplySprite(state, facing, reason);
         }
 
         private void Update()
@@ -74,36 +105,62 @@ namespace Client.Net.View
                 return;
             }
 
-            if (!_buffer.HaveSample(Time.time, out float x, out float y, out float z, out byte facing, out byte state))
+            if (!_buffer.HaveSample(Time.time, out float x, out float y, out float z, out byte facing, out byte state, out byte reason))
                 return;
 
             // Сервер (X, Y=глубина, Z=этаж) -> Unity (X, высота, Z=глубина).
             transform.position = new Vector3(x, z * RenderConfig.FloorHeight, y);
 
-            ApplySprite(state, facing);
+            ApplySprite(state, facing, reason);
         }
 
-        /// <summary>Перевыбрать спрайт при смене State ИЛИ Facing (оба дискретны).</summary>
-        private void ApplySprite(byte state, byte facing)
+        /// <summary>Перевыбрать спрайт при смене State, Facing ИЛИ Reason (все дискретны).</summary>
+        private void ApplySprite(byte state, byte facing, byte reason)
         {
-            if (facing == _lastFacing && state == _lastState) return;
-            _spriteRenderer.sprite = GetSprite(state, (Entity.Direction)facing);
+            if (facing == _lastFacing && state == _lastState && reason == _lastReason) return;
+            _spriteRenderer.sprite = GetSprite(state, reason, (Direction)facing);
             _lastFacing = facing;
             _lastState = state;
+            _lastReason = reason;
         }
 
-        private Sprite GetSprite(byte state, Entity.Direction dir)
+        // Спрайт по (State, Reason, Direction) для всех 6 PlayerState. Пустой слот → фолбэк в Stand-набор;
+        // у Laying KnockedDown — свой слот с фолбэком в общий Laying → Stand (Voluntary рисуется общим Laying).
+        private Sprite GetSprite(byte state, byte reason, Direction dir)
         {
-            // Move-вариант опционален: пока он не назначен в префабе, Move выглядит как Stand.
-            bool moving = state == (byte)PlayerState.Move;
-            switch (dir)
+            switch ((PlayerState)state)
             {
-                case Entity.Direction.North: return moving && _northMoveSprite != null ? _northMoveSprite : _northSprite;
-                case Entity.Direction.South: return moving && _southMoveSprite != null ? _southMoveSprite : _southSprite;
-                case Entity.Direction.East:  return moving && _eastMoveSprite != null ? _eastMoveSprite : _eastSprite;
-                case Entity.Direction.West:  return moving && _westMoveSprite != null ? _westMoveSprite : _westSprite;
-                default:                     return moving && _southMoveSprite != null ? _southMoveSprite : _southSprite;
+                case PlayerState.Move:        return Pick(dir, _northMoveSprite, _southMoveSprite, _eastMoveSprite, _westMoveSprite);
+                case PlayerState.Stun:        return Pick(dir, _northStunSprite, _southStunSprite, _eastStunSprite, _westStunSprite);
+                case PlayerState.Laying:
+                    if ((LayingReason)reason == LayingReason.KnockedDown)
+                    {
+                        var kd = Dir(dir, _northKnockedDownSprite, _southKnockedDownSprite, _eastKnockedDownSprite, _westKnockedDownSprite);
+                        if (kd != null) return kd; // иначе — общий Laying-набор ниже
+                    }
+                    return Pick(dir, _northLayingSprite, _southLayingSprite, _eastLayingSprite, _westLayingSprite);
+                case PlayerState.Unconscious: return Pick(dir, _northUnconsciousSprite, _southUnconsciousSprite, _eastUnconsciousSprite, _westUnconsciousSprite);
+                case PlayerState.Dead:        return Pick(dir, _northDeadSprite, _southDeadSprite, _eastDeadSprite, _westDeadSprite);
+                default:                      return StandSprite(dir); // Stand
             }
         }
+
+        // Спрайт набора по направлению (без фолбэка).
+        private static Sprite Dir(Direction dir, Sprite n, Sprite s, Sprite e, Sprite w) => dir switch
+        {
+            Direction.North => n,
+            Direction.East => e,
+            Direction.West => w,
+            _ => s,
+        };
+
+        // Набор состояния по направлению; пустой слот → фолбэк в Stand-набор.
+        private Sprite Pick(Direction dir, Sprite n, Sprite s, Sprite e, Sprite w)
+        {
+            Sprite chosen = Dir(dir, n, s, e, w);
+            return chosen != null ? chosen : StandSprite(dir);
+        }
+
+        private Sprite StandSprite(Direction dir) => Dir(dir, _northSprite, _southSprite, _eastSprite, _westSprite);
     }
 }

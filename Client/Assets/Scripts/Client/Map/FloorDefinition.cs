@@ -19,8 +19,12 @@ namespace Client.Map
         [Header("Грани 3D-меша (шейдер TileFaceSprites)")]
         [Tooltip("Боковые грани меша пола. MapRenderer кладёт в _SideTex материала.")]
         public Sprite SideSprite;
-        [Tooltip("Верхняя грань при ВЫКЛЮЧЕННОМ autotiling. При UseConnections верх берётся по форме (Connection.GetTopSprite).")]
+        [Tooltip("Верхняя грань при ВЫКЛЮЧЕННОМ autotiling. Пол с autotiling текстурится материалом TileView (TopMap + _i).")]
         public Sprite TopSprite;
+
+        [Header("Верх пола — материал TileView")]
+        [Tooltip("Грид-текстура этого типа пола → _TopMap. Форму выбирает шейдер по _i = 4-(int)shape. Пусто → дефолт материала.")]
+        public Texture2D TopMap;
 
         [Header("Флаги симуляции, которые даёт этот пол")]
         [Tooltip("Сплошной пол не просвечивает на этаж ниже (FOV). Решётка/стекло = false.")]
@@ -54,10 +58,6 @@ namespace Client.Map
 
             public GameObject MeshSingle, MeshEnd, MeshStraight, MeshCorner, MeshT, MeshCross;
 
-            // Top-спрайты по форме (autotiling вкл): шейдер TileFaceSprites текстурит верх меша формы.
-            // Зеркало мешам — MapRenderer берёт спрайт той же формы, что и меш.
-            public Sprite TopSingle, TopEnd, TopStraight, TopCorner, TopT, TopCross;
-
             public GameObject GetMesh(WallShape shape) => shape switch
             {
                 WallShape.Single => MeshSingle,
@@ -66,17 +66,6 @@ namespace Client.Map
                 WallShape.Corner => MeshCorner,
                 WallShape.T => MeshT,
                 WallShape.Cross => MeshCross,
-                _ => null
-            };
-
-            public Sprite GetTopSprite(WallShape shape) => shape switch
-            {
-                WallShape.Single => TopSingle,
-                WallShape.End => TopEnd,
-                WallShape.Straight => TopStraight,
-                WallShape.Corner => TopCorner,
-                WallShape.T => TopT,
-                WallShape.Cross => TopCross,
                 _ => null
             };
         }

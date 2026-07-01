@@ -18,7 +18,9 @@ namespace ServerTests.Shared.Messages.Core
                 Y = 20.5f,
                 Z = 0.0f,
                 Facing = 1,
-                State = (byte)PlayerState.Move
+                State = (byte)PlayerState.Move,
+                Reason = (byte)LayingReason.Voluntary,
+                Speed = 0.25f
             };
 
             var serialized = original.Serialize();
@@ -31,6 +33,8 @@ namespace ServerTests.Shared.Messages.Core
             Assert.Equal(original.Z, deserialized.Z);
             Assert.Equal(original.Facing, deserialized.Facing);
             Assert.Equal(original.State, deserialized.State);
+            Assert.Equal(original.Reason, deserialized.Reason);
+            Assert.Equal(original.Speed, deserialized.Speed);
         }
 
         [Fact]
@@ -48,20 +52,61 @@ namespace ServerTests.Shared.Messages.Core
             Assert.Equal(original.Z, deserialized.Z);
             Assert.Equal(original.Facing, deserialized.Facing);
             Assert.Equal(original.State, deserialized.State); // дефолт 0 (Stand)
+            Assert.Equal(original.Reason, deserialized.Reason); // дефолт 0 (None)
+            Assert.Equal(original.Speed, deserialized.Speed); // дефолт 0
         }
 
         [Fact]
-        public void EntitySnapshot_SerializeNonZeroState_RoundTrips()
+        public void EntitySnapshot_SerializeNonZeroStateAndReason_RoundTrips()
         {
-            var original = new EntitySnapshot { NetId = 7, State = (byte)PlayerState.Move };
+            var original = new EntitySnapshot
+            {
+                NetId = 7,
+                State = (byte)PlayerState.Laying,
+                Reason = (byte)LayingReason.KnockedDown,
+                Speed = 0.15f
+            };
 
             var serialized = original.Serialize();
-            Assert.Equal(18, serialized.Length);
+            Assert.Equal(23, serialized.Length);
 
             var deserialized = new EntitySnapshot();
             deserialized.Deserialize(serialized);
 
-            Assert.Equal((byte)PlayerState.Move, deserialized.State);
+            Assert.Equal((byte)PlayerState.Laying, deserialized.State);
+            Assert.Equal((byte)LayingReason.KnockedDown, deserialized.Reason);
+            Assert.Equal(0.15f, deserialized.Speed);
+        }
+
+        [Fact]
+        public void ReadFrom_MatchesWriteTo_RoundTrips()
+        {
+            // 2.5-A: клиент читает сущность напрямую из reader (WorldSnapshot без per-entity len-prefix). ReadFrom
+            // должен байт-в-байт обратить WriteTo (тот же порядок/23 байта), что и Deserialize(byte[]).
+            var original = new EntitySnapshot
+            {
+                NetId = -42, X = -7.5f, Y = 9.25f, Z = 3.0f,
+                Facing = 3, State = (byte)PlayerState.Laying, Reason = (byte)LayingReason.KnockedDown, Speed = 0.07f
+            };
+
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+                original.WriteTo(w);
+            Assert.Equal(EntitySnapshot.SerializedSize, ms.Length); // 23 байта, без len-prefix
+
+            ms.Position = 0;
+            using var r = new BinaryReader(ms);
+            var back = EntitySnapshot.ReadFrom(r);
+
+            Assert.Equal(original.NetId, back.NetId);
+            Assert.Equal(original.X, back.X);
+            Assert.Equal(original.Y, back.Y);
+            Assert.Equal(original.Z, back.Z);
+            Assert.Equal(original.Facing, back.Facing);
+            Assert.Equal(original.State, back.State);
+            Assert.Equal(original.Reason, back.Reason);
+            Assert.Equal(original.Speed, back.Speed);
+            Assert.Equal(ms.Length, ms.Position); // прочитано ровно 23 байта
         }
 
         [Fact]
@@ -107,6 +152,15 @@ namespace ServerTests.Shared.Messages.Core
         }
 
         [Fact]
+        public void Deserialize_InvalidSpeed_ThrowsInvalidOperationException()
+        {
+            var snapshot = new EntitySnapshot();
+            var data = CreateTestData(netId: 1, x: 10, y: 20, z: 5, facing: 2, state: 0, reason: 0, speed: float.NaN);
+
+            Assert.Throws<InvalidOperationException>(() => snapshot.Deserialize(data));
+        }
+
+        [Fact]
         public void TileX_ValidValue_CalculatesCorrectly()
         {
             var snapshot = new EntitySnapshot { X = 5.7f };
@@ -127,7 +181,7 @@ namespace ServerTests.Shared.Messages.Core
             Assert.Equal(10, snapshot.TileY);
         }
 
-        private static byte[] CreateTestData(int netId, float x, float y, float z, byte facing, byte state)
+        private static byte[] CreateTestData(int netId, float x, float y, float z, byte facing, byte state, byte reason = 0, float speed = 0.1f)
         {
             using var ms = new MemoryStream();
             using var writer = new BinaryWriter(ms);
@@ -137,7 +191,9 @@ namespace ServerTests.Shared.Messages.Core
             writer.Write(y);
             writer.Write(z);
             writer.Write(facing);
-            writer.Write(state); // 18 байт: иначе length-check (18) сработает раньше NaN-check
+            writer.Write(state);
+            writer.Write(reason);
+            writer.Write(speed); // 23 байта: иначе length-check (23) сработает раньше NaN-check
 
             return ms.ToArray();
         }

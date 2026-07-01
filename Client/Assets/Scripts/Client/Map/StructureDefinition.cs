@@ -22,8 +22,12 @@ namespace Client.Map
         [Header("Грани 3D-меша (шейдер TileFaceSprites)")]
         [Tooltip("Боковые грани меша. MapRenderer кладёт в _SideTex материала.")]
         public Sprite SideSprite;
-        [Tooltip("Верхняя грань при ВЫКЛЮЧЕННОМ autotiling. При UseConnections верх берётся по форме (Connection.GetTopSprite).")]
+        [Tooltip("Верхняя грань при ВЫКЛЮЧЕННОМ autotiling. Стены с autotiling текстурятся материалом TileView (TopMap + _i).")]
         public Sprite TopSprite;
+
+        [Header("Верх стены — материал TileView")]
+        [Tooltip("Грид-текстура этого типа стены → _TopMap. Форму выбирает шейдер по _i = 4-(int)shape. Пусто → дефолт материала.")]
+        public Texture2D TopMap;
 
         [Header("Флаги симуляции")]
         [Tooltip("Держит обзор по горизонтали (в закрытом виде). Стекло/окно = false.")]
@@ -61,10 +65,6 @@ namespace Client.Map
 
             public GameObject MeshSingle, MeshEnd, MeshStraight, MeshCorner, MeshT, MeshCross;
 
-            // Top-спрайты по форме (autotiling вкл): шейдер TileFaceSprites текстурит верх меша формы.
-            // Зеркало мешам — MapRenderer берёт спрайт той же формы, что и меш.
-            public Sprite TopSingle, TopEnd, TopStraight, TopCorner, TopT, TopCross;
-
             public GameObject GetMesh(WallShape shape) => shape switch
             {
                 WallShape.Single => MeshSingle,
@@ -73,17 +73,6 @@ namespace Client.Map
                 WallShape.Corner => MeshCorner,
                 WallShape.T => MeshT,
                 WallShape.Cross => MeshCross,
-                _ => null
-            };
-
-            public Sprite GetTopSprite(WallShape shape) => shape switch
-            {
-                WallShape.Single => TopSingle,
-                WallShape.End => TopEnd,
-                WallShape.Straight => TopStraight,
-                WallShape.Corner => TopCorner,
-                WallShape.T => TopT,
-                WallShape.Cross => TopCross,
                 _ => null
             };
         }

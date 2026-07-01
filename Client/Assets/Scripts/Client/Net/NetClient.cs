@@ -15,6 +15,10 @@ namespace Client.Net
         public event Action<LoginResponse> OnLoginResponse;
         public event Action<MapDataMessage> OnMapData;
         public event Action<TileUpdate> OnTileUpdate;
+        public event Action<PlayerJoined> OnPlayerJoined;
+        public event Action<PlayerLeft> OnPlayerLeft;
+        public event Action<ChunkData> OnChunkData;
+        public event Action<ChunkUnload> OnChunkUnload;
         public event Action OnConnected;
         public event Action OnDisconnected;
 
@@ -29,19 +33,24 @@ namespace Client.Net
             _transport.OnLoginResponse += login => OnLoginResponse?.Invoke(login);
             _transport.OnMapData += map => OnMapData?.Invoke(map);
             _transport.OnTileUpdate += tu => OnTileUpdate?.Invoke(tu);
+            _transport.OnPlayerJoined += m => OnPlayerJoined?.Invoke(m);
+            _transport.OnPlayerLeft += m => OnPlayerLeft?.Invoke(m);
+            _transport.OnChunkData += m => OnChunkData?.Invoke(m);
+            _transport.OnChunkUnload += m => OnChunkUnload?.Invoke(m);
         }
 
         public void Connect(string address, int port) => _transport.Connect(address, port);
         public void Disconnect() => _transport.Disconnect();
         public void Poll() => _transport.Poll();
 
-        /// <summary>Отправить намерение движения; возвращает его Sequence (для reconciliation).</summary>
-        public uint SendMove(IntentDirection direction, bool sprint)
+        /// <summary>Отправить намерение движения (+бит «лечь/встать»); возвращает Sequence (для reconciliation).</summary>
+        public uint SendMove(IntentDirection direction, bool sprint, bool layToggle)
         {
             var intent = new MoveIntent
             {
                 Direction = direction,
                 Sprint = sprint,
+                LayToggle = layToggle,
                 Sequence = ++_inputSequence
             };
             _transport.Send(intent);

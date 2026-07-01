@@ -19,6 +19,14 @@ namespace Client.Net
         /// <summary>Изменение одного тайла в рантайме (дверь и т.п.).</summary>
         event Action<TileUpdate> OnTileUpdate;
 
+        /// <summary>Игрок вошёл / вышел (lifecycle сетевых сущностей).</summary>
+        event Action<PlayerJoined> OnPlayerJoined;
+        event Action<PlayerLeft> OnPlayerLeft;
+
+        /// <summary>Стрим карты: пришёл чанк / выгрузить чанк (замена разовой MapData).</summary>
+        event Action<ChunkData> OnChunkData;
+        event Action<ChunkUnload> OnChunkUnload;
+
         bool IsConnected { get; }
 
         void Connect(string address, int port);
