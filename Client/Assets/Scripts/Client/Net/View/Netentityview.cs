@@ -11,43 +11,43 @@ namespace Client.Net.View
     {
         [SerializeField] private SpriteRenderer _spriteRenderer;
 
-        [Header("Direction Sprites")]
+        [Header("Спрайты: Stand")]
         [SerializeField] private Sprite _northSprite;
         [SerializeField] private Sprite _southSprite;
         [SerializeField] private Sprite _eastSprite;
         [SerializeField] private Sprite _westSprite;
 
-        [Header("Move Sprites (опц.: пусто → берётся Stand-набор выше)")]
+        [Header("Спрайты: Move (опц.)")]
         [SerializeField] private Sprite _northMoveSprite;
         [SerializeField] private Sprite _southMoveSprite;
         [SerializeField] private Sprite _eastMoveSprite;
         [SerializeField] private Sprite _westMoveSprite;
 
-        [Header("Stun Sprites (опц.: пусто → Stand-набор)")]
+        [Header("Спрайты: Stun (опц.)")]
         [SerializeField] private Sprite _northStunSprite;
         [SerializeField] private Sprite _southStunSprite;
         [SerializeField] private Sprite _eastStunSprite;
         [SerializeField] private Sprite _westStunSprite;
 
-        [Header("Laying Sprites — добровольное (опц.: пусто → Stand-набор)")]
+        [Header("Спрайты: Laying (опц.)")]
         [SerializeField] private Sprite _northLayingSprite;
         [SerializeField] private Sprite _southLayingSprite;
         [SerializeField] private Sprite _eastLayingSprite;
         [SerializeField] private Sprite _westLayingSprite;
 
-        [Header("Laying KnockedDown Sprites (опц.: пусто → общий Laying → Stand)")]
+        [Header("Спрайты: KnockedDown (опц.)")]
         [SerializeField] private Sprite _northKnockedDownSprite;
         [SerializeField] private Sprite _southKnockedDownSprite;
         [SerializeField] private Sprite _eastKnockedDownSprite;
         [SerializeField] private Sprite _westKnockedDownSprite;
 
-        [Header("Unconscious Sprites (опц.: пусто → Stand-набор)")]
+        [Header("Спрайты: Unconscious (опц.)")]
         [SerializeField] private Sprite _northUnconsciousSprite;
         [SerializeField] private Sprite _southUnconsciousSprite;
         [SerializeField] private Sprite _eastUnconsciousSprite;
         [SerializeField] private Sprite _westUnconsciousSprite;
 
-        [Header("Dead Sprites (ОБЯЗАТЕЛЬНО назначить в префабе — иначе труп выглядит живым)")]
+        [Header("Спрайты: Dead (обязат.)")]
         [SerializeField] private Sprite _northDeadSprite;
         [SerializeField] private Sprite _southDeadSprite;
         [SerializeField] private Sprite _eastDeadSprite;

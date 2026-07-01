@@ -20,13 +20,26 @@ namespace Client.Editor.Inspectors
     [CustomEditor(typeof(MapRenderer))]
     public sealed class MapRendererEditor : UnityEditor.Editor
     {
-        // Подписи R1-полей — static readonly, без аллокаций на repaint.
-        private static readonly GUIContent LRevealBase = new GUIContent("Радиус кольца (далеко)", "Базовый радиус кольца просвета вдали от проёма.");
-        private static readonly GUIContent LRevealMax = new GUIContent("Радиус у проёма (макс)", "Максимальный радиус кольца вплотную к проёму.");
+        // Все подписи — static readonly (без аллокаций на repaint); длинные пояснения в tooltip, не в подписи.
+        private static readonly GUIContent LRevealBase = new GUIContent("Радиус (далеко)", "Базовый радиус кольца просвета вдали от проёма.");
+        private static readonly GUIContent LRevealMax = new GUIContent("Радиус (макс)", "Максимальный радиус кольца вплотную к проёму.");
         private static readonly GUIContent LRevealProximity = new GUIContent("Дистанция роста", "Дистанция до проёма, на которой радиус растёт от базового к максимуму.");
-        private static readonly GUIContent LWallRevealAlpha = new GUIContent("Непрозрачность стен (reveal)", "Единая альфа стен reveal-уровня (без cheb/глубины), 0..1.");
+        private static readonly GUIContent LWallRevealAlpha = new GUIContent("Альфа стен", "Единая альфа стен reveal-уровня (без cheb/глубины), 0..1.");
         private static readonly GUIContent LRevealMaxFloors = new GUIContent("Глубина этажей", "Макс число этажей просвета вверх/вниз.");
         private static readonly GUIContent LRevealDepthDim = new GUIContent("Затемнение/этаж", "Множитель яркости на этаж глубже, 0..1.");
+        private static readonly GUIContent LCatalog = new GUIContent("Каталог", "Каталог тайлов (id → префаб/спрайт). Без него рисовать нечем.");
+        private static readonly GUIContent LStartZ = new GUIContent("Стартовый этаж", "Активный Z-этаж на старте (в игре ведёт NetworkRunner).");
+        private static readonly GUIContent LFadeMat = new GUIContent("Прозр. материал", "URP/Lit Surface=Transparent, ZWrite Off — для колец верхнего этажа.");
+        private static readonly GUIContent LDrawReveal = new GUIContent("Этаж выше", "Показывать этаж выше кольцами вокруг проёмов в потолке.");
+        private static readonly GUIContent LXray = new GUIContent("Рентген", "Показывать весь верхний этаж полупрозрачным, не только кольца у проёмов.");
+        private static readonly GUIContent LXrayAlpha = new GUIContent("Альфа рентгена", "Непрозрачность верхнего этажа в режиме рентгена (0..1).");
+        private static readonly GUIContent LFadeRings = new GUIContent("Кольца", "Градиент непрозрачности кольца по абсолютному индексу (cheb + floorStep·depthDim).");
+        private static readonly GUIContent LFloorYOffset = new GUIContent("Сдвиг пола Y", "Доп. сдвиг пола по Y над уровнем этажа (обычно 0).");
+        private static readonly GUIContent LWallYOffset = new GUIContent("Сдвиг стены Y", "Сдвиг стены по Y над полом — против z-fighting плоских квадов.");
+        private static readonly GUIContent LFloorSort = new GUIContent("Sorting пола");
+        private static readonly GUIContent LWallSort = new GUIContent("Sorting стены");
+        private static readonly GUIContent LSeam = new GUIContent("Анти-шов", "Лёгкое расширение тайлов пола против шва на стыках (1.0 = выкл).");
+        private static readonly GUIContent LTestMap = new GUIContent("Тест .smap", "Относительный путь к .smap для загрузки при старте. Пусто = не грузить.");
 
         private SerializedProperty _catalog;
         private SerializedProperty _activeZ;
@@ -86,7 +99,7 @@ namespace Client.Editor.Inspectors
 
             // 1. Данные — без каталога рисовать нечем.
             EditorGUILayout.LabelField("Данные", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(_catalog, new GUIContent("Каталог тайлов"));
+            EditorGUILayout.PropertyField(_catalog, LCatalog);
             if (_catalog.objectReferenceValue == null)
                 EditorGUILayout.HelpBox(
                     "Каталог не задан — ApplyChunk нечем рисовать (в рантайме будет ошибка).",
@@ -111,7 +124,7 @@ namespace Client.Editor.Inspectors
             }
             else
             {
-                EditorGUILayout.PropertyField(_activeZ, new GUIContent("Стартовый этаж"));
+                EditorGUILayout.PropertyField(_activeZ, LStartZ);
             }
 
             EditorGUILayout.Space(8);
@@ -122,29 +135,30 @@ namespace Client.Editor.Inspectors
             EditorGUILayout.LabelField(
                 "Низ виден сквозь дыры обычной отрисовкой. Здесь — только верхний этаж.",
                 EditorStyles.miniLabel);
-            EditorGUILayout.PropertyField(_floorFadeMaterial, new GUIContent("Прозрачный материал"));
+            EditorGUILayout.PropertyField(_floorFadeMaterial, LFadeMat);
             if (_floorFadeMaterial.objectReferenceValue == null)
                 EditorGUILayout.HelpBox(
                     "Материал не задан — полупрозрачность верхнего этажа не работает. " +
                     "Создай URP/Lit: Surface=Transparent, ZWrite Off.",
                     MessageType.Warning);
-            EditorGUILayout.PropertyField(_drawCeilingReveal, new GUIContent("Показывать этаж выше (кольца)"));
-            using (new EditorGUI.DisabledScope(!_drawCeilingReveal.boolValue))
-            using (new EditorGUI.IndentLevelScope())
-            {
-                EditorGUILayout.PropertyField(_ceilingSemiTransparent, new GUIContent("Рентген: весь верхний этаж"));
-                using (new EditorGUI.DisabledScope(!_ceilingSemiTransparent.boolValue))
-                    EditorGUILayout.PropertyField(_ceilingXrayAlpha, new GUIContent("Непрозрачность рентгена"));
-                EditorGUILayout.PropertyField(_fadeRingOpacity, new GUIContent("Кольца верхнего этажа"), true);
+            EditorGUILayout.PropertyField(_drawCeilingReveal, LDrawReveal);
+            // Под-параметры просвета СКРЫВАЕМ (не грейним), когда просвет выключен.
+            if (_drawCeilingReveal.boolValue)
+                using (new EditorGUI.IndentLevelScope())
+                {
+                    EditorGUILayout.PropertyField(_ceilingSemiTransparent, LXray);
+                    if (_ceilingSemiTransparent.boolValue)
+                        EditorGUILayout.PropertyField(_ceilingXrayAlpha, LXrayAlpha);
+                    EditorGUILayout.PropertyField(_fadeRingOpacity, LFadeRings, true);
 
-                EditorGUILayout.LabelField("Динамический просвет (R1)", EditorStyles.miniBoldLabel);
-                EditorGUILayout.PropertyField(_revealBaseRadius, LRevealBase);
-                EditorGUILayout.PropertyField(_revealMaxRadius, LRevealMax);
-                EditorGUILayout.PropertyField(_revealProximityDistance, LRevealProximity);
-                EditorGUILayout.PropertyField(_wallRevealAlpha, LWallRevealAlpha);
-                EditorGUILayout.PropertyField(_revealMaxFloors, LRevealMaxFloors);
-                EditorGUILayout.PropertyField(_revealDepthDim, LRevealDepthDim);
-            }
+                    EditorGUILayout.LabelField("Динамический просвет (R1)", EditorStyles.miniBoldLabel);
+                    EditorGUILayout.PropertyField(_revealBaseRadius, LRevealBase);
+                    EditorGUILayout.PropertyField(_revealMaxRadius, LRevealMax);
+                    EditorGUILayout.PropertyField(_revealProximityDistance, LRevealProximity);
+                    EditorGUILayout.PropertyField(_wallRevealAlpha, LWallRevealAlpha);
+                    EditorGUILayout.PropertyField(_revealMaxFloors, LRevealMaxFloors);
+                    EditorGUILayout.PropertyField(_revealDepthDim, LRevealDepthDim);
+                }
 
             EditorGUILayout.Space(8);
 
@@ -159,11 +173,11 @@ namespace Client.Editor.Inspectors
             {
                 using (new EditorGUI.IndentLevelScope())
                 {
-                    EditorGUILayout.PropertyField(_floorYOffset, new GUIContent("Сдвиг пола по Y"));
-                    EditorGUILayout.PropertyField(_wallYOffset, new GUIContent("Сдвиг стены по Y"));
-                    EditorGUILayout.PropertyField(_floorSortingOrder, new GUIContent("Sorting пола"));
-                    EditorGUILayout.PropertyField(_wallSortingOrder, new GUIContent("Sorting стены"));
-                    EditorGUILayout.PropertyField(_floorSeamScale, new GUIContent("Анти-шов пола"));
+                    EditorGUILayout.PropertyField(_floorYOffset, LFloorYOffset);
+                    EditorGUILayout.PropertyField(_wallYOffset, LWallYOffset);
+                    EditorGUILayout.PropertyField(_floorSortingOrder, LFloorSort);
+                    EditorGUILayout.PropertyField(_wallSortingOrder, LWallSort);
+                    EditorGUILayout.PropertyField(_floorSeamScale, LSeam);
                 }
             }
 
@@ -180,7 +194,7 @@ namespace Client.Editor.Inspectors
             {
                 using (new EditorGUI.IndentLevelScope())
                 {
-                    EditorGUILayout.PropertyField(_testMapPath, new GUIContent("Тестовая .smap"));
+                    EditorGUILayout.PropertyField(_testMapPath, LTestMap);
                     using (new EditorGUI.DisabledScope(
                         !Application.isPlaying || string.IsNullOrEmpty(_testMapPath.stringValue)))
                     {

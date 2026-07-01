@@ -35,6 +35,12 @@ namespace Client.Map
         [Tooltip("Не пропускает газ по горизонтали (герметичность).")]
         public bool SealsHorizontal = true;
 
+        [Tooltip("Держит обзор по вертикали (Z). Лестница-проём вниз = false → видно сквозь этаж (reveal-дыра).")]
+        [SerializeField] private bool _blocksVerticalSight = true;
+
+        /// <summary>Держит ли обзор по вертикали (Z). Дефолт true (стена/окно); see-through лестница-проём = false.</summary>
+        public bool BlocksVerticalSight => _blocksVerticalSight;
+
         /// <summary>Открываемый объект (дверь/люк), а не глухой (стена/окно).</summary>
         public bool Openable => Category == StructureCategory.Door || Category == StructureCategory.Hatch;
 

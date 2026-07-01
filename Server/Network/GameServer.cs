@@ -38,6 +38,12 @@ public class GameServer
     private readonly BinaryWriter _broadcastPayloadWriter;
     private readonly NetDataWriter _broadcastWriter = new();
 
+    // MTU-guard: снапшот на Sequenced (2.5-B) НЕ фрагментируется — при большом видимом наборе payload превысит MTU и
+    // начнёт молча теряться. Логируем предупреждение (throttled раз/5с), консервативный порог ~1200 (типичный MTU ~1400+
+    // минус заголовки; надёжной публичной константы в LiteNetLib 2.1 нет). Триггер под будущие дельты (план C).
+    private const int SnapshotMtuWarnBytes = 1200;
+    private uint _lastMtuWarnTick; // 0 = ещё не предупреждали
+
     public event Action<ClientConnection>? OnClientConnected;
     public event Action<ClientConnection>? OnClientDisconnected;
     public event Action<ClientConnection, MoveIntent>? OnMoveIntentReceived;
@@ -454,11 +460,22 @@ public class GameServer
             snapshot.WriteTo(_broadcastPayloadWriter, _perClientEntities, k);
             _broadcastPayloadWriter.Flush();
 
-            // Кадр tag + length-prefixed payload — в переиспользуемый NetDataWriter. КАНАЛ ReliableOrdered (смена — сабшаг B).
+            // MTU-guard: Sequenced не фрагментирует → большой payload молча теряется. Предупреждаем throttled (раз/5с).
+            if (_broadcastPayload.Length > SnapshotMtuWarnBytes
+                && (_lastMtuWarnTick == 0 || _currentTick - _lastMtuWarnTick >= (uint)_config.TickRate * 5))
+            {
+                Console.WriteLine($"[Server] WARN: snapshot payload {_broadcastPayload.Length}B > {SnapshotMtuWarnBytes}B " +
+                                  $"(client #{client.ConnectionId}, {k} сущностей) — Sequenced не фрагментирует, риск молчаливой потери; нужны дельты (план C)");
+                _lastMtuWarnTick = _currentTick;
+            }
+
+            // Кадр tag + length-prefixed payload — в переиспользуемый NetDataWriter. КАНАЛ Sequenced (2.5-B): свежайший
+            // full-state; потеря само-исцеляется следующим тиком (Reconcile пере-сидит безусловно). Интенты/двери/чанки —
+            // на своих reliable-каналах (НЕ трогаем). ТОЛЬКО этот Send — Sequenced.
             _broadcastWriter.Reset();
             _broadcastWriter.Put((ushort)MessageType.WorldSnapshot);
             _broadcastWriter.PutBytesWithLength(_broadcastPayload.GetBuffer(), 0, (ushort)_broadcastPayload.Length);
-            client.Peer.Send(_broadcastWriter, DeliveryMethod.ReliableOrdered);
+            client.Peer.Send(_broadcastWriter, DeliveryMethod.Sequenced);
         }
     }
 
@@ -647,15 +664,27 @@ public class GameServer
         else if (tile.Special == TileSpecial.StairDown) targetZ = fromZ - 1;
         else return; // не лестница — ничего не делаем
 
-        // Назначение — парная лестница в той же колонке. Переходим, только если там
-        // можно стоять (редактор ставит пару с полом; защита от «лестницы в никуда»).
-        var dest = _map.GetTile(px, py, targetZ);
-        if (!dest.Walkable) return;
+        // Высадка на targetZ: на парный тайл, если там можно стоять; иначе — на первый walkable-сосед (ладдер-проём
+        // наверху — блок-структура, на неё не встать → сходим рядом). Нет walkable — стоп (гард «лестница в никуда»).
+        if (!TryFindLanding(_map, px, py, targetZ, out int nx, out int ny)) return;
 
-        client.X = px + 0.5f;   // в центр парной лестницы на другом этаже
-        client.Y = py + 0.5f;
+        client.X = nx + 0.5f;
+        client.Y = ny + 0.5f;
         client.Z = targetZ;
-        Console.WriteLine($"[Stairs] #{client.ConnectionId}: z{fromZ} -> z{targetZ} at ({px},{py})");
+        Console.WriteLine($"[Stairs] #{client.ConnectionId}: z{fromZ} -> z{targetZ} at ({nx},{ny})");
+    }
+
+    /// <summary>Найти клетку высадки лестницы на targetZ: парный тайл (px,py) если walkable, иначе первый walkable-сосед
+    /// в порядке N/E/S/W. false — высаживаться некуда (гард «лестница в никуда»). public static — юнит-тестируется напрямую.</summary>
+    public static bool TryFindLanding(GridMap map, int px, int py, int targetZ, out int nx, out int ny)
+    {
+        if (map.GetTile(px, py, targetZ).Walkable) { nx = px; ny = py; return true; }        // парный тайл (как раньше)
+        if (map.GetTile(px, py + 1, targetZ).Walkable) { nx = px; ny = py + 1; return true; } // N
+        if (map.GetTile(px + 1, py, targetZ).Walkable) { nx = px + 1; ny = py; return true; } // E
+        if (map.GetTile(px, py - 1, targetZ).Walkable) { nx = px; ny = py - 1; return true; } // S
+        if (map.GetTile(px - 1, py, targetZ).Walkable) { nx = px - 1; ny = py; return true; } // W
+        nx = px; ny = py;
+        return false;
     }
 
     /// <summary>Гравитация: падаем на этаж ниже, только если СТРОГО больше 50% футпринта игрока (коллизионный AABB

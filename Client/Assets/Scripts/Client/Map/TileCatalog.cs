@@ -96,9 +96,18 @@ namespace Client.Map
                 }
                 if (!t.Openable)
                 {
-                    // Глухой объект (стена/окно) держит вертикаль и герметичен по Z.
-                    t.BlocksVerticalSight = true;
-                    t.SealsVertical = true;
+                    // Неоткрываемый объект: вертикаль/герметичность по Z берём из SO — see-through лестница-проём
+                    // (BlocksVerticalSight=false) даёт reveal-дыру и не герметичен по Z. Нет SO → консервативно держим.
+                    if (s != null)
+                    {
+                        t.BlocksVerticalSight = s.BlocksVerticalSight;
+                        t.SealsVertical = s.BlocksVerticalSight; // see-through ⇒ не герметичен по Z
+                    }
+                    else
+                    {
+                        t.BlocksVerticalSight = true;
+                        t.SealsVertical = true;
+                    }
                 }
             }
 
