@@ -18,6 +18,7 @@ MonoBehaviour:
   Prefab: {fileID: 5886712932950718308, guid: 4b605fb98c9d75a42b883ecdda07d8b6, type: 3}
   SideSprite: {fileID: -312021214, guid: 36e995cc6af84e842b4d6a366b000961, type: 3}
   TopSprite: {fileID: 21300000, guid: e2e41efd3c2d51040ae85a1ccfe839cf, type: 3}
+  TopMap: {fileID: 2800000, guid: a680f83a0bfe93b4383b3df3c4514d1a, type: 3}
   BlocksVerticalSight: 1
   SealsVertical: 1
   Connection:
@@ -31,9 +32,3 @@ MonoBehaviour:
     MeshCorner: {fileID: 4376710111407018939, guid: aa277530c42d5d04bb661b3674505bd8, type: 3}
     MeshT: {fileID: 2476352247093195437, guid: b711e138dfcfd00419f207312c6bdb0a, type: 3}
     MeshCross: {fileID: 8947755035325840453, guid: 751f3cc5fadca154b850c9c66adc2e3b, type: 3}
-    TopSingle: {fileID: 21300000, guid: e2e41efd3c2d51040ae85a1ccfe839cf, type: 3}
-    TopEnd: {fileID: 21300000, guid: e2e41efd3c2d51040ae85a1ccfe839cf, type: 3}
-    TopStraight: {fileID: 21300000, guid: e2e41efd3c2d51040ae85a1ccfe839cf, type: 3}
-    TopCorner: {fileID: 643592574, guid: 38ad1317478eb1e4bb14866b189e54f9, type: 3}
-    TopT: {fileID: -705550082, guid: 38ad1317478eb1e4bb14866b189e54f9, type: 3}
-    TopCross: {fileID: 21300000, guid: e2e41efd3c2d51040ae85a1ccfe839cf, type: 3}
