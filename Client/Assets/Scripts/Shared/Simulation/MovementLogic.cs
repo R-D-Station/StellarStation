@@ -22,8 +22,8 @@ namespace Shared.Simulation
         /// <summary>Множитель шага при ползании (Laying). Литерал (как InvSqrt2) — один и тот же бит обе стороны.</summary>
         public const float CrawlMultiplier = 0.7f;
 
-        /// <summary>Применить один шаг движения к позиции (X/Y суб-тайловые, Z не меняется). baseStep — база
-        /// скорости/тик (дефолт StepPerTick; обычно AdvancedValue.CurrentValue из ОДНОЙ базы обе стороны).</summary>
+        /// <summary>Применить один шаг движения к позиции (X/Y суб-тайловые, Z не меняется). baseStep —
+        /// скорость/тик: сервер = Speed.CurrentValue (AdvancedValue), клиент = EntitySnapshot.Speed (авторитетно из снапшота).</summary>
         public static void Apply(GridMap map, int z, ref float x, ref float y, IntentDirection dir, bool sprint, bool crawl = false, float baseStep = StepPerTick)
         {
             GetAxes(dir, out int dx, out int dy);

@@ -21,7 +21,7 @@ namespace Client.Net
         [Tooltip("Частота тиков. Дефолт до логина; затем перезаписывается серверным LoginResponse.TickRate.")]
         [SerializeField] private int _tickRate = 30;
 
-        [Header("Карта (приходит с сервера)")]
+        [Header("Карта")]
         [Tooltip("Рендерер, которому отдать карту, полученную от сервера.")]
         [SerializeField] private View.MapRenderer _mapRenderer;
         [Tooltip("Опц.: камера, которая должна следовать за локальным игроком. Пусто — не трогаем.")]
@@ -44,6 +44,11 @@ namespace Client.Net
         // Backstop despawn: переиспользуемые буферы (без per-tick аллокаций — правило CLAUDE.md).
         private readonly HashSet<int> _seenIds = new HashSet<int>();
         private readonly List<int> _toRemove = new List<int>();
+
+        // ServerTick-guard (2.5-B): снапшот на Sequenced-канале → дропаем устаревший/переупорядоченный, чтобы Reconcile
+        // не сел на СТАРЫЙ авторитет поверх свежего. _snapshotSeen пропускает ПЕРВЫЙ снапшот при любом стартовом тике.
+        private uint _lastServerTick;
+        private bool _snapshotSeen;
 
         // Реплика карты: один объект на предиктор и рендер, TileUpdate применяем один раз.
         private GridMap _map;
@@ -253,6 +258,13 @@ namespace Client.Net
         private void OnSnapshot(WorldSnapshot snap)
         {
             if (snap.Entities == null) return;
+
+            // Дропаем устаревший/переупорядоченный снапшот (Sequenced обычно уже отсеивает, но страхуемся независимо от
+            // семантики этой сборки LiteNetLib) — иначе Reconcile сядет на СТАРЫЙ авторитет поверх свежего. ack
+            // (LastProcessedInput) монотонен → prune-до-последнего от свежайшего снапшота корректен.
+            if (_snapshotSeen && snap.ServerTick <= _lastServerTick) return;
+            _snapshotSeen = true;
+            _lastServerTick = snap.ServerTick;
 
             _seenIds.Clear();
             float now = Time.time;

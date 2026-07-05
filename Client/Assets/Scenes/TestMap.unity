@@ -475,6 +475,11 @@ MonoBehaviour:
   _floorSortingOrder: 0
   _wallSortingOrder: 10
   _floorSeamScale: 1.02
+  _stairUpMarker: {fileID: 0}
+  _stairDownMarker: {fileID: 0}
+  _spawnMarker: {fileID: 0}
+  _markerYOffset: 0.002
+  _markerSortingOrder: 5
   _floorFadeMaterial: {fileID: 2100000, guid: bf5a4111a65052f46805ff0c528ff9ac, type: 2}
   _drawCeilingReveal: 1
   _ceilingSemiTransparent: 0
