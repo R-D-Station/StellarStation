@@ -3,7 +3,12 @@ Shader "Custom/TileReader"
     Properties
     {
         [MainTexture] _TopMap("Base Map", 2D) = "white" {}
-        _i("InputBits",Float)=0
+        _cur("_cur",Float)=0
+        _cur_corner("_cur_corner",Float)=0
+        _rotate("_rotate",Float)=0
+        _count("_count",Float)=0
+
+
     }
 
     SubShader
@@ -23,7 +28,11 @@ Shader "Custom/TileReader"
 
              CBUFFER_START(UnityPerMaterial)
                 float4 _TopMap_ST;
-                uint _i;
+                uint _cur;
+                uint _cur_corner;
+                uint _rotate;
+                uint _count;
+                
             CBUFFER_END
 
             struct Attributes
@@ -37,8 +46,15 @@ Shader "Custom/TileReader"
                 float4 positionHCS : SV_POSITION;
                 float2 uv : TEXCOORD0;
             };
-
-
+            float2 rotateUv(float2 uv){
+                static const float2x2 R[4]={
+                    float2x2(1,0,0,1),
+                    float2x2(0,-1,1,0),
+                    float2x2(-1,0,0,-1),
+                    float2x2(0,1,-1,0)
+                };
+                return mul(R[_rotate],uv - 0.5) + 0.5;
+            };
             Varyings vert(Attributes IN)
             {
                 Varyings OUT;
@@ -49,18 +65,23 @@ Shader "Custom/TileReader"
 
             half4 frag(Varyings IN) : SV_Target
             {
-                /*uint bits = asuint(_InputBits);
-                [unroll]
-                for (uint i = 0u;i<32u;i++){
-                    uint bit = (bits>>i)&1u;
-                }
-
-                uint bit = (bits>>0)&1u;*/
                 float2 tiledUV = IN.uv;
-                tiledUV.x=(tiledUV.x+_i)/5; 
-                half3 tile = SAMPLE_TEXTURE2D( _TopMap, sampler_TopMap, tiledUV);
+
+                tiledUV.x=(tiledUV.x+_cur-1)/_count;
+                tiledUV.y=(tiledUV.y+1)/2;  
+                half4 wallTex = SAMPLE_TEXTURE2D( _TopMap, sampler_TopMap, tiledUV);
+
+                tiledUV = rotateUv(IN.uv);
+                tiledUV.y=(tiledUV.y)/2;  
+                tiledUV.x=(tiledUV.x+_cur_corner-1)/_count;
+                
+                half4 cornerTex = SAMPLE_TEXTURE2D( _TopMap, sampler_TopMap, tiledUV);
+                 
                 half4 color;
-                color.rgb=tile;
+                half4 downColor = {0,0,0,1};
+                wallTex = lerp(downColor,wallTex,(1 && _cur)*wallTex.a);
+                wallTex = lerp(wallTex,cornerTex,(1 && _cur_corner)*cornerTex.a);
+                color.rgb=wallTex;
                 return color;
             }
             ENDHLSL
