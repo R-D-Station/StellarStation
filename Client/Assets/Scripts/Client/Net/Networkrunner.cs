@@ -245,6 +245,9 @@ namespace Client.Net
             }
         }
 
+        /// <summary>Камера обзора для world-anchored надписей (LabelManager): та же ленивая ClickCamera (резолв Camera.main).</summary>
+        public UnityEngine.Camera ViewCamera => ClickCamera;
+
         /// <summary>Клик мыши → адресная интеракция (в Update, не в Tick): request-only, без предсказания. Экран→ЦЕЛЫЙ
         /// тайл по камере на плоскости этажа игрока (строго PlayerPredictor.Z); опц. пик сущности, иначе цель-тайл.</summary>
         private void HandleInteractionInput()

@@ -15,6 +15,8 @@ namespace Client.UI.Labels
         [SerializeField] private CanvasGroup _group;
         [Tooltip("Опц.: фон-Image (для LabelStyleTable.Background). Пусто → фон не красим.")]
         [SerializeField] private Image _background;
+        [Tooltip("Зазор рамки вокруг текста, экранные пиксели: размер RectTransform = preferred size текста + это.")]
+        [SerializeField] private Vector2 _padding = new Vector2(16f, 10f);
 
         private RectTransform _rt;
 
@@ -54,6 +56,9 @@ namespace Client.UI.Labels
                 _text.text = text;
                 _text.fontSize = fontSize;
                 _text.color = textColor;
+                Debug.Log(_text.GetPreferredValues(text));
+                Debug.Log(_rt.sizeDelta);
+                _rt.sizeDelta = _text.GetPreferredValues(text) + _padding;
             }
             if (_background != null) _background.color = background;
             if (_group != null) _group.alpha = fadeIn > 0f ? 0f : 1f;

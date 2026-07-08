@@ -209,7 +209,6 @@ GameObject:
   - component: {fileID: 711917054}
   - component: {fileID: 711917053}
   - component: {fileID: 711917052}
-  - component: {fileID: 711917051}
   m_Layer: 5
   m_Name: Canvas
   m_TagString: Untagged
@@ -217,23 +216,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &711917051
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 711917050}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: dc42784cf147c0c48a680349fa168899, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.GraphicRaycaster
-  m_IgnoreReversedGraphics: 1
-  m_BlockingObjects: 0
-  m_BlockingMask:
-    serializedVersion: 2
-    m_Bits: 4294967295
 --- !u!114 &711917052
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -274,8 +256,8 @@ Canvas:
   m_OverrideSorting: 0
   m_OverridePixelPerfect: 0
   m_SortingBucketNormalizedSize: 0
-  m_VertexColorAlwaysGammaSpace: 0
-  m_AdditionalShaderChannelsFlag: 0
+  m_VertexColorAlwaysGammaSpace: 1
+  m_AdditionalShaderChannelsFlag: 25
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
   m_SortingOrder: 0
@@ -385,11 +367,9 @@ MonoBehaviour:
   _dwellSeconds: 2
   _reachGate: 1
   _fovGate: 0
-  _cursorOffset: {x: 16, y: 16}
   _followCursor: 1
-  _fontSize: 14
-  _boxTint: {r: 0, g: 0, b: 0, a: 0.8}
   _hintText: {fileID: 0}
+  _labels: {fileID: 1850106032}
 --- !u!1 &1067873584
 GameObject:
   m_ObjectHideFlags: 0
@@ -620,6 +600,55 @@ MonoBehaviour:
   _revealDepthDim: 0.6
   _wallRevealAlpha: 0.75
   _testMapPath: E:\VS projects\StellarStation\Client\Assets\Map\station.smap
+--- !u!1 &1850106031
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1850106033}
+  - component: {fileID: 1850106032}
+  m_Layer: 0
+  m_Name: LabelSystem
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1850106032
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1850106031}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f99dc4fa3861b3b469094b8ca7346eed, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Client.UI.Labels.LabelManager
+  _prefab: {fileID: 5968586522883582670, guid: cc35b018deffd854289c34ea14ac2c71, type: 3}
+  _canvas: {fileID: 711917054}
+  _initialPool: 8
+  _style: {fileID: 11400000, guid: 88f561a0bac4c224d805040a322fc8b4, type: 2}
+  _runner: {fileID: 960182750}
+--- !u!4 &1850106033
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1850106031}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1961795966
 GameObject:
   m_ObjectHideFlags: 0
@@ -816,3 +845,4 @@ SceneRoots:
   - {fileID: 1824954096}
   - {fileID: 2039717658}
   - {fileID: 711917054}
+  - {fileID: 1850106033}
