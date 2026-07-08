@@ -5,9 +5,7 @@ using Client.UI.Labels;
 
 namespace Client.Editor.Inspectors
 {
-    /// <summary>Компактный инспектор <see cref="LabelStyleTable"/>: на каждый Entry — заголовок Kind и его поля.
-    /// Для «вечной» надписи (Lifetime = ∞) поля Появл./Исчез. скрыты (fade по таймеру не применяется).
-    /// Только отображение; логику видов не дублирует.</summary>
+    /// <summary>Компактный инспектор <see cref="LabelStyleTable"/>: заголовок Kind и поля на каждый Entry, условный показ по «Вечная».</summary>
     [CustomEditor(typeof(LabelStyleTable))]
     public sealed class LabelStyleTableEditor : UnityEditor.Editor
     {
@@ -28,9 +26,7 @@ namespace Client.Editor.Inspectors
 
         private void OnEnable()
         {
-            // null-гард ([[inspector-so-field-coupling]]): LabelStyleTable создаёт MainCoder параллельно —
-            // поле может ещё не появиться на диске; FindProperty вернёт null.
-            _entries = serializedObject.FindProperty("_entries");
+            _entries = serializedObject.FindProperty("_entries"); // null-гард ниже — см. [[inspector-so-field-coupling]]
         }
 
         public override void OnInspectorGUI()
@@ -97,8 +93,7 @@ namespace Client.Editor.Inspectors
 
                 if (lifetime != null)
                 {
-                    // «Вечная» = +∞: удобный способ выставить/снять Infinity + гейт для Жизнь/Появл./Исчез.
-                    // Строго PositiveInfinity — симметрично записи (line ниже) и рантайм-сверке в PooledLabel.
+                    // Строго PositiveInfinity — симметрично записи ниже и рантайм-сверке в PooledLabel.
                     bool eternal = float.IsPositiveInfinity(lifetime.floatValue);
                     bool next = EditorGUILayout.Toggle(LEternal, eternal);
                     if (next != eternal)

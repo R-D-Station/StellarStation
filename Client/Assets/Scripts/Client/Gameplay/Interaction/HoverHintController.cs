@@ -7,8 +7,7 @@ using Client.UI.Labels;
 
 namespace Client.Gameplay.Interaction
 {
-    /// <summary>Подсказка ЛКМ-действия по наведению: держишь курсор ≥DwellSeconds на интерактивном тайле (в дальности) →
-    /// пул-надпись CursorHint у курсора. Драйвится <see cref="NetworkRunner"/>.Tick(this) из Update. MVP — лестница (см. InteractionHints).</summary>
+    /// <summary>Подсказка ЛКМ-действия по наведению: dwell на интерактивном тайле в дальности → пул-надпись CursorHint у курсора.</summary>
     public sealed class HoverHintController : MonoBehaviour
     {
         [Tooltip("Держать курсор на цели столько секунд, прежде чем показать подсказку.")]

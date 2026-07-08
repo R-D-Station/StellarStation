@@ -2,8 +2,7 @@ using UnityEngine;
 
 namespace Client.UI.Labels
 {
-    /// <summary>SO-стили надписей по <see cref="LabelKind"/> (время жизни/фейды/шрифт/цвета/смещение). Runtime-данные;
-    /// зеркало HintTextTable. Инспектор — LabelStyleTableEditor (EditorCoder).</summary>
+    /// <summary>SO-стили надписей по <see cref="LabelKind"/>: время жизни, фейды, шрифт, цвета, смещение.</summary>
     [CreateAssetMenu(menuName = "Station/Label Style Table", fileName = "LabelStyleTable")]
     public sealed class LabelStyleTable : ScriptableObject
     {
@@ -35,8 +34,8 @@ namespace Client.UI.Labels
             return Default(k);
         }
 
-        /// <summary>Безопасный дефолт, если записи/таблицы нет: ВИДИМАЯ, ПЕРСИСТЕНТНАЯ надпись (Lifetime=∞) — чтобы мисконфиг
-        /// был ЗАМЕТЕН (надпись висит), а не молча исчезал через кадр (default(Entry).Lifetime=0 → мгновенный само-возврат).</summary>
+        /// <summary>Безопасный дефолт, если записи/таблицы нет: видимая персистентная надпись (Lifetime=∞).</summary>
+        // Lifetime=∞ намеренно: мисконфиг заметен (надпись висит), а не тихо исчезает за кадр как default(Entry) (Lifetime=0).
         public static Entry Default(LabelKind k) => new Entry
         {
             Kind = k,

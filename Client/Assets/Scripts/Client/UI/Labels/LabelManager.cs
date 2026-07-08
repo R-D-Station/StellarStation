@@ -5,8 +5,7 @@ using Client.Util;
 
 namespace Client.UI.Labels
 {
-    /// <summary>Менеджер пула экранных надписей (срез 1: только CursorHint). Пул под активным Canvas (Screen-Space-Overlay);
-    /// свободная надпись = SetActive(false). World-anchored (над игроком/объектом) — следующий срез.</summary>
+    /// <summary>Менеджер пула экранных надписей: курсор-подсказки и world-anchored сообщения на Screen-Space-Overlay Canvas.</summary>
     public sealed class LabelManager : MonoBehaviour
     {
         [SerializeField] private PooledLabel _prefab;
@@ -50,7 +49,7 @@ namespace Client.UI.Labels
             if (handle != null) handle.Dismiss();
         }
 
-        // Dev-проверка пула в Play (hover не мигрируем → это единственный живой триггер среза): спавн CursorHint у курсора, follow.
+        // Dev-проверка пула в Play: спавн CursorHint у курсора, follow.
         [ContextMenu("Debug: spawn test cursor hint")]
         private void DebugSpawnHint()
         {
@@ -61,8 +60,7 @@ namespace Client.UI.Labels
             ShowCursorHint(LabelKind.CursorHint, "Тест: курсор-подсказка", pos, follow: true);
         }
 
-        /// <summary>Надпись, привязанная к ОБЪЕКТУ в мире (FollowWorld: следует за anchor через WorldToScreenPoint; offset —
-        /// в SCREEN-пикселях после проекции, 2.5D-safe). Авто-истечение по конечному Lifetime стиля (в PooledLabel).</summary>
+        /// <summary>Надпись, привязанная к объекту в мире (FollowWorld: следует за anchor через WorldToScreenPoint).</summary>
         public PooledLabel ShowWorldMessage(LabelKind kind, string text, Transform anchor)
         {
             var s = _style != null ? _style.For(kind) : LabelStyleTable.Default(kind);

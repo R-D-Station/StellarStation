@@ -5,9 +5,7 @@ using Client.UI.Labels;
 
 namespace Client.Util
 {
-    /// <summary>Пул MonoBehaviour-объектов (порт внешнего PoolMono, адаптирован). Свободная = !activeInHierarchy;
-    /// O(n) free-scan (надписей единицы). При выдаче дёргает <see cref="IPooledLabel.OnAcquire"/> (reset до pristine) —
-    /// PoolMono остаётся ОБЩИМ (хук опционален через is-проверку). autoExpand БЕЗ hard-cap (в отличие от тайл-пула 512).</summary>
+    /// <summary>Пул MonoBehaviour-объектов: свободная = !activeInHierarchy, O(n) free-scan, autoExpand без hard-cap.</summary>
     public class PoolMono<T> where T : MonoBehaviour
     {
         public T prefab { get; }
@@ -81,10 +79,9 @@ namespace Client.Util
             throw new Exception($"PoolMono<{typeof(T).Name}>: нет свободного элемента и autoExpand=false");
         }
 
-        // Reset-хук при выдаче: если элемент реализует IPooledLabel — сбросить до pristine (для НЕ-надписей — no-op).
         private static void Acquire(T element)
         {
-            if (element is IPooledLabel p) p.OnAcquire();
+            if (element is IPooledLabel p) p.OnAcquire(); // хук опционален — для не-надписей no-op
         }
 
         public void SetNotActive(T element) => element.gameObject.SetActive(false);
