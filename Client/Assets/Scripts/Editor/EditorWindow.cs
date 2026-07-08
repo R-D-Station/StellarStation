@@ -23,6 +23,8 @@ namespace Client.Editor.MapTools
         // ---- Слой / вид ----
         private int _activeZ;
         private const int CellSize = 24;
+        private const int MaxViewTiles = 128;   // потолок размера вида (в т.ч. авто-фита «По карте» — перф)
+        private const int PanStep = 1;          // шаг сдвига вида по WASD (тайлы за нажатие)
         private int _viewTilesX = 32;
         private int _viewTilesY = 32;
         private int _originX;
@@ -98,6 +100,8 @@ namespace Client.Editor.MapTools
 
         private void OnGUI()
         {
+            HandlePanKeys();   // WASD-сдвиг вида (до отрисовки, чтобы полей не касалось)
+
             DrawFileToolbar();
             DrawLayerAndView();
             DrawBrushSection();
@@ -153,10 +157,11 @@ namespace Client.Editor.MapTools
                     _originY = EditorGUILayout.IntField(_originY, GUILayout.Width(46));
                     GUILayout.Space(10);
                     EditorGUILayout.LabelField("size", GUILayout.Width(30));
-                    _viewTilesX = Mathf.Clamp(EditorGUILayout.IntField(_viewTilesX, GUILayout.Width(44)), 1, 128);
-                    _viewTilesY = Mathf.Clamp(EditorGUILayout.IntField(_viewTilesY, GUILayout.Width(44)), 1, 128);
+                    _viewTilesX = Mathf.Clamp(EditorGUILayout.IntField(_viewTilesX, GUILayout.Width(44)), 1, MaxViewTiles);
+                    _viewTilesY = Mathf.Clamp(EditorGUILayout.IntField(_viewTilesY, GUILayout.Width(44)), 1, MaxViewTiles);
                     GUILayout.Space(10);
                     if (GUILayout.Button("к 0,0", GUILayout.Width(50))) { _originX = 0; _originY = 0; }
+                    if (GUILayout.Button("По карте", GUILayout.Width(64))) FitViewToMap();
                     GUILayout.FlexibleSpace();
                 }
 
@@ -164,6 +169,58 @@ namespace Client.Editor.MapTools
                 _showConnections = EditorGUILayout.ToggleLeft(
                     "Показывать соединения (стены/пол)", _showConnections);
             }
+        }
+
+        // Кадрирует вид по фактическому содержимому карты (все Z): origin = мин. занятый тайл, size = размах, клампится
+        // до MaxViewTiles (большие карты досматриваются WASD). Пустая карта — вид не трогаем. Зовётся с «По карте» и после Load.
+        private void FitViewToMap()
+        {
+            if (_map == null) return;
+            bool any = false;
+            int minX = 0, minY = 0, maxX = 0, maxY = 0;
+            foreach (var ch in _map.Chunks)
+            {
+                for (int ly = 0; ly < Chunk.Size; ly++)
+                for (int lx = 0; lx < Chunk.Size; lx++)
+                {
+                    var t = ch[lx, ly];
+                    if (t.FloorType == 0 && t.StructureType == 0 && t.Special == TileSpecial.None) continue;
+                    int wx = ch.ChunkX * Chunk.Size + lx;
+                    int wy = ch.ChunkY * Chunk.Size + ly;
+                    if (!any) { minX = maxX = wx; minY = maxY = wy; any = true; }
+                    else
+                    {
+                        if (wx < minX) minX = wx; else if (wx > maxX) maxX = wx;
+                        if (wy < minY) minY = wy; else if (wy > maxY) maxY = wy;
+                    }
+                }
+            }
+            if (!any) return;
+            _originX = minX;
+            _originY = minY;
+            _viewTilesX = Mathf.Clamp(maxX - minX + 1, 1, MaxViewTiles);
+            _viewTilesY = Mathf.Clamp(maxY - minY + 1, 1, MaxViewTiles);
+        }
+
+        // WASD-сдвиг вида (origin). Грид рисуется севером вверх: W=север(+Y), S=юг, A=запад(−X), D=восток. Не перехватываем,
+        // пока правится текстовое поле (ввод чисел origin/size/Z). Ключ гасим (e.Use), чтобы не ушёл в контролы.
+        private void HandlePanKeys()
+        {
+            var e = Event.current;
+            if (e.type != EventType.KeyDown || EditorGUIUtility.editingTextField) return;
+            int dx = 0, dy = 0;
+            switch (e.keyCode)
+            {
+                case KeyCode.W: dy = PanStep; break;
+                case KeyCode.S: dy = -PanStep; break;
+                case KeyCode.A: dx = -PanStep; break;
+                case KeyCode.D: dx = PanStep; break;
+                default: return;
+            }
+            _originX += dx;
+            _originY += dy;
+            e.Use();
+            Repaint();
         }
 
         // ===== Зона 3: Кисть =================================================
@@ -431,7 +488,7 @@ namespace Client.Editor.MapTools
                 else
                 {
                     EditorGUILayout.LabelField(
-                        "ЛКМ — красить · ПКМ — стереть · наведи на клетку для инфо",
+                        "ЛКМ — красить · ПКМ — стереть · WASD — двигать вид · наведи на клетку для инфо",
                         EditorStyles.miniLabel);
                 }
             }
@@ -963,6 +1020,7 @@ namespace Client.Editor.MapTools
                 _map = MapSerializer.LoadFromFile(path);
                 _currentPath = path;
                 _dirty = false;
+                FitViewToMap();   // кадрируем вид по загруженной карте («по максимальным значениям»)
             }
             catch (System.Exception ex)
             {

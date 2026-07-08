@@ -25,6 +25,7 @@ MonoBehaviour:
   BlocksHorizontalSight: 1
   SealsHorizontal: 1
   _blocksVerticalSight: 1
+  _noVisibleFloor: 1
   Connection:
     UseConnections: 1
     ConnectsToSameType: 1
