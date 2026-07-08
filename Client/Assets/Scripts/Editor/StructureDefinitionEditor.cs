@@ -2,6 +2,7 @@
 using UnityEditor;
 using UnityEngine;
 using Client.Map;
+using Shared.World;
 
 namespace Client.Editor.Inspectors
 {
@@ -23,13 +24,17 @@ namespace Client.Editor.Inspectors
         private static readonly GUIContent LCategory = new GUIContent("Категория", "Стена/дверь/люк/окно. Дверь и люк — открываемые.");
         private static readonly GUIContent LSprite = new GUIContent("Спрайт");
         private static readonly GUIContent LPrefab = new GUIContent("Префаб");
-        private static readonly GUIContent LSideSprite = new GUIContent("Спрайт боков", "Боковые грани меша. MapRenderer кладёт в _SideTex материала.");
-        private static readonly GUIContent LTopSprite = new GUIContent("Спрайт верха", "Верх при выключенном autotiling. При UseConnections верх берётся по форме.");
-        private static readonly GUIContent LTopMap = new GUIContent("Грид верха (TileView)", "Грид-текстура этого типа стены. MapRenderer кладёт в _TopMap материала TileView; форму выбирает _i.");
+        private static readonly GUIContent LTopMap = new GUIContent("Грид верха", "Грид-текстура верха → _TopMap материала WallTop. Форму выбирает шейдер по _cur.");
+        private static readonly GUIContent LBackingMap = new GUIContent("Подложка", "Подложка → _DownTex материала WallTop.");
+        private static readonly GUIContent LSideMap = new GUIContent("Боковина", "Текстура боковины → _TopMap материала TileWall.");
         private static readonly GUIContent LOpenSprite = new GUIContent("Спрайт (открыт)");
         private static readonly GUIContent LOpenPrefab = new GUIContent("Префаб (открыт)");
         private static readonly GUIContent LBlocksSight = new GUIContent("Держит обзор", "Держит обзор по горизонтали (в закрытом виде). Стекло/окно = false.");
         private static readonly GUIContent LSeals = new GUIContent("Герметична", "Не пропускает газ по горизонтали.");
+        private static readonly GUIContent LBlocksVSight = new GUIContent("Держит обзор Z",
+            "Держит обзор по вертикали (Z). false = see-through проём: видно сквозь этаж (reveal-дыра). Лестница-верх=false; глухая стена=true.");
+        private static readonly GUIContent LNoVisibleFloor = new GUIContent("Скрыть пол",
+            "Пол под этой структурой не рендерится и считается отсутствующим для автотайлинга соседних полов (пол физически остаётся — walkable не меняется).");
         private static readonly GUIContent LUseConnections = new GUIContent("Автотайлинг", "Выбирать меш по 4 соседям.");
         private static readonly GUIContent LSameType = new GUIContent("С тем же типом");
         private static readonly GUIContent LOtherWalls = new GUIContent("С другими стенами");
@@ -48,13 +53,15 @@ namespace Client.Editor.Inspectors
         private SerializedProperty _category;
         private SerializedProperty _sprite;
         private SerializedProperty _prefab;
-        private SerializedProperty _sideSprite;
-        private SerializedProperty _topSprite;
         private SerializedProperty _topMap;
+        private SerializedProperty _backingMap;
+        private SerializedProperty _sideMap;
         private SerializedProperty _openSprite;
         private SerializedProperty _openPrefab;
         private SerializedProperty _blocksHorizontalSight;
         private SerializedProperty _sealsHorizontal;
+        private SerializedProperty _blocksVerticalSight;
+        private SerializedProperty _noVisibleFloor;
 
         // Вложенный WallConnectionData: флаги — всегда внутри блока, 6 мешей — под UseConnections.
         private SerializedProperty _connection;
@@ -71,6 +78,11 @@ namespace Client.Editor.Inspectors
         private SerializedProperty _meshT;
         private SerializedProperty _meshCross;
 
+        // Кэш авто-ID/коллизии: скан AssetDatabase дорог — считаем только при смене _type.intValue.
+        private int _idScannedFor = int.MinValue;
+        private StructureDefinition _idConflict;
+        private bool _noFreeIds;
+
         private void OnEnable()
         {
             _type = serializedObject.FindProperty("Type");
@@ -78,13 +90,15 @@ namespace Client.Editor.Inspectors
             _category = serializedObject.FindProperty("Category");
             _sprite = serializedObject.FindProperty("Sprite");
             _prefab = serializedObject.FindProperty("Prefab");
-            _sideSprite = serializedObject.FindProperty("SideSprite");
-            _topSprite = serializedObject.FindProperty("TopSprite");
             _topMap = serializedObject.FindProperty("TopMap");
+            _backingMap = serializedObject.FindProperty("BackingMap");
+            _sideMap = serializedObject.FindProperty("SideMap");
             _openSprite = serializedObject.FindProperty("OpenSprite");
             _openPrefab = serializedObject.FindProperty("OpenPrefab");
             _blocksHorizontalSight = serializedObject.FindProperty("BlocksHorizontalSight");
             _sealsHorizontal = serializedObject.FindProperty("SealsHorizontal");
+            _blocksVerticalSight = serializedObject.FindProperty("_blocksVerticalSight");
+            _noVisibleFloor = serializedObject.FindProperty("_noVisibleFloor");
 
             // Connection — [Serializable]-класс, всегда инстанцирован (= new WallConnectionData()),
             // поэтому свойство и его relative-пути присутствуют структурно. Кэшируем по разу.
@@ -110,14 +124,37 @@ namespace Client.Editor.Inspectors
         {
             serializedObject.Update();
 
+            // Авто-ID новой SO (write-once, Type==0) + скан коллизии; кэш по _type.intValue (без аллокаций на repaint).
+            var self = target as StructureDefinition;
+            if (_type.intValue != _idScannedFor)
+            {
+                if (_type.intValue == 0)
+                {
+                    byte free = TileIdEditorUtil.SmallestFreeStructureId(self);
+                    if (free > 0) _type.intValue = free;   // присвоить наименьший свободный
+                    _noFreeIds = free == 0;                // все 1..255 заняты
+                    _idConflict = null;                    // свежий свободный id не конфликтует
+                }
+                else
+                {
+                    _idConflict = TileIdEditorUtil.FindStructureIdConflict(self);
+                    _noFreeIds = false;
+                }
+                _idScannedFor = _type.intValue;
+            }
+
             // Общие поля — релевантны любой категории.
             EditorGUILayout.PropertyField(_type, LType);
+            if (_noFreeIds)
+                EditorGUILayout.HelpBox("Нет свободных id (1..255 заняты). Освободите id у другого ассета.", MessageType.Error);
+            else if (_idConflict != null)
+                EditorGUILayout.HelpBox($"ID {_type.intValue} уже занят: '{_idConflict.DisplayName}'. Выберите свободный ID.", MessageType.Error);
             EditorGUILayout.PropertyField(_displayName, LDisplayName);
             EditorGUILayout.PropertyField(_category, LCategory);
 
-            // enumValueIndex == значению (StructureCategory непрерывна от 0): Wall=0,Door=1,Hatch=2,Window=3.
+            // enumValueIndex == значению (StructureCategory непрерывна 0..4): Wall=0,Door=1,Hatch=2,Window=3,Ladder=4.
             var category = (StructureCategory)_category.enumValueIndex;
-            bool openable = category == StructureCategory.Door || category == StructureCategory.Hatch;
+            bool openable = StructureCategoryInfo.IsOpenable(category);   // единый источник (зеркалит рантайм)
             bool isWall = category == StructureCategory.Wall;
 
             EditorGUILayout.Space(8);
@@ -130,23 +167,29 @@ namespace Client.Editor.Inspectors
                 EditorGUILayout.PropertyField(_openSprite, LOpenSprite);
                 EditorGUILayout.PropertyField(_openPrefab, LOpenPrefab);
             }
-            EditorGUILayout.PropertyField(_sideSprite, LSideSprite);
-            EditorGUILayout.PropertyField(_topSprite, LTopSprite);
+            // Текстуры шейдера TileReader — релевантны ЛЮБОЙ структуре (не только стене): верх/подложка/боковина.
+            // null-гард (поля — зона coder-main): при рассинхроне не падаем.
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField("Текстуры (TileReader)", EditorStyles.boldLabel);
+            if (_topMap != null) EditorGUILayout.PropertyField(_topMap, LTopMap);
+            if (_backingMap != null) EditorGUILayout.PropertyField(_backingMap, LBackingMap);
+            if (_sideMap != null) EditorGUILayout.PropertyField(_sideMap, LSideMap);
 
             EditorGUILayout.Space(8);
             EditorGUILayout.LabelField("Флаги симуляции", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(_blocksHorizontalSight, LBlocksSight);
             EditorGUILayout.PropertyField(_sealsHorizontal, LSeals);
+            // Скрытие пола под структурой — общий флаг для любой категории (стена/дверь/лестница/машина).
+            if (_noVisibleFloor != null)
+                EditorGUILayout.PropertyField(_noVisibleFloor, LNoVisibleFloor);
+            // Вертикальный обзор (Z) — только у глухих (стена/окно/лестница); открываемым (дверь/люк) не нужен.
+            // Здесь человек задаёт see-through на ladder-SO (верх лестницы = false → reveal-дыра).
+            if (!openable && _blocksVerticalSight != null)
+                EditorGUILayout.PropertyField(_blocksVerticalSight, LBlocksVSight);
 
             // Autotiling-соединения имеют смысл только для стен; у двери/люка/окна форму не считают.
             if (isWall && _connection != null)
             {
-                EditorGUILayout.Space(8);
-                EditorGUILayout.LabelField("Верх стены (TileView)", EditorStyles.boldLabel);
-                // null-гард: если поле TopMap ещё не в рантайме (зона coder-main) — не падаем (PropertyField(null) бросает).
-                if (_topMap != null)
-                    EditorGUILayout.PropertyField(_topMap, LTopMap);
-
                 EditorGUILayout.Space(8);
                 EditorGUILayout.LabelField("Соединение стен (autotiling)", EditorStyles.boldLabel);
                 EditorGUILayout.LabelField(

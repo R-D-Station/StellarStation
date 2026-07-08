@@ -43,6 +43,10 @@ namespace Client.Editor.MapTools
         private TileSpecial _selSpecial = TileSpecial.None;
         private Brush _brush = Brush.Floor;   // только когда каталога нет
 
+        // Категория-таргет мазка (режим каталога): какие слои клетки пишем; невыбранные — сохраняем (read-modify-write).
+        private bool _paintFloor = true;
+        private bool _paintStructure;
+
         // Потолок: при включённом флаге краска кладёт пол на z+1 над клеткой (закрытая комната).
         private bool _withCeiling;
         private byte _ceilingFloor;          // 0 = «как пол кисти», иначе явный вид пола
@@ -73,6 +77,10 @@ namespace Client.Editor.MapTools
             "Дополнительно кладёт пол выбранного типа на этаж z+1 над каждой закрашенной клеткой.");
         private static readonly GUIContent ManualFlagsToggle = new GUIContent("Ручные флаги",
             "Игнорировать палитру пола/структуры, выставлять флаги тайла напрямую.");
+        private static readonly GUIContent PaintFloorToggle = new GUIContent("Пол",
+            "Красить слой пола. Выкл — существующий пол клетки сохраняется. «Нет» в ряду пола очищает только пол.");
+        private static readonly GUIContent PaintStructureToggle = new GUIContent("Объект",
+            "Красить слой объекта (стена/дверь/люк/окно). Выкл — существующий объект сохраняется. «Нет» очищает только объект.");
 
         [MenuItem("Tools/Station/Map Editor")]
         public static void Open()
@@ -185,8 +193,9 @@ namespace Client.Editor.MapTools
 
                 if (_catalog != null)
                 {
-                    DrawFloorRow();
-                    DrawStructureRow();
+                    DrawPaintTargetRow();
+                    if (_paintFloor) DrawFloorRow();
+                    if (_paintStructure) DrawStructureRow();
                 }
                 else
                 {
@@ -202,6 +211,21 @@ namespace Client.Editor.MapTools
                 EditorGUILayout.Space(2);
                 DrawExpert();
             }
+        }
+
+        // Категория-таргет: какие слои несёт мазок. Невыбранный слой read-modify-write сохраняет из клетки.
+        private void DrawPaintTargetRow()
+        {
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Красить", GUILayout.Width(56));
+                _paintFloor = GUILayout.Toggle(_paintFloor, PaintFloorToggle, EditorStyles.miniButton, GUILayout.Height(20));
+                _paintStructure = GUILayout.Toggle(_paintStructure, PaintStructureToggle, EditorStyles.miniButton, GUILayout.Height(20));
+                GUILayout.FlexibleSpace();
+            }
+            if (!_paintFloor && !_paintStructure)
+                EditorGUILayout.LabelField("нет цели: мазок сохранит пол и объект (можно ставить только спец)",
+                    EditorStyles.miniLabel);
         }
 
         // Пол: «Нет» + виды из каталога.
@@ -298,22 +322,34 @@ namespace Client.Editor.MapTools
             }
         }
 
-        // Превью собранной кисти + текстовая сводка.
+        // Превью собранной кисти (на пустой клетке) + текстовая сводка. Второй строкой — что мазок пишет / что сохраняет.
         private void DrawBrushPreview()
         {
+            Tile empty = Tile.Space;
             using (new EditorGUILayout.HorizontalScope())
             {
                 EditorGUILayout.LabelField("Превью", GUILayout.Width(56));
                 Rect box = GUILayoutUtility.GetRect(CellSize + 8, CellSize + 8,
                     GUILayout.Width(CellSize + 8), GUILayout.Height(CellSize + 8));
                 var cell = new Rect(box.x + 4, box.y + 4, CellSize, CellSize);
-                Tile t = MakeTile();
-                DrawCell(cell, in t);
+                Tile t = MakeTile(in empty);
+                DrawCell(cell, in t, 0, 0, hasWorld: false);   // превью на пустой клетке → форма Single
                 DrawBorder(cell, new Color(0f, 0f, 0f, 0.45f), 1);
 
                 GUILayout.Space(8);
                 EditorGUILayout.LabelField(TileSummary(in t), EditorStyles.miniLabel);
             }
+            if (!_advanced && _catalog != null)
+                EditorGUILayout.LabelField(PaintTargetSummary(), EditorStyles.miniLabel);
+        }
+
+        // Сводка per-category мазка: какой слой пишем/очищаем и какой сохраняем (режим каталога).
+        private string PaintTargetSummary()
+        {
+            string floor = _paintFloor ? (_selFloor == 0 ? "пол → очистить" : $"пол → {_selFloor}") : "пол: сохранить";
+            string obj = _paintStructure ? (_selStructure == 0 ? "объект → очистить" : $"объект → {_selStructure}") : "объект: сохранить";
+            string spec = _selSpecial != TileSpecial.None ? $"спец → {_selSpecial}" : "спец: сохранить";
+            return $"{floor}  ·  {obj}  ·  {spec}";
         }
 
         // Эксперт: ручные флаги под свёрнутой секцией (раньше — открытая панель Advanced).
@@ -422,7 +458,7 @@ namespace Client.Editor.MapTools
                     var cell = new Rect(px, py, CellSize, CellSize);
 
                     Tile t = _map.GetTile(worldX, worldY, _activeZ);
-                    DrawCell(cell, in t);
+                    DrawCell(cell, in t, worldX, worldY, hasWorld: true);
                     if (_showConnections) DrawConnectionStubs(cell, worldX, worldY, in t);
 
                     if (cell.Contains(e.mousePosition))
@@ -457,9 +493,11 @@ namespace Client.Editor.MapTools
             // ЛКМ (0) — рисуем выбранным; ПКМ (1) — стираем в космос.
             if (e.button == 0)
             {
-                Tile painted = MakeTile();
+                Tile existing = _map.GetTile(worldX, worldY, _activeZ);
+                Tile painted = MakeTile(in existing);
                 _map.SetTile(worldX, worldY, _activeZ, painted);
-                AutoPairStair(worldX, worldY, _activeZ, painted.Special);
+                // Авто-пара — по интенту кисти (_selSpecial), не по сохранённому спецу клетки.
+                AutoPairStair(worldX, worldY, _activeZ, _selSpecial);
                 if (_withCeiling) PaintCeiling(worldX, worldY, _activeZ, in painted);
                 MarkDirty();
                 e.Use();
@@ -473,12 +511,14 @@ namespace Client.Editor.MapTools
             }
         }
 
-        private Tile MakeTile()
+        // Собирает тайл для записи в клетку. Режим каталога — per-category read-modify-write: пишет только
+        // слои с включённым тумблером «Красить», остальные слои и Special берёт из existing (не обнуляет).
+        // Ручные флаги/пресеты (без каталога) — прежний whole-tile мазок.
+        private Tile MakeTile(in Tile existing)
         {
-            Tile t;
             if (_advanced)
             {
-                t = new Tile
+                var adv = new Tile
                 {
                     FloorType = _advFloorType,
                     StructureType = _advStructureType,
@@ -489,33 +529,40 @@ namespace Client.Editor.MapTools
                     SealsHorizontal = _advSealH,
                     SealsVertical = _advSealV
                 };
-            }
-            else if (_catalog != null)
-            {
-                // Флаги выводятся из выбранных видов пола и настенного объекта.
-                t = _catalog.Compose(_selFloor, _selStructure);
-            }
-            else
-            {
-                switch (_brush)
-                {
-                    case Brush.Floor:
-                        t = new Tile { FloorType = 1, Support = true, BlocksVerticalSight = true, SealsVertical = true };
-                        break;
-                    case Brush.Wall:
-                        t = new Tile { FloorType = 1, StructureType = 1, Support = true, BlocksHorizontalSight = true, BlocksVerticalSight = true, SealsHorizontal = true, SealsVertical = true };
-                        break;
-                    case Brush.Grate:
-                        t = new Tile { FloorType = 2, Support = true };
-                        break;
-                    default:
-                        t = Tile.Space;
-                        break;
-                }
+                adv.Special = _selSpecial;   // whole-tile: явный выбор, «Нет» очищает
+                return adv;
             }
 
-            t.Special = _selSpecial;   // спец-маркер поверх выбранного тайла
-            return t;
+            if (_catalog != null)
+            {
+                // Слой берём из кисти только при включённом тумблере; иначе сохраняем из клетки. Compose
+                // (источник флагов) пересобирает флаги из пары id — сохранённый слой участвует как есть.
+                byte floorId = _paintFloor ? _selFloor : existing.FloorType;
+                byte structureId = _paintStructure ? _selStructure : existing.StructureType;
+                var t = _catalog.Compose(floorId, structureId);
+                // per-category: спец пишем только при явном выборе; «Нет» сохраняет существующий (не обнуляем).
+                t.Special = _selSpecial != TileSpecial.None ? _selSpecial : existing.Special;
+                return t;
+            }
+
+            Tile p;
+            switch (_brush)
+            {
+                case Brush.Floor:
+                    p = new Tile { FloorType = 1, Support = true, BlocksVerticalSight = true, SealsVertical = true };
+                    break;
+                case Brush.Wall:
+                    p = new Tile { FloorType = 1, StructureType = 1, Support = true, BlocksHorizontalSight = true, BlocksVerticalSight = true, SealsHorizontal = true, SealsVertical = true };
+                    break;
+                case Brush.Grate:
+                    p = new Tile { FloorType = 2, Support = true };
+                    break;
+                default:
+                    p = Tile.Space;
+                    break;
+            }
+            p.Special = _selSpecial;   // whole-tile: явный выбор, «Нет» очищает
+            return p;
         }
 
         // Авто-пара лестниц: StairUp на z ⇒ StairDown на z+1 (та же клетка), и наоборот.
@@ -527,9 +574,16 @@ namespace Client.Editor.MapTools
                 PaintPairedStair(x, y, z - 1, TileSpecial.StairUp);
         }
 
-        // Парная лестница на соседнем этаже: всегда с полом (иначе на неё не перейти).
+        // Парная лестница на соседнем этаже. Для ladder-кисти пару НЕ пишем: верх и низ лестницы — ДВЕ разные SO
+        // (низ сплошной BlocksVerticalSight=true, верх see-through =false); авто-пара не знает парную SO → положила бы
+        // не тот конец и сломала reveal. Человек ставит оба конца вручную. Не-ladder (floor-based) лестницы — как раньше.
         private void PaintPairedStair(int x, int y, int z, TileSpecial special)
         {
+            // Кисть несёт ladder-структуру? (гейт по _paintStructure — как в MakeTile). Тогда пару не авто-парим.
+            bool ladderBrush = _paintStructure && _catalog != null && _selStructure != 0
+                && _catalog.GetStructure(_selStructure)?.Category == StructureCategory.Ladder;
+            if (ladderBrush) return;
+
             byte floor = _selFloor != 0 ? _selFloor : (byte)1;
             Tile t = _catalog != null
                 ? _catalog.Compose(floor, 0)
@@ -556,7 +610,8 @@ namespace Client.Editor.MapTools
 
         // ---- Рисование клетки ----------------------------------------------
 
-        private void DrawCell(Rect r, in Tile t)
+        // worldX/worldY/hasWorld — контекст формы верха: грид даёт реальные соседей; brush-preview → hasWorld=false → Single.
+        private void DrawCell(Rect r, in Tile t, int worldX, int worldY, bool hasWorld)
         {
             EditorGUI.DrawRect(r, CellColor(in t));
 
@@ -564,12 +619,17 @@ namespace Client.Editor.MapTools
             if (_catalog != null)
             {
                 if (t.FloorType != 0)
-                    DrawSprite(r, _catalog.GetFloor(t.FloorType)?.Sprite);
+                {
+                    var f = _catalog.GetFloor(t.FloorType);
+                    if (!DrawFloorTop(r, f, worldX, worldY, hasWorld))
+                        DrawSprite(r, f?.Sprite);
+                }
                 if (t.StructureType != 0)
                 {
                     var s = _catalog.GetStructure(t.StructureType);
-                    var sprite = (s != null && s.Openable && t.Open) ? s.OpenSprite : s?.Sprite;
-                    structDrawn = DrawSprite(r, sprite);
+                    bool openNow = s != null && s.Openable && t.Open;
+                    structDrawn = DrawStructureTop(r, s, openNow, worldX, worldY, hasWorld)
+                        || DrawSprite(r, openNow ? s.OpenSprite : s?.Sprite);
                 }
             }
 
@@ -578,6 +638,142 @@ namespace Client.Editor.MapTools
 
             if (t.Special != TileSpecial.None)
                 DrawSpecialMarker(r, t.Special);
+        }
+
+        // ---- Верх тайла грид-атласом TopMap (полная композиция рантайм-шейдера TileReader) ----
+        // Атлас TopMap материала TileTop: 5 колонок форм × 2 ряда (верх — основной слой по _cur, низ — углы по _cur_corner).
+        private const int TopAtlasCountX = 5;   // _count_x — сверено с TileTop.mat
+        private const int TopAtlasCountY = 2;   // _count_y
+        private static readonly Rect FullTexUV = new Rect(0f, 0f, 1f, 1f);
+
+        // ⚠ ВИЗУАЛЬНЫЕ КНОБЫ поворота верха (зеркало саги WallCornerCode — правятся ПО КАРТИНКЕ, человек):
+        // RotateSign — общий экранный знак: мешевый поворот North→East (вверх→вправо) = по часовой = +1 в IMGUI (Y вниз).
+        //   Весь верх (форма+углы) повёрнут зеркально (CW↔CCW) → поставь -1.
+        private const int RotateSign = 1;
+
+        // ОСНОВНОЙ слой: per-shape база от UV-развёртки меша формы (в 2D-превью меша нет → добавляем сами). Итог осн. = steps + это.
+        // Индекс = (int)WallShape: Single=0,End=1,Straight=2,Corner=3,T=4,Cross=5. Single/Straight/Cross 0; End/Corner +180°(2),
+        // T −90°(3). Косит ФОРМА (носик End/T/Corner) → правь тут (четверти 0..3).
+        private static readonly int[] ShapeBaseQuarter = { 0, 2, 0, 2, 3, 0 };
+
+        // УГЛОВОЙ слой: поправка базовой ориентации углового спрайта по паре (форма × _cur_corner), четверти (×90°).
+        // Итог угла = cornerRotate + это (×RotateSign в DrawAtlasQuarter). Стены и полы — РАЗНЫЕ атласы (угловой арт нарисован
+        // с разной базой) → ДВЕ таблицы; сейчас расходятся на T. Строка = (int)WallShape, столбец = _cur_corner (0..5; 0 не исп.).
+        // Косит угол на клетке (превью vs сцена) — правь ЕЁ ячейку: стены → CornerCorrection, полы → FloorCornerCorrection.
+        private static readonly int[,] CornerCorrection =    // СТЕНЫ
+        {
+            //            cc0 cc1 cc2 cc3 cc4 cc5   (_cur_corner)
+            /* Single  */ {  0,  0,  0,  0,  0,  0 },
+            /* End     */ {  0,  0,  0,  0,  0,  0 },
+            /* Straight*/ {  0,  0,  0,  0,  0,  0 },
+            /* Corner  */ {  0,  1,  0,  0,  0,  0 },   // cc1 +90°
+            /* T       */ {  0,  1,  0,  0,  0,  0 },   // cc1 +90°, cc2 0°
+            /* Cross   */ {  0,  1,  0,  0,  2,  2 },   // cc1 +90°, cc2/cc3 0°, cc4/cc5 +180°
+        };
+        private static readonly int[,] FloorCornerCorrection =    // ПОЛЫ (свой атлас → своя база; сейчас = стеновой)
+        {
+            //            cc0 cc1 cc2 cc3 cc4 cc5   (_cur_corner)
+            /* Single  */ {  0,  0,  0,  0,  0,  0 },
+            /* End     */ {  0,  0,  0,  0,  0,  0 },
+            /* Straight*/ {  0,  0,  0,  0,  0,  0 },
+            /* Corner  */ {  0,  1,  0,  0,  0,  0 },   // cc1 +90°
+            /* T       */ {  0,  1,  0,  0,  0,  0 },   // cc1 +90°, cc2 0°
+            /* Cross   */ {  0,  1,  0,  0,  2,  2 },   // cc1 +90°, cc2/cc3 0°, cc4/cc5 +180°
+        };
+
+        // Верх пола атласом TopMap по форме+углам соседей-полов (как рантайм). Угловой слой — по СВОЕЙ таблице
+        // FloorCornerCorrection (floor-атлас нарисован с иной базой угла, чем стеновой). false → плоский Sprite-фолбэк.
+        private bool DrawFloorTop(Rect r, FloorDefinition f, int worldX, int worldY, bool hasWorld)
+        {
+            if (f == null || f.TopMap == null || f.Connection == null || !f.Connection.UseConnections)
+                return false;
+            var shape = WallShape.Single;
+            int steps = 0;
+            byte cornerMask = 0;
+            if (hasWorld)
+            {
+                (shape, steps) = FloorConnectivity.ResolveAt(_catalog, _map, f, worldX, worldY, _activeZ);
+                cornerMask = FloorConnectivity.ResolveCornersAt(_catalog, _map, f, worldX, worldY, _activeZ);
+            }
+            return DrawTopAtlas(r, f.TopMap, f.BackingMap, shape, steps, cornerMask, FloorCornerCorrection);
+        }
+
+        // Верх стены атласом TopMap по форме+углам соседей-стен. Как рантайм: только глухая (не открытая) стена-Wall с
+        // UseConnections; двери/окна/открытые/без autotiling → false (плоский Sprite-фолбэк).
+        private bool DrawStructureTop(Rect r, StructureDefinition s, bool openNow, int worldX, int worldY, bool hasWorld)
+        {
+            if (s == null || openNow || s.Category != StructureCategory.Wall
+                || s.TopMap == null || s.Connection == null || !s.Connection.UseConnections)
+                return false;
+            var shape = WallShape.Single;
+            int steps = 0;
+            byte cornerMask = 0;
+            if (hasWorld)
+            {
+                (shape, steps) = WallConnectivity.ResolveAt(_catalog, _map, s, worldX, worldY, _activeZ);
+                cornerMask = WallConnectivity.ResolveCornersAt(_catalog, _map, s, worldX, worldY, _activeZ);
+            }
+            return DrawTopAtlas(r, s.TopMap, s.BackingMap, shape, steps, cornerMask, CornerCorrection);
+        }
+
+        // Композиция верха = как рантайм-frag TileReader: (1) подложка _DownTex → (2) основной слой _cur (верх-ряд),
+        // повёрнут на 90°·(steps + ShapeBaseQuarter) → (3) слой углов _cur_corner (низ-ряд), повёрнут на cornerRotate + cornerTable[...].
+        // UV колонок сверены с шейдером: осн. x=(uv.x+_cur-1)/_count_x,y=(uv.y+1)/_count_y; угол — та же схема, низ-ряд.
+        // cornerTable = CornerCorrection (стены) / FloorCornerCorrection (полы). _cur==0 (Cross) шейдер гейтит основной слой
+        // на подложку → колонку не рисуем. false → рисовать нечего → плоский фолбэк.
+        private static bool DrawTopAtlas(Rect r, Texture2D topMap, Texture2D backing, WallShape shape, int steps, byte cornerMask, int[,] cornerTable)
+        {
+            bool drew = false;
+
+            // 1. Подложка (_DownTex): база под всё, на всю клетку; крутится мешем на steps (шейдер сэмплит сырым мешевым uv).
+            if (backing != null)
+            {
+                DrawAtlasQuarter(r, backing, FullTexUV, steps);
+                drew = true;
+            }
+
+            // 2. Основной слой: колонка _cur, верх-ряд; поворот мешем на steps + per-shape база (ShapeBaseQuarter).
+            //    Cross (_cur==0) — колонки нет (гейт шейдера).
+            int cur = WallCornerCode.CurFromShape(shape);
+            if (cur != 0)
+            {
+                DrawAtlasQuarter(r, topMap,
+                    new Rect((cur - 1f) / TopAtlasCountX, 1f / TopAtlasCountY, 1f / TopAtlasCountX, 1f / TopAtlasCountY),
+                    steps + ShapeBaseQuarter[(int)shape]);
+                drew = true;
+            }
+
+            // 3. Слой углов: колонка _cur_corner, низ-ряд; поворот = cornerRotate + cornerTable[форма, _cur_corner]
+            //    (cornerTable: стены — CornerCorrection, полы — FloorCornerCorrection). steps сворачивается — см. вывод.
+            if (cornerMask != 0)
+            {
+                var (curCorner, cornerRotate) = WallCornerCode.EncodeCorners(cornerMask);
+                if (curCorner != 0)
+                {
+                    DrawAtlasQuarter(r, topMap,
+                        new Rect((curCorner - 1f) / TopAtlasCountX, 0f, 1f / TopAtlasCountX, 1f / TopAtlasCountY),
+                        cornerRotate + cornerTable[(int)shape, curCorner]);
+                    drew = true;
+                }
+            }
+
+            return drew;
+        }
+
+        // Рисует под-прямоугольник атласа с поворотом на turns·90° по часовой вокруг центра клетки. Клетка квадратная →
+        // поворот на кратный 90° не искажает. Экранный знак — RotateSign. GUI.matrix сохраняется/восстанавливается (scroll цел).
+        private static void DrawAtlasQuarter(Rect r, Texture2D tex, Rect uv, int turns)
+        {
+            int q = ((turns * RotateSign) % 4 + 4) % 4;
+            if (q == 0)
+            {
+                GUI.DrawTextureWithTexCoords(r, tex, uv);
+                return;
+            }
+            Matrix4x4 saved = GUI.matrix;
+            GUIUtility.RotateAroundPivot(90f * q, r.center);
+            GUI.DrawTextureWithTexCoords(r, tex, uv);
+            GUI.matrix = saved;
         }
 
         // Превью autotiling (W4b + F-editor): для стены и/или пола с UseConnections рисует стабы из центра

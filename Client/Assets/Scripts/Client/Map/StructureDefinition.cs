@@ -7,8 +7,8 @@ namespace Client.Map
     [CreateAssetMenu(menuName = "Station/Structure Definition", fileName = "StructureDefinition")]
     public sealed class StructureDefinition : ScriptableObject
     {
-        [Tooltip("Значение Tile.StructureType. 0 = объекта нет.")]
-        public byte Type = 1;
+        [Tooltip("Значение Tile.StructureType. 0 = не назначен (авто-ID заполнит в инспекторе).")]
+        public byte Type = 0;
         public string DisplayName = "Structure";
         [Tooltip("Стена/дверь/люк/окно. Дверь и люк — открываемые (Openable).")]
         public StructureCategory Category = StructureCategory.Wall;
@@ -19,15 +19,13 @@ namespace Client.Map
         public Sprite OpenSprite;
         public GameObject OpenPrefab;
 
-        [Header("Грани 3D-меша (шейдер TileFaceSprites)")]
-        [Tooltip("Боковые грани меша. MapRenderer кладёт в _SideTex материала.")]
-        public Sprite SideSprite;
-        [Tooltip("Верхняя грань при ВЫКЛЮЧЕННОМ autotiling. Стены с autotiling текстурятся материалом TileView (TopMap + _i).")]
-        public Sprite TopSprite;
-
-        [Header("Верх стены — материал TileView")]
-        [Tooltip("Грид-текстура этого типа стены → _TopMap. Форму выбирает шейдер по _i = 4-(int)shape. Пусто → дефолт материала.")]
+        [Header("Текстуры стены (шейдер TileReader)")]
+        [Tooltip("Грид-текстура верха → _TopMap материала WallTop. Форму выбирает шейдер по _cur. Пусто → дефолт материала.")]
         public Texture2D TopMap;
+        [Tooltip("Подложка → _DownTex материала WallTop.")]
+        public Texture2D BackingMap;
+        [Tooltip("Текстура боковины → _TopMap материала TileWall.")]
+        public Texture2D SideMap;
 
         [Header("Флаги симуляции")]
         [Tooltip("Держит обзор по горизонтали (в закрытом виде). Стекло/окно = false.")]
@@ -41,8 +39,14 @@ namespace Client.Map
         /// <summary>Держит ли обзор по вертикали (Z). Дефолт true (стена/окно); see-through лестница-проём = false.</summary>
         public bool BlocksVerticalSight => _blocksVerticalSight;
 
-        /// <summary>Открываемый объект (дверь/люк), а не глухой (стена/окно).</summary>
-        public bool Openable => Category == StructureCategory.Door || Category == StructureCategory.Hatch;
+        [Tooltip("Только рендер: пол под этой структурой НЕ рисуется и считается отсутствующим для автотайлинга соседних полов. Пол физически остаётся (walkable).")]
+        [SerializeField] private bool _noVisibleFloor;
+
+        /// <summary>Render-only: пол под структурой не рисуется + сосед-автотайлинг считает его отсутствующим. Данные пола (Walkable/Support) НЕ меняет.</summary>
+        public bool NoVisibleFloor => _noVisibleFloor;
+
+        /// <summary>Открываемый объект (дверь/люк), а не глухой (стена/окно). Единый источник — StructureCategoryInfo.</summary>
+        public bool Openable => StructureCategoryInfo.IsOpenable(Category);
 
         [Header("Соединение стен (autotiling)")]
         public WallConnectionData Connection = new WallConnectionData();

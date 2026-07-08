@@ -49,5 +49,28 @@ namespace Client.Map
             bool w = Connects(catalog, map, self, x - 1, y,     z);
             return WallConnection.Resolve(n, e, s, w);
         }
+
+        /// <summary>Маска углов (внутренних вырезов) слоя углов для стены self в (x,y,z): бит есть, когда ОБА смежных
+        /// кардинальных соседа — соединённые стены, а диагональ между ними — НЕ стена. Биты: NW=1, NE=2, SE=4, SW=8
+        /// (по часовой от NW). Мир N=+Y; диагонали NW=(x-1,y+1), NE=(x+1,y+1), SE=(x+1,y-1), SW=(x-1,y-1). Без аллокаций.</summary>
+        public static byte ResolveCornersAt(TileCatalog catalog, GridMap map, StructureDefinition self, int x, int y, int z)
+        {
+            bool n = Connects(catalog, map, self, x,     y + 1, z);
+            bool e = Connects(catalog, map, self, x + 1, y,     z);
+            bool s = Connects(catalog, map, self, x,     y - 1, z);
+            bool w = Connects(catalog, map, self, x - 1, y,     z);
+
+            bool nw = Connects(catalog, map, self, x - 1, y + 1, z);
+            bool ne = Connects(catalog, map, self, x + 1, y + 1, z);
+            bool se = Connects(catalog, map, self, x + 1, y - 1, z);
+            bool sw = Connects(catalog, map, self, x - 1, y - 1, z);
+
+            byte mask = 0;
+            if (n && w && !nw) mask |= 1; // NW
+            if (n && e && !ne) mask |= 2; // NE
+            if (s && e && !se) mask |= 4; // SE
+            if (s && w && !sw) mask |= 8; // SW
+            return mask;
+        }
     }
 }

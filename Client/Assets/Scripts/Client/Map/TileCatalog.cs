@@ -41,14 +41,14 @@ namespace Client.Map
             {
                 if (f == null || f.Type == 0) continue;
                 if (_floorById.ContainsKey(f.Type))
-                    Debug.LogWarning($"[TileCatalog] дубль Floor Type={f.Type} ('{f.DisplayName}') — перезапись (last-wins)", this);
+                    Debug.LogError($"[TileCatalog] дубль Floor Type={f.Type} ('{f.DisplayName}') — перезапись (last-wins)", this);
                 _floorById[f.Type] = f;
             }
             foreach (var s in _structures)
             {
                 if (s == null || s.Type == 0) continue;
                 if (_structureById.ContainsKey(s.Type))
-                    Debug.LogWarning($"[TileCatalog] дубль Structure Type={s.Type} ('{s.DisplayName}') — перезапись (last-wins)", this);
+                    Debug.LogError($"[TileCatalog] дубль Structure Type={s.Type} ('{s.DisplayName}') — перезапись (last-wins)", this);
                 _structureById[s.Type] = s;
             }
         }

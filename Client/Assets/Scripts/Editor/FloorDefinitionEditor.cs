@@ -20,9 +20,8 @@ namespace Client.Editor.Inspectors
         private static readonly GUIContent LDisplayName = new GUIContent("Название");
         private static readonly GUIContent LSprite = new GUIContent("Спрайт", "Спрайт клетки редактора; при пустом префабе рисуется и в игре.");
         private static readonly GUIContent LPrefab = new GUIContent("Префаб", "Инстансится в игре. Пусто → fallback на Sprite.");
-        private static readonly GUIContent LSideSprite = new GUIContent("Спрайт боков", "Боковые грани меша пола. MapRenderer кладёт в _SideTex материала.");
-        private static readonly GUIContent LTopSprite = new GUIContent("Спрайт верха", "Верх при выключенном autotiling. При UseConnections верх берётся по форме.");
-        private static readonly GUIContent LTopMap = new GUIContent("Грид верха (TileView)", "Грид-текстура этого типа пола. MapRenderer кладёт в _TopMap материала TileView; форму выбирает _i.");
+        private static readonly GUIContent LTopMap = new GUIContent("Грид верха", "Грид-текстура верха пола → _TopMap материала TileView; форму выбирает шейдер по _i.");
+        private static readonly GUIContent LBackingMap = new GUIContent("Подложка", "Подложка верха пола → _DownTex материала.");
         private static readonly GUIContent LBlocksSight = new GUIContent("Держит обзор ↓", "Сплошной пол не просвечивает на этаж ниже (FOV). Решётка/стекло = false.");
         private static readonly GUIContent LSeals = new GUIContent("Герметичен ↓", "Не пропускает газ вниз. Решётка = false.");
         private static readonly GUIContent LUseConnections = new GUIContent("Автотайлинг", "Выбирать меш по 4 соседям.");
@@ -40,9 +39,8 @@ namespace Client.Editor.Inspectors
         private SerializedProperty _displayName;
         private SerializedProperty _sprite;
         private SerializedProperty _prefab;
-        private SerializedProperty _sideSprite;
-        private SerializedProperty _topSprite;
         private SerializedProperty _topMap;
+        private SerializedProperty _backingMap;
         private SerializedProperty _blocksVerticalSight;
         private SerializedProperty _sealsVertical;
 
@@ -59,15 +57,19 @@ namespace Client.Editor.Inspectors
         private SerializedProperty _meshT;
         private SerializedProperty _meshCross;
 
+        // Кэш авто-ID/коллизии: скан AssetDatabase дорог — считаем только при смене _type.intValue.
+        private int _idScannedFor = int.MinValue;
+        private FloorDefinition _idConflict;
+        private bool _noFreeIds;
+
         private void OnEnable()
         {
             _type = serializedObject.FindProperty("Type");
             _displayName = serializedObject.FindProperty("DisplayName");
             _sprite = serializedObject.FindProperty("Sprite");
             _prefab = serializedObject.FindProperty("Prefab");
-            _sideSprite = serializedObject.FindProperty("SideSprite");
-            _topSprite = serializedObject.FindProperty("TopSprite");
             _topMap = serializedObject.FindProperty("TopMap");
+            _backingMap = serializedObject.FindProperty("BackingMap");
             _blocksVerticalSight = serializedObject.FindProperty("BlocksVerticalSight");
             _sealsVertical = serializedObject.FindProperty("SealsVertical");
 
@@ -93,15 +95,42 @@ namespace Client.Editor.Inspectors
         {
             serializedObject.Update();
 
+            // Авто-ID новой SO (write-once, Type==0) + скан коллизии; кэш по _type.intValue (без аллокаций на repaint).
+            var self = target as FloorDefinition;
+            if (_type.intValue != _idScannedFor)
+            {
+                if (_type.intValue == 0)
+                {
+                    byte free = TileIdEditorUtil.SmallestFreeFloorId(self);
+                    if (free > 0) _type.intValue = free;   // присвоить наименьший свободный
+                    _noFreeIds = free == 0;                // все 1..255 заняты
+                    _idConflict = null;                    // свежий свободный id не конфликтует
+                }
+                else
+                {
+                    _idConflict = TileIdEditorUtil.FindFloorIdConflict(self);
+                    _noFreeIds = false;
+                }
+                _idScannedFor = _type.intValue;
+            }
+
             EditorGUILayout.PropertyField(_type, LType);
+            if (_noFreeIds)
+                EditorGUILayout.HelpBox("Нет свободных id (1..255 заняты). Освободите id у другого ассета.", MessageType.Error);
+            else if (_idConflict != null)
+                EditorGUILayout.HelpBox($"ID {_type.intValue} уже занят: '{_idConflict.DisplayName}'. Выберите свободный ID.", MessageType.Error);
             EditorGUILayout.PropertyField(_displayName, LDisplayName);
 
             EditorGUILayout.Space(8);
             EditorGUILayout.LabelField("Визуал", EditorStyles.boldLabel);
             EditorGUILayout.PropertyField(_sprite, LSprite);
             EditorGUILayout.PropertyField(_prefab, LPrefab);
-            EditorGUILayout.PropertyField(_sideSprite, LSideSprite);
-            EditorGUILayout.PropertyField(_topSprite, LTopSprite);
+
+            // Текстуры шейдера TileReader — у пола грид верха + подложка (боковина — только у стен).
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField("Текстуры (TileReader)", EditorStyles.boldLabel);
+            if (_topMap != null) EditorGUILayout.PropertyField(_topMap, LTopMap);
+            if (_backingMap != null) EditorGUILayout.PropertyField(_backingMap, LBackingMap);
 
             EditorGUILayout.Space(8);
             EditorGUILayout.LabelField("Флаги симуляции", EditorStyles.boldLabel);
@@ -111,12 +140,6 @@ namespace Client.Editor.Inspectors
             // У пола нет категории — блок соединений релевантен всегда; меши гейтятся UseConnections.
             if (_connection != null)
             {
-                EditorGUILayout.Space(8);
-                EditorGUILayout.LabelField("Верх пола (TileView)", EditorStyles.boldLabel);
-                // null-гард: если поле TopMap ещё не в рантайме (зона AuxCoder) — не падаем (PropertyField(null) бросает).
-                if (_topMap != null)
-                    EditorGUILayout.PropertyField(_topMap, LTopMap);
-
                 EditorGUILayout.Space(8);
                 EditorGUILayout.LabelField("Соединение пола (autotiling)", EditorStyles.boldLabel);
                 EditorGUILayout.LabelField(

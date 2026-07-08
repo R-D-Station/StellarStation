@@ -7,12 +7,8 @@ using Client.Config;
 
 namespace Client.Net.View
 {
-    /// <summary>
-    /// Рисует GridMap префабами из TileCatalog в 2.5D (этажи по Unity-Y). Активный Z и z-1 — непрозрачно;
-    /// этажи z±2…z±maxFloors раскрываются reveal'ом через вертикальные шахты дыр: кандидаты вокруг каждой
-    /// дыры берутся shadowcast-Fov на её уровне (тень за стенами), связные дыры = кластер-проём.
-    /// Видимость/непрозрачность кольца — per-frame по близости игрока к кластеру (без ребилда чанков).
-    /// </summary>
+    // Архитектура (Obsidian): RendererPool · CeilingReveal · WallConnection
+    /// <summary>Рисует GridMap префабами из TileCatalog в 2.5D: чанки, пул тайлов, автотайлинг, reveal верхних/нижних этажей.</summary>
     public class MapRenderer : MonoBehaviour
     {
         [Header("Каталог тайлов (id → префаб/спрайт)")]
@@ -39,16 +35,13 @@ namespace Client.Net.View
         [SerializeField] private int _markerSortingOrder = 5; // выше пола (0), ниже стен (10)
 
         [Header("Просвечивание этажей")]
-        [Tooltip("Прозрачный материал URP/Lit (Surface=Transparent, ZWrite Off) для колец верхнего этажа.")]
-        [SerializeField] private Material _floorFadeMaterial;
         [Tooltip("Показывать этаж выше кольцами вокруг проёмов в потолке.")]
         [SerializeField] private bool _drawCeilingReveal = true;
         [Tooltip("Рентген: показывать ВЕСЬ верхний этаж полупрозрачным, а не только кольца у проёмов.")]
         [SerializeField] private bool _ceilingSemiTransparent = false;
         [Tooltip("Непрозрачность верхнего этажа в режиме рентгена (0..1).")]
         [Range(0f, 1f)] [SerializeField] private float _ceilingXrayAlpha = 0.4f;
-        [Tooltip("Градиент непрозрачности кольца по АБСОЛЮТНОМУ индексу (cheb + floorStep·depthDim), НЕ нормируется " +
-                 "на радиус. Индекс 0 = у проёма (прозрачнее), дальше — плотнее; радиус лишь гейтит число видимых колец.")]
+        [Tooltip("Градиент непрозрачности кольца по абсолютному индексу cheb+floorStep·depthDim (не нормируется на радиус).")]
         [SerializeField] private float[] _fadeRingOpacity = { 0f, 0.18f, 0.34f, 0.50f };
 
         [Header("Динамический просвет потолка (R1)")]
@@ -58,8 +51,7 @@ namespace Client.Net.View
         [SerializeField] private float _revealMaxRadius = 4f;
         [Tooltip("Дистанция игрок↔проём, дальше которой радиус = base; ближе → растёт к max.")]
         [SerializeField] private float _revealProximityDistance = 5f;
-        [Tooltip("Глубина многоэтажного reveal (этажей вверх/вниз через стопку дыр). Мин. 2: up-reveal требует " +
-                 "наличие сплошного этажа над дырой, а это диапазон [activeZ+2..].")]
+        [Tooltip("Глубина многоэтажного reveal вверх/вниз через стопку дыр (мин. 2 — иначе up-reveal молча гаснет).")]
         [SerializeField] private int _revealMaxFloors = 3;
         [Tooltip("Сдвиг кольца на этаж глубже, колец/этаж (idx = cheb + floorStep*это).")]
         [SerializeField] private float _revealDepthDim = 1f;
@@ -78,12 +70,10 @@ namespace Client.Net.View
         // Дедуп чанков, перерисованных за один RefreshTileAt (поле — без аллокаций на вызов).
         private readonly HashSet<long> _refreshedChunks = new();
 
-        // Кандидатный набор reveal-слоёв: (wx,wy,z) → ближайший проём этого уровня + Chebyshev + глубина.
-        // Пересчёт в RecomputeReveal (многоуровневая пропагация дыр); используется в ApplyChunk.
+        // (wx,wy,z) → ближайший проём этого уровня + Chebyshev + глубина; пересчёт RecomputeReveal, читает ApplyChunk.
         private readonly Dictionary<(int, int, int), CeilingCandidate> _ceilingCandidates = new();
 
-        // Реестр пред-инстансных верхних рендеров для per-frame reveal (динамический радиус, без ребилда).
-        // Заполняется в ApplyChunk (delta>0), чистится в ClearAll и PruneCeilingTiles (ребилд чанка).
+        // Реестр пред-инстансных верхних рендеров для per-frame reveal (динамический радиус, без ребилда чанков).
         private readonly List<CeilingReveal> _ceilingTiles = new();
 
         private struct CeilingCandidate { public int Hx, Hy, Cheb, Lz, FloorStep, ClusterId; public bool IsWall; }
@@ -94,8 +84,7 @@ namespace Client.Net.View
             public GameObject Root;          // чанковый корень — для прунинга при ребилде
             public bool IsSprite;
             public int Cheb;                 // Chebyshev тайл→ближайший проём
-            public Color BaseColor;          // базовый цвет; alpha задаётся per-frame
-            public Texture BaseTex;
+            public Color BaseColor;          // базовый цвет СПРАЙТА (alpha per-frame); для меша не используется (reveal через _alpha)
             public int Wx, Wy;               // координата тайла (для editor-пробника)
             public int Lz;                   // z-уровень тайла
             public int FloorStep;            // глубина − база направления (вверх 0,1,2; вниз 0,1) — для alpha
@@ -105,23 +94,19 @@ namespace Client.Net.View
         }
 
         private MaterialPropertyBlock _mpb;
-        private bool _warnedNoFadeMat;
         private bool _warnedNoFadeRing;
 
-        // Пул тайл-GO (2.4): реюз вместо Instantiate/Destroy — стрим (2.3b) постоянно грузит/выгружает чанки,
-        // покадровый Instantiate/Destroy на 256 тайлов/чанк даёт GC-спайки/хитчи. Ключ prefab-стека = исходный
-        // префаб; sprite-fallback (без префаба) — свой стек (нельзя выдать sprite-GO там, где ждут prefab-структуру).
+        // Пул тайл-GO: реюз вместо Instantiate/Destroy (стрим грузит/выгружает чанки постоянно — иначе GC-хитчи).
         private Transform _poolRoot;                                                  // неактивный контейнер released-тайлов
         private readonly Dictionary<GameObject, Stack<GameObject>> _tilePool = new();  // по префабу
         private readonly Stack<GameObject> _spritePool = new();                        // sprite-fallback
         private const int MaxPooledPerKey = 512;                                       // кап на стек — дальние чанки не держат память вечно
 
-        // Shadowcast-буфер «света от дыры» (fix10): кандидаты reveal = тайлы, видимые из дыры на её уровне.
-        // Переиспользуется в RecomputeReveal (не per-frame); ресайз только при смене радиуса.
+        // Shadowcast-буфер «света от дыры»: кандидаты reveal = тайлы, видимые из дыры на её уровне.
         private float[,] _holeLight;
         private int _holeLightRadius = -1;
 
-        // Переиспользуемые скретч-коллекции пропагации reveal (RecomputeReveal, не per-frame) — без GC на смену этажа.
+        // Скретч-коллекции пропагации reveal (RecomputeReveal, не per-frame) — без GC на смену этажа.
         private readonly List<(int, int)> _shaft = new();           // текущая вертикальная шахта дыр (Up, затем Down)
         private readonly HashSet<(int, int)> _seedSeen = new();     // дедуп окрестности при сборе нижних сид-дыр
         private readonly HashSet<(int, int)> _inShaft = new();      // membership шахты для flood-fill кластеров
@@ -130,54 +115,41 @@ namespace Client.Net.View
         private readonly List<(int, int)> _clusterComponent = new();
 
         // Кластеры дыр (связные проёмы): центры дыр на кластер + per-frame min-дистанция игрока до кластера.
-        // Строятся в RecomputeReveal (не per-frame); _clusterMinDist переиспользуется.
         private int _clusterCount;
         private readonly List<List<Vector2>> _clusterCenters = new();
         private float[] _clusterMinDist;
 
-        // Последняя player-позиция — кэш для editor-диагностики reveal (DescribeReveal) И short-circuit ниже.
+        // Последняя player-позиция — кэш для editor-диагностики reveal (DescribeReveal) и short-circuit ниже.
         private float _lastPx, _lastPy;
 
-        // Short-circuit per-frame reveal: пока игрок не сдвинулся и reveal-состояние валидно, оба прохода
-        // (близость к кластерам + подстройка alpha) дают тот же результат → пропускаем кадр целиком.
-        // Инвалидируется при любом изменении reveal-состояния (RecomputeReveal/ApplyChunk/ClearAll).
+        // Short-circuit: игрок не сдвинулся и reveal-состояние валидно → оба прохода дадут тот же результат, пропуск кадра.
         private bool _revealValid;
         private const float RevealMoveEps = 1e-4f;
 
-        // Стрим: набор загруженных чанков изменился → _ceilingCandidates устарели (RecomputeReveal бежит только в
-        // SetMap). Ставится в OnChunkData/OnChunkUnload, гасится раз/кадр в RefreshRevealIfDirty (естественный троттл:
-        // Poll дренирует всю пачку чанков за кадр → dirty 1× → пересчёт 1×/кадр).
+        // Стрим: набор загруженных чанков сменился → _ceilingCandidates устарели (RecomputeReveal бежит только в SetMap).
+        // Ставится в OnChunkData/OnChunkUnload, гасится раз/кадр в RefreshRevealIfDirty (естественный троттл по Poll).
         private bool _revealDirtyStream;
 
-        private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-        private static readonly int BaseMapId = Shader.PropertyToID("_BaseMap");
-
-        // Грани тайла (шейдер TileFaceSprites): спрайты боковой/верхней грани через per-tile MPB (без материала безвредно).
-        private static readonly int SideTexId = Shader.PropertyToID("_SideTex");
-        private static readonly int TopTexId = Shader.PropertyToID("_TopTex");
-        private static readonly int SideStId = Shader.PropertyToID("_SideST");
-        private static readonly int TopStId = Shader.PropertyToID("_TopST");
-        private static readonly int BoundsMinId = Shader.PropertyToID("_BoundsMin");
-        private static readonly int BoundsSizeId = Shader.PropertyToID("_BoundsSize");
-        private MaterialPropertyBlock _faceMpb;
-
-        // Верх тайла (материал TileView): грид-текстура + индекс формы. Стены И полы (двери — TileFaceSprites).
+        // Материал TileReader верха тайла: _TopMap/_DownTex + форма `_cur` + углы `_cur_corner`/`_rotate` (uint → SetInteger).
+        // Тело/бок стены (TileWall) — отдельный _sideMpb, `_cur` туда не течёт.
         private static readonly int TopMapId = Shader.PropertyToID("_TopMap");
-        private static readonly int WallIId = Shader.PropertyToID("_i");
-        private MaterialPropertyBlock _wallMpb;
+        private static readonly int DownTexId = Shader.PropertyToID("_DownTex");
+        private static readonly int AlphaId = Shader.PropertyToID("_alpha"); // reveal: полупрозрачность верх-этажа (float, per-tile, SetFloat)
+        private static readonly int CurId = Shader.PropertyToID("_cur");
+        private static readonly int CurCornerId = Shader.PropertyToID("_cur_corner");
+        private static readonly int RotateId = Shader.PropertyToID("_rotate");
+        private MaterialPropertyBlock _wallMpb;   // верх (WallTop / материал TileTop)
+        private MaterialPropertyBlock _sideMpb;   // тело/бок стены (материал TileWall) — изоляция от _cur/_cur_corner/_rotate
 
         private void Start()
         {
-            // Тест-карта (.smap) — ТОЛЬКО для standalone-сцены без сети. Если сеть уже привязала карту (NetworkRunner.Awake
-            // → SetMap; все Awake идут ДО всех Start), НЕ перетираем её локальным файлом: иначе рендерер рисует по своей
-            // карте, а коллизия/двери — по сетевой. Дверь открывается в сетевой карте (проходима), но рисуется закрытой,
-            // т.к. RefreshTileAt читает тест-карту. Под SendMap это маскировал OnMapData (ре-SetMap), под стримом — нет.
+            // Тест-карта — только для standalone без сети; если сеть уже привязала карту (Awake идёт до Start),
+            // не перетираем — иначе рендер и коллизия/двери разойдутся на разные GridMap-инстансы.
             if (_map == null && !string.IsNullOrEmpty(_testMapPath))
                 LoadLocal(_testMapPath);
         }
 
-        // Живая подстройка просвечивания в Play Mode: меняешь тумблеры/кольца — перерисовываем.
-        private void OnValidate()
+        private void OnValidate() // живая подстройка просвечивания в Play Mode
         {
             // Предсказуемый тюнинг в инспекторе: base ≤ max, дистанция > 0 (защита деления в reveal).
             _revealMaxRadius = Mathf.Max(0f, _revealMaxRadius);
@@ -227,10 +199,7 @@ namespace Client.Net.View
             if (_map != null) SetMap(_map);
         }
 
-        /// <summary>Перерисовать после рантайм-изменения тайла (TileUpdate: дверь, смена/снос стены).
-        /// Форма стены зависит от 4 прямых соседей (autotiling, W3), а они могут лежать в смежных
-        /// чанках — поэтому перерисовываем чанк тайла И его 4 соседей с дедупом. Маску просвечивания не
-        /// трогаем: дверь её не меняет, правки структуры пола идут через SetMap.</summary>
+        /// <summary>Перерисовывает чанк тайла и 4 соседей после рантайм-изменения (TileUpdate).</summary>
         public void RefreshTileAt(int x, int y, int z)
         {
             if (_map == null || z < _activeZ - 1 || z > _activeZ + 1) return;
@@ -240,7 +209,7 @@ namespace Client.Net.View
             ReapplyChunkAt(x + 1, y, z); ReapplyChunkAt(x - 1, y, z);
         }
 
-        // Перерисовать чанк, содержащий (x,y,z) — не более одного раза за вызов RefreshTileAt (дедуп).
+        /// <summary>Перерисовывает чанк с (x,y,z) не чаще раза за вызов.</summary>
         private void ReapplyChunkAt(int x, int y, int z)
         {
             int cx = FloorDiv(x, Chunk.Size);
@@ -250,11 +219,8 @@ namespace Client.Net.View
             if (chunk != null) ApplyChunk(chunk);
         }
 
-        /// <summary>Пере-применить 4 ПРЯМЫХ соседних чанка (N/E/S/W, тот же z) вокруг (cx,cy,z). Автотайлинг
-        /// (WallConnectivity/FloorConnectivity.ResolveAt) резолвит форму тайла по 4 соседям через _map.GetTile —
-        /// при стриме сосед мог быть ещё не загружен → край резолвился «нет соседа». При приходе/уходе чанка
-        /// пере-резолвим края УЖЕ отрисованных соседей. ПЛОСКО, без рекурсии (ApplyChunk это НЕ зовёт) — иначе каскад.</summary>
-        public void ReapplyLoadedNeighbors(int cx, int cy, int z)
+        /// <summary>Пере-резолвит autotiling-края 4 соседних чанков вокруг (cx,cy,z).</summary>
+        public void ReapplyLoadedNeighbors(int cx, int cy, int z) // плоско, без рекурсии — ApplyChunk не зовём, иначе каскад
         {
             ReapplyChunkIfLoaded(cx + 1, cy, z);
             ReapplyChunkIfLoaded(cx - 1, cy, z);
@@ -262,7 +228,7 @@ namespace Client.Net.View
             ReapplyChunkIfLoaded(cx, cy - 1, z);
         }
 
-        // Пере-применить чанк (cx,cy,z), только если он ОТРИСОВАН (в _chunkRoots) и есть в _map. Реюз тайлов — через пул.
+        /// <summary>Пере-применяет чанк, только если он уже отрисован.</summary>
         private void ReapplyChunkIfLoaded(int cx, int cy, int z)
         {
             if (_map == null || !_chunkRoots.ContainsKey(Key(cx, cy, z))) return;
@@ -270,13 +236,10 @@ namespace Client.Net.View
             if (chunk != null) ApplyChunk(chunk);
         }
 
-        /// <summary>Пометить reveal-кандидаты устаревшими (набор загруженных чанков сменился при стриме). Зовётся из
-        /// OnChunkData/OnChunkUnload; фактический пересчёт — раз/кадр в RefreshRevealIfDirty.</summary>
+        /// <summary>Помечает reveal-кандидаты устаревшими (вызывать из OnChunkData/OnChunkUnload).</summary>
         public void MarkRevealDirty() => _revealDirtyStream = true;
 
-        /// <summary>Раз/кадр (если dirty): пересчитать reveal-кандидаты на ПОЛНОМ текущем наборе чанков и пере-применить
-        /// загруженные REVEAL-СЛОИ, чтобы догруженные стримом верхние/нижние чанки зарегистрировали reveal. Активный этаж
-        /// (delta==0) и z-1 (delta==-1) opaque — от кандидатов не зависят, их НЕ трогаем (иначе мигал бы пол).</summary>
+        /// <summary>Раз/кадр (если dirty): пересчитывает reveal-кандидаты для догруженных стримом чанков.</summary>
         public void RefreshRevealIfDirty()
         {
             if (!_revealDirtyStream) return;
@@ -311,12 +274,9 @@ namespace Client.Net.View
             return Quaternion.identity;
         }
 
-        // Сосед-коннектор для ориентации двери: любая структура (стена/окно/дверь/люк), вкл. открытые.
-        private bool IsConnector(int x, int y, int z) => _map.GetTile(x, y, z).StructureType != 0;
+        private bool IsConnector(int x, int y, int z) => _map.GetTile(x, y, z).StructureType != 0; // любая структура, вкл. открытые
 
-        /// <summary>Пересчитать многоуровневые reveal-кандидаты: вверх z+1…z+max и вниз z-2…z-max через стопки
-        /// вертикальных дыр (z-1 непрозрачен — база вниз). Для каждого тайла: ближайший проём своего уровня +
-        /// Chebyshev + глубина (FloorStep для alpha). Непрозрачность считается per-frame в UpdateCeilingReveal.</summary>
+        /// <summary>Пересчитать многоуровневые reveal-кандидаты вверх/вниз через стопки вертикальных дыр.</summary>
         private void RecomputeReveal()
         {
             _ceilingCandidates.Clear();
@@ -325,16 +285,13 @@ namespace Client.Net.View
             if (_map == null) return;
 
             int maxR = Mathf.Max(0, Mathf.CeilToInt(_revealMaxRadius)); // ceil: дробный max не теряет внешнее кольцо
-            // ≥2 в рантайме (не только OnValidate): при 1 диапазон HasSolidAbove пуст → up-reveal молча
-            // умирает; кламп здесь держит инвариант и в билде со стейл-значением 1 (OnValidate там не бежит).
-            int maxFloors = Mathf.Max(2, _revealMaxFloors);
+            int maxFloors = Mathf.Max(2, _revealMaxFloors); // кламп и здесь — билд может нести стейл-значение 1 (OnValidate там не бежит)
 
             PropagateUp(maxR, maxFloors);
             PropagateDown(maxR, maxFloors);
         }
 
-        // Вверх: якорь — ПОЛНАЯ вертикальная шахта дыр. reveal z+d вокруг H_d = (дыры z+1)∩…∩(дыры z+d):
-        // пересекаем с дырами z+d ДО раскрытия → z+d рисуется только там, где над дырой z+1 есть СВОЯ дыра.
+        /// <summary>Пробрасывает reveal-кандидаты вверх по вертикальным шахтам дыр.</summary>
         private void PropagateUp(int maxR, int maxFloors)
         {
             var shaft = CollectUpSeedOpenings(maxFloors);  // H_1: дыры z+1 над полом игрока (с этажом сверху)
@@ -346,8 +303,7 @@ namespace Client.Net.View
             }
         }
 
-        // Вниз: якорь — ПОЛНАЯ шахта дыр в полу. reveal z-d вокруг H_d = (дыры пола z-1)∩…∩(дыры пола z-d):
-        // пересекаем с дырами z-d ДО раскрытия; z-1 непрозрачен (база), кольца с z-2.
+        /// <summary>Пробрасывает reveal-кандидаты вниз по вертикальным шахтам дыр в полу.</summary>
         private void PropagateDown(int maxR, int maxFloors)
         {
             if (maxFloors < 2) return;
@@ -360,8 +316,7 @@ namespace Client.Net.View
             }
         }
 
-        // Проёмы потолка на activeZ+1: вертикальная дыра над полом игрока (как R1) И над ней есть хотя бы один
-        // сплошной этаж в пределах maxFloors (иначе колонна открыта в космос — не reveal, Bug1).
+        /// <summary>Собирает дыры потолка на activeZ+1, над которыми есть сплошной этаж (иначе колонна открыта в космос).</summary>
         private List<(int, int)> CollectUpSeedOpenings(int maxFloors)
         {
             _shaft.Clear();
@@ -382,7 +337,7 @@ namespace Client.Net.View
             return _shaft;
         }
 
-        // Есть ли сплошной (BlocksVerticalSight) уровень над (x,y) в [activeZ+2 .. activeZ+maxFloors].
+        /// <summary>Есть ли сплошной уровень над (x,y) в [activeZ+2 .. activeZ+maxFloors].</summary>
         private bool HasSolidAbove(int x, int y, int maxFloors)
         {
             for (int z = _activeZ + 2; z <= _activeZ + maxFloors; z++)
@@ -390,8 +345,7 @@ namespace Client.Net.View
             return false;
         }
 
-        // База вниз: дыры в полу z-1, попадающие под дыры пола activeZ (в пределах maxR), И под ними есть хотя
-        // бы один сплошной этаж в пределах maxFloors (иначе колонна открыта в космос снизу — не reveal, Bug1).
+        /// <summary>Собирает дыры пола z-1 под дырами пола activeZ, под которыми есть сплошной этаж.</summary>
         private List<(int, int)> CollectDownSeedOpenings(int maxR, int maxFloors)
         {
             _shaft.Clear();
@@ -419,7 +373,7 @@ namespace Client.Net.View
             return _shaft;
         }
 
-        // Есть ли сплошной (BlocksVerticalSight) уровень под (x,y) в [activeZ-2 .. activeZ-maxFloors].
+        /// <summary>Есть ли сплошной уровень под (x,y) в [activeZ-2 .. activeZ-maxFloors].</summary>
         private bool HasSolidBelow(int x, int y, int maxFloors)
         {
             for (int z = _activeZ - 2; z >= _activeZ - maxFloors; z--)
@@ -427,8 +381,7 @@ namespace Client.Net.View
             return false;
         }
 
-        // Разбить дыры уровня lz на связные проёмы (кардинальная 4-смежность); от каждого проёма-кластера
-        // разложить кольца maxR. Кластеризация — на RecomputeReveal (не per-frame).
+        /// <summary>Разбивает дыры уровня lz на связные проёмы (кластеры) и раскладывает кольца reveal-кандидатов от каждого.</summary>
         private void EmitClusteredRings(List<(int, int)> shaft, int lz, int floorStep, int maxR)
         {
             _inShaft.Clear();
@@ -466,15 +419,14 @@ namespace Client.Net.View
             if (inShaft.Contains(p) && visited.Add(p)) stack.Push(p);
         }
 
-        // Переиспользуемый список центров дыр для кластера clusterId (растёт по мере надобности).
+        /// <summary>Переиспользуемый список центров дыр для кластера clusterId.</summary>
         private List<Vector2> NextClusterCenters(int clusterId)
         {
             while (_clusterCenters.Count <= clusterId) _clusterCenters.Add(new List<Vector2>());
             return _clusterCenters[clusterId];
         }
 
-        // Кандидаты reveal от каждой дыры кластера = shadowcast-Fov ОТ дыры на её уровне lz (fix10): стены/углы
-        // уровня lz дают тень — за ними не кандидаты; сама стена-граница подсвечена (виден край) → рисуется.
+        /// <summary>Добавляет reveal-кандидаты вокруг дыр кластера через shadowcast-FOV от каждой дыры на её уровне.</summary>
         private void AddCandidatesAround(List<(int, int)> holes, int lz, int floorStep, int maxR, int clusterId)
         {
             EnsureHoleLight(maxR);
@@ -492,7 +444,7 @@ namespace Client.Net.View
             }
         }
 
-        // (Ре)аллокация буфера «света от дыры» — только при изменении радиуса.
+        /// <summary>(Ре)аллоцирует буфер «света от дыры» при изменении радиуса.</summary>
         private void EnsureHoleLight(int radius)
         {
             if (_holeLight != null && _holeLightRadius == radius) return;
@@ -501,8 +453,7 @@ namespace Client.Net.View
             _holeLightRadius = radius;
         }
 
-        // Оставить точки шахты, где на уровне lz — вертикальная дыра (шахта продолжается сквозь этот уровень).
-        // Сужение монотонно (пересечение) → фильтруем НА МЕСТЕ компактированием, без новой коллекции (GC на смену этажа).
+        /// <summary>Оставляет в set только точки, где на уровне lz есть вертикальная дыра (пересечение на месте, без аллокаций).</summary>
         private void FilterHolesInPlace(List<(int, int)> set, int lz)
         {
             int w = 0;
@@ -512,7 +463,7 @@ namespace Client.Net.View
             if (w < set.Count) set.RemoveRange(w, set.Count - w);
         }
 
-        // При перекрытии колец выигрывает МЕНЬШИЙ Chebyshev (ближайшая дыра); ClusterId следует за якорь-дырой.
+        /// <summary>Регистрирует reveal-кандидата (wx,wy,lz); при перекрытии колец выигрывает меньший Chebyshev.</summary>
         private void AddCandidate(int wx, int wy, int lz, int hx, int hy, int cheb, int floorStep, int clusterId)
         {
             var k = (wx, wy, lz);
@@ -524,7 +475,7 @@ namespace Client.Net.View
             };
         }
 
-        // Глухая стена на reveal-тайле (для единой alpha). RecomputeReveal, не per-frame — каталог-lookup ок.
+        /// <summary>Глухая стена на reveal-тайле (для единой alpha, без градиента).</summary>
         private bool IsRevealWall(int x, int y, int z)
         {
             if (_catalog == null) return false;
@@ -534,8 +485,7 @@ namespace Client.Net.View
             return s != null && s.Category == StructureCategory.Wall;
         }
 
-        // Opacity кольца: ФИКС-индекс = cheb (до ближайшей дыры) + сдвиг глубины (floorStep*_revealDepthDim колец/этаж).
-        // НЕ делим на radius — стоя В шахте кольца не пропадают; radius лишь гейтит, сколько колец видно. floorStep=0 → idx=cheb.
+        /// <summary>Непрозрачность кольца по индексу cheb + глубина этажа (radius лишь гейтит видимость, не делит индекс).</summary>
         private float RevealAlpha(int cheb, float radius, int floorStep)
         {
             if (cheb > radius) return 0f;
@@ -549,12 +499,11 @@ namespace Client.Net.View
             return Mathf.Lerp(_fadeRingOpacity[i0], _fadeRingOpacity[i0 + 1], fidx - i0);
         }
 
-        // Стены reveal — единая alpha (_wallRevealAlpha), без cheb/глубины; пол/потолок — градиент (fix4).
+        /// <summary>Alpha reveal-тайла: единая для стен, градиент по кольцу для пола/потолка.</summary>
         private float WallOrRingAlpha(bool isWall, int cheb, float radius, int floorStep)
             => isWall ? _wallRevealAlpha : RevealAlpha(cheb, radius, floorStep);
 
-        /// <summary>Per-frame: подстроить непрозрачность пред-инстансных верхних тайлов под близость игрока к
-        /// «своему» проёму. Без ребилда чанков и без аллокаций (реестр и _mpb — поля). Только при reveal.</summary>
+        /// <summary>Per-frame подстраивает непрозрачность reveal-тайлов под близость игрока к проёму.</summary>
         public void UpdateCeilingReveal(float px, float py)
         {
             // Short-circuit: игрок не сдвинулся и состояние валидно → результат обоих проходов байт-идентичен.
@@ -612,12 +561,12 @@ namespace Client.Net.View
                 }
                 else
                 {
-                    ApplyCeilingMpb(r, rec.BaseColor, rec.BaseTex, a);
+                    SetTileAlpha(r, a); // меш: `_alpha` на TileReader-материале (MPB-preserve), без подмены материала
                 }
             }
         }
 
-        // Per-frame: min-дистанция игрока до каждого кластера (по всем его дырам). Массив/центры — поля.
+        /// <summary>Считает per-frame min-дистанцию игрока до каждого кластера дыр.</summary>
         private void UpdateClusterDistances(float px, float py)
         {
             EnsureClusterDistArray(_clusterCount);
@@ -641,7 +590,7 @@ namespace Client.Net.View
                 _clusterMinDist = new float[Mathf.Max(count, 4)];
         }
 
-        /// <summary>Пересобрать инстансы тайлов одного чанка (слой по chunk.Z относительно активного).</summary>
+        /// <summary>Пересобирает инстансы тайлов одного чанка.</summary>
         public void ApplyChunk(Chunk chunk)
         {
             if (_catalog == null)
@@ -680,12 +629,8 @@ namespace Client.Net.View
                     Tile t = chunk[lx, ly];
                     int wx = baseX + lx, wy = baseY + ly;
 
-                    // Маркер спец-тайла (только активный этаж): лестницы/спавн — оверлей выше пола, через тот же
-                    // Spawn → жизненный цикл чанка (чистится при ребилде). Lift/None/неназначенный спрайт → пропуск.
                     if (delta == 0) SpawnSpecialMarker(t.Special, wx, wy, floorBaseY, root.transform);
 
-                    // Активный этаж и низ — непрозрачно. Верх — либо динамическое кольцо у проёма (R1),
-                    // либо весь пол в режиме рентгена; остальной потолок не рисуем (срез — видно свой этаж).
                     float alpha;
                     bool registerCeiling = false;
                     CeilingCandidate cand = default;
@@ -699,8 +644,7 @@ namespace Client.Net.View
                         if (!_drawCeilingReveal) continue;
                         if (_ceilingCandidates.TryGetValue((wx, wy, chunk.Z), out cand))
                         {
-                            // Стартовая alpha по базовому радиусу + глубине (стены — единая); обновляется per-frame.
-                            alpha = WallOrRingAlpha(cand.IsWall, cand.Cheb, _revealBaseRadius, cand.FloorStep);
+                            alpha = WallOrRingAlpha(cand.IsWall, cand.Cheb, _revealBaseRadius, cand.FloorStep); // стартовая; обновляется per-frame
                             registerCeiling = true;
                         }
                         else if (delta == 1 && _ceilingSemiTransparent && t.FloorType != 0)
@@ -710,35 +654,35 @@ namespace Client.Net.View
                         else continue;
                     }
 
-                    // Структуру тайла берём один раз — переиспользуем в floor-skip (F1) и structure-ветке.
                     var s = t.StructureType != 0 ? _catalog.GetStructure(t.StructureType) : null;
                     bool wallHere = s != null && s.Category == StructureCategory.Wall;
+                    bool hideFloor = wallHere || (s != null && s.NoVisibleFloor);
 
-                    if (t.FloorType != 0 && !wallHere) // F1: под стеной пол не рисуем (окна/двери — рисуем)
+                    if (t.FloorType != 0 && !hideFloor)
                     {
                         var f = _catalog.GetFloor(t.FloorType);
                         GameObject floorGo;
 
-                        // F2: пол с autotiling выбирает форму по 4 соседям-полам → меш + поворот по Unity-Y.
                         if (f != null && f.Connection.UseConnections)
                         {
                             var (shape, steps) = FloorConnectivity.ResolveAt(_catalog, _map, f, wx, wy, chunk.Z);
                             var mesh = f.Connection.GetMesh(shape);
                             var prefab = mesh != null ? mesh : f.Prefab; // фолбэк, если меш формы не назначен
-                            // Плоский спрайт-фолбэк (ни меша, ни Prefab) по Y не крутим — встал бы ребром.
-                            var rot = prefab != null ? Quaternion.Euler(0f, 90f * steps, 0f) : Quaternion.identity;
-                            // planarScale=1: у autotiling-мешей края задаёт сам меш, seam-scale не нужен.
+                            var rot = prefab != null ? Quaternion.Euler(0f, 90f * steps, 0f) : Quaternion.identity; // sprite-фолбэк по Y не крутим
                             floorGo = Spawn(prefab, f.Sprite, wx, wy, floorBaseY + _floorYOffset, _floorSortingOrder,
                                 root.transform, "Floor", alignTop: true, planarScale: 1f, rotation: rot, alpha: alpha, deferFade: registerCeiling);
-                            // Полы (autotiling) текстурятся тем же материалом TileView (_TopMap + _i по форме), что и стены.
-                            ApplyTileViewTop(floorGo, f.TopMap, shape);
+                            // Угол подаём безусловно (pool-leak иначе); +FloorCornerBaseQuarter — шов, парный EditorWindow.DrawFloorTop.
+                            byte cornerMask = FloorConnectivity.ResolveCornersAt(_catalog, _map, f, wx, wy, chunk.Z);
+                            var (curCorner, cornerRotate) = WallCornerCode.EncodeCorners(cornerMask);
+                            byte rotate = (byte)((WallCornerCode.CompensateRotateForMesh(cornerRotate, steps)
+                                + WallCornerCode.FloorCornerBaseQuarter + WallCornerCode.ShapeCornerQuarter(true, shape, curCorner)) & 3);
+                            ApplyTileViewTop(floorGo, f.TopMap, shape, curCorner, rotate, f.BackingMap, null); // side=null: у пола боковин нет
                         }
                         else
                         {
                             float ps = alpha < 1f ? 1f : _floorSeamScale;
                             floorGo = Spawn(f?.Prefab, f?.Sprite, wx, wy, floorBaseY + _floorYOffset, _floorSortingOrder,
                                 root.transform, "Floor", alignTop: true, planarScale: ps, rotation: Quaternion.identity, alpha: alpha, deferFade: registerCeiling);
-                            if (f != null) ApplyFaceSprites(floorGo, f.SideSprite, f.TopSprite);
                         }
 
                         if (registerCeiling) RegisterCeiling(floorGo, root, cand, wx, wy);
@@ -749,28 +693,28 @@ namespace Client.Net.View
                         bool openNow = s != null && s.Openable && t.Open;
                         GameObject structGo;
 
-                        // Глухая стена с autotiling: форма по 4 прямым соседям → меш + поворот по Unity-Y.
                         if (s != null && !openNow && s.Category == StructureCategory.Wall && s.Connection.UseConnections)
                         {
                             var (shape, steps) = WallConnectivity.ResolveAt(_catalog, _map, s, wx, wy, chunk.Z);
                             var mesh = s.Connection.GetMesh(shape);
                             var prefab = mesh != null ? mesh : s.Prefab; // фолбэк, если меш формы не назначен
-                            // Плоский спрайт-фолбэк (ни меша, ни Prefab) по Y не крутим — встал бы ребром к камере.
-                            var rot = prefab != null ? Quaternion.Euler(0f, 90f * steps, 0f) : Quaternion.identity;
+                            var rot = prefab != null ? Quaternion.Euler(0f, 90f * steps, 0f) : Quaternion.identity; // sprite-фолбэк по Y не крутим
                             structGo = Spawn(prefab, s.Sprite, wx, wy, floorBaseY + _wallYOffset, _wallSortingOrder,
                                 root.transform, "Structure", alignTop: false, planarScale: 1f, rotation: rot, alpha: alpha, deferFade: registerCeiling);
-                            // Стены текстурятся материалом TileView (_TopMap + _i по форме), не TileFaceSprites.
-                            ApplyTileViewTop(structGo, s.TopMap, shape);
+                            // Меш повёрнут на 90°·steps, UV мешевые (TEXCOORD0) → компенсируем _rotate на -steps (double-rotate trap).
+                            byte cornerMask = WallConnectivity.ResolveCornersAt(_catalog, _map, s, wx, wy, chunk.Z);
+                            var (curCorner, cornerRotate) = WallCornerCode.EncodeCorners(cornerMask);
+                            byte rotate = (byte)((WallCornerCode.CompensateRotateForMesh(cornerRotate, steps)
+                                + WallCornerCode.ShapeCornerQuarter(false, shape, curCorner)) & 3);
+                            ApplyTileViewTop(structGo, s.TopMap, shape, curCorner, rotate, s.BackingMap, s.SideMap);
                         }
                         else
                         {
                             var prefab = openNow ? s.OpenPrefab : s?.Prefab;
                             var sprite = openNow ? s.OpenSprite : s?.Sprite;
-                            // Открываемые (двери/люки) поворачиваем по линии стены; глухие — как есть.
                             var rot = (s != null && s.Openable) ? DoorRotation(wx, wy, chunk.Z) : Quaternion.identity;
                             structGo = Spawn(prefab, sprite, wx, wy, floorBaseY + _wallYOffset, _wallSortingOrder,
                                 root.transform, "Structure", alignTop: false, planarScale: 1f, rotation: rot, alpha: alpha, deferFade: registerCeiling);
-                            if (s != null) ApplyFaceSprites(structGo, s.SideSprite, s.TopSprite);
                         }
 
                         if (registerCeiling) RegisterCeiling(structGo, root, cand, wx, wy);
@@ -779,9 +723,7 @@ namespace Client.Net.View
             }
         }
 
-        /// <summary>Создать инстанс тайла (префаб или fallback-спрайт) в центре тайла, выровнять по грани,
-        /// при alpha&lt;1 — погасить через прозрачный материал. Возвращает созданный объект (null — пусто).
-        /// deferFade=true: фейд НЕ применяем (его сделает RegisterCeiling, перехватив базовый цвет/текстуру).</summary>
+        /// <summary>Создаёт инстанс тайла (префаб/sprite-фолбэк), выравнивает по грани и применяет fade.</summary>
         private GameObject Spawn(GameObject prefab, Sprite sprite, int wx, int wy, float y, int sortingOrder,
             Transform parent, string label, bool alignTop, float planarScale, Quaternion rotation, float alpha = 1f, bool deferFade = false)
         {
@@ -796,9 +738,7 @@ namespace Client.Net.View
                 var sr = go.GetComponent<SpriteRenderer>();
                 sr.sprite = sprite;
                 sr.sortingOrder = sortingOrder;
-                // При deferFade оставляем полную непрозрачность — alpha задаст RegisterCeiling. Реюз: color сброшен
-                // к pristine (white) в ResetToPristine, так что rgb-тинт прошлого тайла не течёт.
-                var col = sr.color; col.a = deferFade ? 1f : alpha; sr.color = col;
+                var col = sr.color; col.a = deferFade ? 1f : alpha; sr.color = col; // color уже сброшен к pristine в ResetToPristine
             }
             else
             {
@@ -807,8 +747,7 @@ namespace Client.Net.View
 
             go.transform.rotation = rotation;
 
-            // localScale уже сброшен к pristine (реюз — ResetToPristine; свежий инстанс — pristine по определению),
-            // поэтому planarScale НЕ накапливается между реюзами.
+            // localScale уже pristine (ResetToPristine на реюзе) — planarScale не накапливается между реюзами.
             if (planarScale != 1f)
             {
                 Vector3 s = go.transform.localScale;
@@ -824,7 +763,7 @@ namespace Client.Net.View
             return go;
         }
 
-        // Выдать prefab-инстанс из пула (со СБРОСОМ стейл-состояния) или создать новый и пометить PooledTile.
+        /// <summary>Выдаёт prefab-инстанс из пула (со сбросом состояния) или создаёт новый.</summary>
         private GameObject AcquirePrefab(GameObject prefab, Transform parent)
         {
             if (_tilePool.TryGetValue(prefab, out var stack))
@@ -844,7 +783,7 @@ namespace Client.Net.View
             return inst;
         }
 
-        // Выдать sprite-fallback GO из своего стека (со сбросом) или создать новый.
+        /// <summary>Выдаёт sprite-fallback GO из своего стека (со сбросом) или создаёт новый.</summary>
         private GameObject AcquireSprite(string label, Transform parent)
         {
             var go = PopLive(_spritePool); // null-safe pop
@@ -864,8 +803,7 @@ namespace Client.Net.View
             return inst;
         }
 
-        // Достать из стека ЖИВОЙ GO, сняв флаг пула. Уничтоженные (Unity fake-null — отложенный Destroy сработал, лёжа
-        // в пуле) пропускаем, чтобы acquire не выдал битый тайл (их PooledTile тоже мёртв). Пусто/всё мертво → null.
+        /// <summary>Достаёт живой GO из стека пула, пропуская уничтоженные ссылки.</summary>
         private GameObject PopLive(Stack<GameObject> stack)
         {
             while (stack.Count > 0)
@@ -879,8 +817,7 @@ namespace Client.Net.View
             return null;
         }
 
-        // Вернуть все тайл-GO чанка в пул. PruneCeilingTiles(root) ОБЯЗАН быть вызван ДО этого (иначе reveal-реестр
-        // будет ссылаться на реюзнутые рендеры). После — рут пуст → Destroy(root) дёшев.
+        /// <summary>Возвращает все тайл-GO чанка в пул. Вызывать после PruneCeilingTiles(root).</summary>
         private void ReleaseChunkTiles(GameObject root)
         {
             var tr = root.transform;
@@ -888,15 +825,13 @@ namespace Client.Net.View
                 Release(tr.GetChild(i).gameObject);
         }
 
-        // Release одного тайл-GO: SetActive(false) + reparent в _poolRoot + push в стек по PooledTile.Source.
+        /// <summary>Освобождает один тайл-GO в пул: деактивирует, репарентит и кладёт в стек по источнику.</summary>
         private void Release(GameObject go)
         {
             var pt = go.GetComponent<PooledTile>();
             if (pt == null) { Destroy(go); return; } // не пуловый (страховка) — просто уничтожить
 
-            // Double-release guard: флаг НА самом PooledTile (не HashSet<GameObject> — хэш Unity-объекта может «плыть»
-            // после Destroy → Remove промахивается, мёртвые ссылки копятся). Уже в пуле → второй push дал бы GO две
-            // позиции при acquire (первая — навсегда пустая). Пропускаем + лог источника (вскрывает КОРЕНЬ в Unity-логе).
+            // Double-release guard: флаг на PooledTile, не HashSet<GameObject> (хэш Unity-объекта «плывёт» после Destroy).
             if (pt.InPool)
             {
                 Debug.LogWarning($"[MapRenderer] double-release тайла '{go.name}' (source={(pt.Source != null ? pt.Source.name : "sprite")}) — второй push пропущен (корень double-release)");
@@ -925,12 +860,11 @@ namespace Client.Net.View
             _poolRoot = go.transform;
         }
 
-        // Зарегистрировать рендеры верхнего тайла для динамического reveal: перехватить базовый цвет/текстуру,
-        // подменить материал на прозрачный (как ApplyFade) и выставить стартовую alpha по базовому радиусу.
+        /// <summary>Регистрирует рендеры верхнего тайла для динамического reveal.</summary>
         private void RegisterCeiling(GameObject go, GameObject root, in CeilingCandidate cand, int wx, int wy)
         {
             if (go == null) return;
-            bool opaque = cand.IsWall && _wallRevealAlpha >= 1f; // непрозрачная стена → без fade-материала
+            bool opaque = cand.IsWall && _wallRevealAlpha >= 1f; // непрозрачная стена → alpha не трогаем (дефолт материала 1)
             float startAlpha = WallOrRingAlpha(cand.IsWall, cand.Cheb, _revealBaseRadius, cand.FloorStep);
 
             var renderers = go.GetComponentsInChildren<Renderer>(true);
@@ -942,152 +876,80 @@ namespace Client.Net.View
                     _ceilingTiles.Add(new CeilingReveal
                     {
                         Renderer = r, Root = root, IsSprite = true, Cheb = cand.Cheb,
-                        BaseColor = baseC, BaseTex = null,
+                        BaseColor = baseC,
                         Wx = wx, Wy = wy, Lz = cand.Lz, FloorStep = cand.FloorStep, ClusterId = cand.ClusterId, IsWall = cand.IsWall, Opaque = opaque
                     });
                     if (!opaque) { var col = baseC; col.a = startAlpha; sr.color = col; } // opaque — alpha остаётся 1
                     continue;
                 }
 
-                if (opaque)
-                {
-                    // Непрозрачная стена: оставляем исходный материал (без fade-свапа), видимость — гейтом близости.
-                    _ceilingTiles.Add(new CeilingReveal
-                    {
-                        Renderer = r, Root = root, IsSprite = false, Cheb = cand.Cheb,
-                        BaseColor = Color.white, BaseTex = null,
-                        Wx = wx, Wy = wy, Lz = cand.Lz, FloorStep = cand.FloorStep, ClusterId = cand.ClusterId, IsWall = cand.IsWall, Opaque = true
-                    });
-                    continue;
-                }
-
-                if (_floorFadeMaterial == null) { WarnNoFadeMat(); continue; }
-
-                var orig = r.sharedMaterial;
-                Color c = (orig != null && orig.HasProperty(BaseColorId)) ? orig.GetColor(BaseColorId) : Color.white;
-                Texture tex = (orig != null && orig.HasProperty(BaseMapId)) ? orig.GetTexture(BaseMapId) : null;
-                c.a = 1f;
-
-                SwapRendererToFade(r);
-                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; // прозрачный потолок не льёт тень
-
                 _ceilingTiles.Add(new CeilingReveal
                 {
                     Renderer = r, Root = root, IsSprite = false, Cheb = cand.Cheb,
-                    BaseColor = c, BaseTex = tex,
-                    Wx = wx, Wy = wy, Lz = cand.Lz, FloorStep = cand.FloorStep, ClusterId = cand.ClusterId, IsWall = cand.IsWall, Opaque = false
+                    BaseColor = Color.white, // для меша не используется (alpha через _alpha материала)
+                    Wx = wx, Wy = wy, Lz = cand.Lz, FloorStep = cand.FloorStep, ClusterId = cand.ClusterId, IsWall = cand.IsWall, Opaque = opaque
                 });
-                ApplyCeilingMpb(r, c, tex, startAlpha);
+
+                if (opaque) continue; // непрозрачная стена: только видимость (гейт близости), материал/alpha не трогаем
+
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; // полупрозрачный верх не льёт тень
+                SetTileAlpha(r, startAlpha);
             }
         }
 
-        // Убрать из реестра записи, принадлежащие чанку root (вызывать ДО Destroy(root)).
+        /// <summary>Убирает из reveal-реестра записи чанка root (вызывать до Destroy(root)).</summary>
         private void PruneCeilingTiles(GameObject root)
         {
             for (int i = _ceilingTiles.Count - 1; i >= 0; i--)
                 if (_ceilingTiles[i].Root == root) _ceilingTiles.RemoveAt(i);
         }
 
-        // Погасить меш-рендеры объекта: подменить материал на прозрачный, перенести текстуру/цвет
-        // оригинала с заданной alpha через MaterialPropertyBlock (без аллокаций материалов).
+        /// <summary>Гасит меш-рендеры до alpha через `_alpha` (xray/полупрозрачный тайл вне reveal-реестра).</summary>
         private void ApplyFade(Renderer[] renderers, float alpha)
         {
-            if (_floorFadeMaterial == null) { WarnNoFadeMat(); return; }
-
-            _mpb ??= new MaterialPropertyBlock();
             foreach (var r in renderers)
             {
                 if (r is SpriteRenderer) continue; // спрайтам alpha уже задана через color
-
-                var orig = r.sharedMaterial;
-                Color c = (orig != null && orig.HasProperty(BaseColorId)) ? orig.GetColor(BaseColorId) : Color.white;
-                Texture tex = (orig != null && orig.HasProperty(BaseMapId)) ? orig.GetTexture(BaseMapId) : null;
-
-                SwapRendererToFade(r);
-                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; // прозрачный потолок не льёт тень
-                ApplyCeilingMpb(r, c, tex, alpha);
+                r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; // полупрозрачный верх не льёт тень
+                SetTileAlpha(r, alpha);
             }
         }
 
-        // Подменить материал рендера на _floorFadeMaterial на всех сабмешах (иначе мультиматериальный
-        // префаб останется частично непрозрачным).
-        private void SwapRendererToFade(Renderer r)
-        {
-            int count = r.sharedMaterials.Length;
-            if (count <= 1)
-            {
-                r.sharedMaterial = _floorFadeMaterial;
-            }
-            else
-            {
-                var mats = new Material[count];
-                for (int i = 0; i < count; i++) mats[i] = _floorFadeMaterial;
-                r.sharedMaterials = mats;
-            }
-        }
-
-        // Выставить непрозрачность рендера через переиспользуемый MaterialPropertyBlock (без аллокаций).
-        private void ApplyCeilingMpb(Renderer r, Color baseColor, Texture baseTex, float alpha)
+        /// <summary>Задаёт reveal `_alpha` тайла через MPB, сохраняя прочие свойства блока.</summary>
+        private void SetTileAlpha(Renderer r, float alpha)
         {
             _mpb ??= new MaterialPropertyBlock();
-            _mpb.Clear(); // иначе _BaseMap протекает с предыдущего рендера (SetTexture условный)
-            Color c = baseColor; c.a = alpha;
-            _mpb.SetColor(BaseColorId, c);
-            if (baseTex != null) _mpb.SetTexture(BaseMapId, baseTex);
+            _mpb.Clear();
+            r.GetPropertyBlock(_mpb); // сохранить _cur/_cur_corner/_TopMap/_DownTex
+            _mpb.SetFloat(AlphaId, alpha);
             r.SetPropertyBlock(_mpb);
         }
 
-        // UV-rect спрайта в его текстуре, нормированный (xy=scale, zw=offset). Без спрайта/текстуры → (1,1,0,0).
-        private static Vector4 SpriteST(Sprite s)
+        /// <summary>Диагностика (CornerProbe): текстовое описание углового слоя пола (x,y,z), как его считает floor-ветка ApplyChunk.</summary>
+        public string DescribeFloorCorner(int x, int y, int z)
         {
-            if (s == null || s.texture == null) return new Vector4(1f, 1f, 0f, 0f);
-            var rect = s.textureRect;
-            float tw = s.texture.width, th = s.texture.height;
-            return new Vector4(rect.width / tw, rect.height / th, rect.x / tw, rect.y / th);
+            if (_map == null || _catalog == null) return "CornerProbe: _map/_catalog == null";
+            var t = _map.GetTile(x, y, z);
+            if (t.FloorType == 0) return $"({x},{y},z{z}): пола нет (FloorType=0)";
+            var f = _catalog.GetFloor(t.FloorType);
+            if (f == null) return $"({x},{y},z{z}): FloorType={t.FloorType}, нет FloorDefinition в каталоге";
+            if (f.Connection == null || !f.Connection.UseConnections)
+                return $"({x},{y},z{z}): пол '{f.DisplayName}' БЕЗ autotiling (UseConnections=false) → угловой слой не подаётся";
+
+            var (shape, steps) = FloorConnectivity.ResolveAt(_catalog, _map, f, x, y, z);
+            byte mask = FloorConnectivity.ResolveCornersAt(_catalog, _map, f, x, y, z);
+            var (curCorner, cornerRotate) = WallCornerCode.EncodeCorners(mask);
+            byte rotate = (byte)((WallCornerCode.CompensateRotateForMesh(cornerRotate, steps)
+                + WallCornerCode.FloorCornerBaseQuarter + WallCornerCode.ShapeCornerQuarter(true, shape, curCorner)) & 3);
+            return $"({x},{y},z{z}) '{f.DisplayName}': shape={shape} steps={steps}   mask={mask} "
+                 + $"[NW={(mask & 1) != 0} NE={(mask & 2) != 0} SE={(mask & 4) != 0} SW={(mask & 8) != 0}]   "
+                 + $"_cur_corner={curCorner} _rotate={rotate}";
         }
 
-        // Per-tile спрайты граней через MPB (шейдер TileFaceSprites). Меш-рендеры; спрайт-фолбэк не трогаем.
-        // Без материала TileFaceSprites — безвредно (свойств нет → игнор). RecomputeReveal/ApplyChunk, не per-frame.
-        private void ApplyFaceSprites(GameObject go, Sprite side, Sprite top)
-        {
-            if (go == null || (side == null && top == null)) return;
-            _faceMpb ??= new MaterialPropertyBlock();
-            var renderers = go.GetComponentsInChildren<Renderer>(true);
-            foreach (var r in renderers)
-            {
-                if (r is SpriteRenderer) continue; // спрайт-фолбэк — другой материал, не трогаем
 
-                _faceMpb.Clear();
-                r.GetPropertyBlock(_faceMpb); // сохранить уже выставленный блок (если есть), иначе пусто
-                if (side != null && side.texture != null)
-                {
-                    _faceMpb.SetTexture(SideTexId, side.texture);
-                    _faceMpb.SetVector(SideStId, SpriteST(side));
-                }
-                if (top != null && top.texture != null)
-                {
-                    _faceMpb.SetTexture(TopTexId, top.texture);
-                    _faceMpb.SetVector(TopStId, SpriteST(top));
-                }
-
-                // Локальные габариты меша (AABB) → нормировка UV в шейдере по грани. Нет меша → дефолт шейдера.
-                var mf = r.GetComponent<MeshFilter>();
-                var mesh = mf != null ? mf.sharedMesh : null;
-                if (mesh != null)
-                {
-                    var b = mesh.bounds;
-                    _faceMpb.SetVector(BoundsMinId, (Vector4)b.min);
-                    _faceMpb.SetVector(BoundsSizeId, (Vector4)b.size);
-                }
-
-                r.SetPropertyBlock(_faceMpb);
-            }
-        }
-
-        // Текстурирование ВЕРХА тайла (стены И полы) через материал TileView: грид-текстура _TopMap + индекс формы
-        // _i (зеркальный 4-(int)shape; Cross не индексируем — дефолт материала). Меш-рендеры (включая вложенный
-        // TileView-меш); спрайт-фолбэк не трогаем. Чанк-ребилд (не per-frame); MPB/ID переиспользуются — без аллокаций.
-        private void ApplyTileViewTop(GameObject go, Texture2D topMap, WallShape shape)
+        /// <summary>Заливает материал верхней грани тайла (форма/углы/подложка) через MPB, изолируя боковину стены.</summary>
+        private void ApplyTileViewTop(GameObject go, Texture2D topMap, WallShape shape, byte curCorner, byte rotate,
+            Texture2D backing, Texture2D side)
         {
             if (go == null) return;
             _wallMpb ??= new MaterialPropertyBlock();
@@ -1096,18 +958,34 @@ namespace Client.Net.View
             {
                 if (r is SpriteRenderer) continue; // спрайт-фолбэк — другой материал
 
+                var mat = r.sharedMaterial;
+                if (mat != null && mat.name.Contains("TileWall")) // TileWall-skip: боковина изолирована от формы верха
+                {
+                    if (side == null) continue;
+                    _sideMpb ??= new MaterialPropertyBlock();
+                    _sideMpb.Clear();
+                    r.GetPropertyBlock(_sideMpb);
+                    _sideMpb.SetTexture(TopMapId, side);
+                    r.SetPropertyBlock(_sideMpb);
+                    continue;
+                }
+
                 _wallMpb.Clear();
                 r.GetPropertyBlock(_wallMpb); // сохранить уже выставленный блок, иначе пусто
                 if (topMap != null)
                     _wallMpb.SetTexture(TopMapId, topMap);
-                if (shape != WallShape.Cross) // Cross: _i не ставим, меш спавнится как есть
-                    _wallMpb.SetFloat(WallIId, 4 - (int)shape);
+                if (backing != null)
+                    _wallMpb.SetTexture(DownTexId, backing); // инертно до появления _DownTex в шейдере (подложка чёрная)
+                // uint в CBUFFER шейдера → SetInteger (SetFloat залил бы биты float, прочитанные как мусорный uint).
+                // Всегда безусловно — иначе несписанный из пула MPB подхватит дефолт материала (чужие углы, pool-leak).
+                _wallMpb.SetInteger(CurId, WallCornerCode.CurFromShape(shape));
+                _wallMpb.SetInteger(CurCornerId, curCorner);
+                _wallMpb.SetInteger(RotateId, rotate);
                 r.SetPropertyBlock(_wallMpb);
             }
         }
 
-        // Оверлей-маркер спец-тайла (лестница/спавн) через Spawn → тот же жизненный цикл чанка (без утечек GO,
-        // без alloc сверх Spawn). Null-спрайт (не назначен) или None/Lift → грациозный пропуск.
+        /// <summary>Спавнит оверлей-маркер спец-тайла (лестница/спавн) в жизненном цикле чанка.</summary>
         private void SpawnSpecialMarker(TileSpecial special, int wx, int wy, float floorBaseY, Transform parent)
         {
             Sprite marker = special switch
@@ -1121,13 +999,6 @@ namespace Client.Net.View
 
             Spawn(null, marker, wx, wy, floorBaseY + _markerYOffset, _markerSortingOrder,
                 parent, "SpecialMarker", alignTop: true, planarScale: 1f, rotation: Quaternion.identity);
-        }
-
-        private void WarnNoFadeMat()
-        {
-            if (_warnedNoFadeMat) return;
-            Debug.LogWarning("[MapRenderer] _floorFadeMaterial не назначен — полупрозрачность верхнего этажа не работает.");
-            _warnedNoFadeMat = true;
         }
 
         private void WarnNoFadeRing()
@@ -1150,8 +1021,7 @@ namespace Client.Net.View
             go.transform.position += new Vector3(0f, targetY - edge, 0f);
         }
 
-        /// <summary>Снести рендер одного чанка (стриминговая выгрузка ChunkUnload). Зеркало prune-старого в
-        /// ApplyChunk: убрать ceiling-записи чанка ДО Destroy, уничтожить рут, снять из реестра. Нет рута — no-op.</summary>
+        /// <summary>Снести рендер одного чанка (стриминговая выгрузка ChunkUnload).</summary>
         public void RemoveChunk(int cx, int cy, int z)
         {
             long key = Key(cx, cy, z);
@@ -1169,8 +1039,7 @@ namespace Client.Net.View
 
         private void ClearAll()
         {
-            // Реестр reveal чистим ПЕРВЫМ — до release тайлов: инвариант ReleaseChunkTiles (реестр не ссылается на
-            // released/реюзнутые рендеры) держится тривиально, без per-root PruneCeilingTiles (O(1) вместо O(n²)).
+            // Чистим реестр reveal ДО release тайлов — O(1) вместо per-root PruneCeilingTiles (O(n²)).
             _ceilingTiles.Clear();
             foreach (var root in _chunkRoots.Values)
                 if (root != null) { ReleaseChunkTiles(root); Destroy(root); } // тайлы в пул (реюз при смене Z), рут — снести
@@ -1178,8 +1047,7 @@ namespace Client.Net.View
             _revealValid = false;
         }
 
-        // Та же упаковка ключа, что в GridMap.
-        private static long Key(int cx, int cy, int z)
+        private static long Key(int cx, int cy, int z) // та же упаковка ключа, что в GridMap
         {
             return ((long)(cx & 0x1FFFFF))
                  | ((long)(cy & 0x1FFFFF) << 21)
@@ -1187,7 +1055,7 @@ namespace Client.Net.View
         }
 
 #if UNITY_EDITOR
-        // === Editor-only диагностика reveal (см. CeilingRevealProbe). В билд не входит; только ЧИТАЕТ состояние. ===
+        // Editor-only диагностика reveal (см. CeilingRevealProbe): в билд не входит, только читает состояние.
 
         /// <summary>Описать reveal-состояние тайла по его Renderer (точная запись реестра, иначе — координаты transform).</summary>
         public string DescribeReveal(Renderer r)
@@ -1270,7 +1138,7 @@ namespace Client.Net.View
             return sb.ToString();
         }
 
-        // Min-дистанция от последней player-позиции до дыр кластера (editor-пересчёт; не трогает _clusterMinDist).
+        /// <summary>Min-дистанция от последней player-позиции до дыр кластера (editor-пересчёт).</summary>
         private float ClusterDistDebug(int clusterId)
         {
             if (clusterId < 0 || clusterId >= _clusterCenters.Count) return float.MaxValue;
@@ -1285,7 +1153,7 @@ namespace Client.Net.View
             return best < float.MaxValue ? Mathf.Sqrt(best) : float.MaxValue;
         }
 
-        // Editor-only: ASCII мини-карта по z-уровням в окне вокруг probe/player/anchor — где стены/пол/дыры.
+        /// <summary>Дописывает ASCII мини-карту по z-уровням вокруг probe/player.</summary>
         private void AppendMiniMap(System.Text.StringBuilder sb, int wx, int wy, int lz, bool isCand, in CeilingCandidate cand)
         {
             sb.AppendLine("  --- Мини-карта (по уровням) ---");
@@ -1353,10 +1221,7 @@ namespace Client.Net.View
 #endif
     }
 
-    /// <summary>Метка тайл-GO для пула MapRenderer: источник (префаб / sprite-fallback) — для маршрутизации при
-    /// release, и снимок «чистого» состояния для ПОЛНОГО сброса при реюзе. Без сброса на реюзнутый тайл течёт
-    /// прошлое состояние: материал (swap на fade), MPB (_i/_TopMap/_SideTex/_BaseColor), shadowCastingMode (Off от
-    /// fade), localScale (planarScale накапливается), SpriteRenderer.color — → чужой TileView-грид/fade/тинт.</summary>
+    /// <summary>Метка тайл-GO пула MapRenderer: источник для release-маршрутизации + pristine-снимок для полного сброса при реюзе.</summary>
     internal sealed class PooledTile : MonoBehaviour
     {
         public GameObject Source { get; private set; }     // ключ пула (null для sprite-fallback)
@@ -1404,9 +1269,9 @@ namespace Client.Net.View
                 var r = _renderers[i];
                 if (r == null) continue;
                 r.enabled = _pristineEnabled[i];           // undo reveal enabled=false (иначе реюзнутый тайл невидим НАВСЕГДА)
-                r.sharedMaterials = _pristineMats[i];      // undo fade-свап материала
-                r.shadowCastingMode = _pristineShadow[i];  // undo fade Off
-                r.SetPropertyBlock(_clearBlock);           // сброс MPB (_i/_TopMap/_SideTex/_BaseColor/fade)
+                r.sharedMaterials = _pristineMats[i];      // реставрация материала (reveal больше не свапает; защитно)
+                r.shadowCastingMode = _pristineShadow[i];  // undo reveal Off
+                r.SetPropertyBlock(_clearBlock);           // сброс MPB (_cur/_cur_corner/_rotate/_TopMap/_alpha) → дефолты материала (_alpha=1)
                 if (r is SpriteRenderer sr) sr.color = _pristineColor[i];
             }
         }

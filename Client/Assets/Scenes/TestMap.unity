@@ -209,6 +209,7 @@ GameObject:
   - component: {fileID: 960182751}
   - component: {fileID: 960182750}
   - component: {fileID: 960182752}
+  - component: {fileID: 960182753}
   m_Layer: 0
   m_Name: Network
   m_TagString: Untagged
@@ -233,6 +234,8 @@ MonoBehaviour:
   _mapRenderer: {fileID: 1824954097}
   _camera: {fileID: 2039717654}
   _fov: {fileID: 960182752}
+  _clickCamera: {fileID: 2039717657}
+  _hoverHint: {fileID: 960182753}
 --- !u!4 &960182751
 Transform:
   m_ObjectHideFlags: 0
@@ -266,6 +269,25 @@ MonoBehaviour:
   _minBrightness: 0.08
   _edgeSoftness: 1.5
   _rtSize: 512
+--- !u!114 &960182753
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 960182749}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 321c928ab0f48a04c9093a1cd9a991a7, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Gameplay.Interaction.HoverHintController
+  _dwellSeconds: 2
+  _reachGate: 1
+  _fovGate: 0
+  _cursorOffset: {x: 16, y: 16}
+  _followCursor: 1
+  _fontSize: 14
+  _boxTint: {r: 0, g: 0, b: 0, a: 0.8}
 --- !u!1 &1067873584
 GameObject:
   m_ObjectHideFlags: 0
@@ -480,7 +502,6 @@ MonoBehaviour:
   _spawnMarker: {fileID: 0}
   _markerYOffset: 0.002
   _markerSortingOrder: 5
-  _floorFadeMaterial: {fileID: 2100000, guid: bf5a4111a65052f46805ff0c528ff9ac, type: 2}
   _drawCeilingReveal: 1
   _ceilingSemiTransparent: 0
   _ceilingXrayAlpha: 0.4
@@ -543,7 +564,7 @@ GameObject:
   - component: {fileID: 2039717654}
   m_Layer: 0
   m_Name: Camera
-  m_TagString: Untagged
+  m_TagString: MainCamera
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0

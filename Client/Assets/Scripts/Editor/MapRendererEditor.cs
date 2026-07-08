@@ -135,12 +135,6 @@ namespace Client.Editor.Inspectors
             EditorGUILayout.LabelField(
                 "Низ виден сквозь дыры обычной отрисовкой. Здесь — только верхний этаж.",
                 EditorStyles.miniLabel);
-            EditorGUILayout.PropertyField(_floorFadeMaterial, LFadeMat);
-            if (_floorFadeMaterial.objectReferenceValue == null)
-                EditorGUILayout.HelpBox(
-                    "Материал не задан — полупрозрачность верхнего этажа не работает. " +
-                    "Создай URP/Lit: Surface=Transparent, ZWrite Off.",
-                    MessageType.Warning);
             EditorGUILayout.PropertyField(_drawCeilingReveal, LDrawReveal);
             // Под-параметры просвета СКРЫВАЕМ (не грейним), когда просвет выключен.
             if (_drawCeilingReveal.boolValue)

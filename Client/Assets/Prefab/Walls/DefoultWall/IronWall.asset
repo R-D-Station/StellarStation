@@ -19,11 +19,12 @@ MonoBehaviour:
   Prefab: {fileID: 3465880795150428724, guid: af01450a83e70b147ad23ec07bf570ed, type: 3}
   OpenSprite: {fileID: 0}
   OpenPrefab: {fileID: 0}
-  SideSprite: {fileID: 1779159489, guid: 36e995cc6af84e842b4d6a366b000961, type: 3}
-  TopSprite: {fileID: 670628118, guid: c4982b31397650a4fa46aeb1e7957101, type: 3}
-  TopMap: {fileID: 2800000, guid: 8ad9c18eddbe1f74f9e031639229bdaa, type: 3}
+  TopMap: {fileID: 2800000, guid: 2e9d927726fb23d44b693ce1b4647424, type: 3}
+  BackingMap: {fileID: 0}
+  SideMap: {fileID: 2800000, guid: bc0024cc0910a58469eae7a4d89d01c1, type: 3}
   BlocksHorizontalSight: 1
   SealsHorizontal: 1
+  _blocksVerticalSight: 1
   Connection:
     UseConnections: 1
     ConnectsToSameType: 1

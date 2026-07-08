@@ -7,8 +7,8 @@ namespace Client.Map
     [CreateAssetMenu(menuName = "Station/Floor Definition", fileName = "FloorDefinition")]
     public sealed class FloorDefinition : ScriptableObject
     {
-        [Tooltip("Значение Tile.FloorType. 0 зарезервирован под «нет пола».")]
-        public byte Type = 1;
+        [Tooltip("Значение Tile.FloorType. 0 = не назначен (авто-ID заполнит в инспекторе).")]
+        public byte Type = 0;
         public string DisplayName = "Floor";
 
         [Tooltip("Спрайт для клетки редактора. Если префаб пуст — рисуется и в игре на SpriteRenderer.")]
@@ -16,15 +16,11 @@ namespace Client.Map
         [Tooltip("Префаб пола, инстансится в игре. Пусто → fallback на Sprite.")]
         public GameObject Prefab;
 
-        [Header("Грани 3D-меша (шейдер TileFaceSprites)")]
-        [Tooltip("Боковые грани меша пола. MapRenderer кладёт в _SideTex материала.")]
-        public Sprite SideSprite;
-        [Tooltip("Верхняя грань при ВЫКЛЮЧЕННОМ autotiling. Пол с autotiling текстурится материалом TileView (TopMap + _i).")]
-        public Sprite TopSprite;
-
-        [Header("Верх пола — материал TileView")]
-        [Tooltip("Грид-текстура этого типа пола → _TopMap. Форму выбирает шейдер по _i = 4-(int)shape. Пусто → дефолт материала.")]
+        [Header("Верх пола (шейдер TileReader)")]
+        [Tooltip("Грид-текстура верха пола → _TopMap. Форму выбирает шейдер по _cur. Пусто → дефолт материала.")]
         public Texture2D TopMap;
+        [Tooltip("Подложка верха пола → _DownTex материала (TileTop).")]
+        public Texture2D BackingMap;
 
         [Header("Флаги симуляции, которые даёт этот пол")]
         [Tooltip("Сплошной пол не просвечивает на этаж ниже (FOV). Решётка/стекло = false.")]

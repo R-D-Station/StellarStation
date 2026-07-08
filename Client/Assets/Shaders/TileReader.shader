@@ -42,7 +42,7 @@ Shader "Custom/TileReader"
                 uint _rotate;
                 uint _count_x;
                 uint _count_y;
-                uint _alpha;
+                float _alpha;
                 
             CBUFFER_END
 
@@ -80,7 +80,7 @@ Shader "Custom/TileReader"
 
                 tiledUV.x=(tiledUV.x+_cur-1)/_count_x;
                 tiledUV.y=(tiledUV.y+1)/_count_y;
-                half4 downColor = SAMPLE_TEXTURE2D( _DownTex, sampler_DownTex, tiledUV);
+                half4 downColor = SAMPLE_TEXTURE2D( _DownTex, sampler_DownTex, IN.uv );
                 half4 wallTex = SAMPLE_TEXTURE2D( _TopMap, sampler_TopMap, tiledUV);
 
                 tiledUV = rotateUv(IN.uv);
