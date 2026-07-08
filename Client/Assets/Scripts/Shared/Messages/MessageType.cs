@@ -11,6 +11,8 @@ public enum MessageType : ushort
     EntitySnapshot = 3,
     MapData = 4,
     TileUpdate = 5,
+    MapChunk = 7,        // стриминг: один чанк карты (server→client)
+    MapChunkUnload = 8,  // стриминг: выгрузить чанк (server→client)
 
     // Player (100-199)
     LoginRequest = 100,
@@ -21,7 +23,7 @@ public enum MessageType : ushort
     UseIntent = 6,
 
     // Interaction (200-299)
-    ClickIntent = 200,
+    InteractIntent = 200, // адресный клик по тайлу/сущности (перепрофиль заглушки ClickIntent; wire-id стабилен)
     PickupItem = 201,
     DropItem = 202,
 

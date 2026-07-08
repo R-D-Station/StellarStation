@@ -33,6 +33,12 @@ namespace Shared.World
         /// <summary>Провал: нет опоры и нет глухого объекта — падение на z-1.</summary>
         public readonly bool IsFall => !Support && (StructureType == 0 || Openable);
 
+        /// <summary>Блокирует ГОРИЗОНТАЛЬНОЕ движение: стена/окно/закрытая дверь (глухой или закрытый объект).
+        /// Пол, дыра и открытая дверь — НЕ блокируют: наличие пола под ногами и падение — вопрос IsFall/ProcessFalls,
+        /// а не горизонтального упора. Именно по этому свойству упирается коллизия (MovementLogic), а не по Walkable
+        /// (Walkable требует Support → делал дыры «стенами»).</summary>
+        public readonly bool BlocksMovement => StructureType != 0 && !(Openable && Open);
+
         /// <summary>Пустой тайл (космос): нет пола, объекта и опоры.</summary>
         public static Tile Space => new Tile
         {

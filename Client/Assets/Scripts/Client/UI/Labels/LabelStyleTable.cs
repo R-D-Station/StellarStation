@@ -1,0 +1,52 @@
+using UnityEngine;
+
+namespace Client.UI.Labels
+{
+    /// <summary>SO-стили надписей по <see cref="LabelKind"/> (время жизни/фейды/шрифт/цвета/смещение). Runtime-данные;
+    /// зеркало HintTextTable. Инспектор — LabelStyleTableEditor (EditorCoder).</summary>
+    [CreateAssetMenu(menuName = "Station/Label Style Table", fileName = "LabelStyleTable")]
+    public sealed class LabelStyleTable : ScriptableObject
+    {
+        [System.Serializable]
+        public struct Entry
+        {
+            public LabelKind Kind;
+            [Tooltip("Время жизни, сек. ∞ (float.PositiveInfinity) → без авто-возврата по таймеру (напр. CursorHint).")]
+            public float Lifetime;
+            public float FadeIn;
+            public float FadeOut;
+            public float FontSize;
+            public Color TextColor;
+            public Color Background;
+            [Tooltip("Смещение надписи от точки привязки, экранные пиксели.")]
+            public Vector2 Offset;
+        }
+
+        [Tooltip("Стили по видам надписей. Нет записи для вида → дефолт-Entry.")]
+        [SerializeField] private Entry[] _entries = System.Array.Empty<Entry>();
+
+        /// <summary>Стиль вида k (линейный поиск; безопасный <see cref="Default"/>, если нет) — не горячий путь, резолв при показе.</summary>
+        public Entry For(LabelKind k)
+        {
+            if (_entries != null)
+                for (int i = 0; i < _entries.Length; i++)
+                    if (_entries[i].Kind == k)
+                        return _entries[i];
+            return Default(k);
+        }
+
+        /// <summary>Безопасный дефолт, если записи/таблицы нет: ВИДИМАЯ, ПЕРСИСТЕНТНАЯ надпись (Lifetime=∞) — чтобы мисконфиг
+        /// был ЗАМЕТЕН (надпись висит), а не молча исчезал через кадр (default(Entry).Lifetime=0 → мгновенный само-возврат).</summary>
+        public static Entry Default(LabelKind k) => new Entry
+        {
+            Kind = k,
+            Lifetime = float.PositiveInfinity,
+            FadeIn = 0f,
+            FadeOut = 0f,
+            FontSize = 18f,
+            TextColor = Color.white,
+            Background = new Color(0f, 0f, 0f, 0.8f),
+            Offset = new Vector2(16f, 16f)
+        };
+    }
+}

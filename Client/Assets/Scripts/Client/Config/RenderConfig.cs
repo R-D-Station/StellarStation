@@ -4,6 +4,6 @@ namespace Client.Config
     public static class RenderConfig
     {
         /// <summary>Высота одного этажа по Unity-Y. Равна высоте стены — этажи стоят впритык.</summary>
-        public const float FloorHeight = 2f;
+        public const float FloorHeight = 2.1f;
     }
 }

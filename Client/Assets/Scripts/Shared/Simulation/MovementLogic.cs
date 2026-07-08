@@ -19,14 +19,19 @@ namespace Shared.Simulation
         /// <summary>1/√2 — нормализация диагонали, чтобы она не была быстрее прямого хода.</summary>
         public const float InvSqrt2 = 0.70710677f;
 
-        /// <summary>Применить один шаг движения к позиции (X/Y суб-тайловые, Z не меняется).</summary>
-        public static void Apply(GridMap map, int z, ref float x, ref float y, IntentDirection dir, bool sprint)
+        /// <summary>Множитель шага при ползании (Laying). Литерал (как InvSqrt2) — один и тот же бит обе стороны.</summary>
+        public const float CrawlMultiplier = 0.7f;
+
+        /// <summary>Применить один шаг движения к позиции (X/Y суб-тайловые, Z не меняется). baseStep —
+        /// скорость/тик: сервер = Speed.CurrentValue (AdvancedValue), клиент = EntitySnapshot.Speed (авторитетно из снапшота).</summary>
+        public static void Apply(GridMap map, int z, ref float x, ref float y, IntentDirection dir, bool sprint, bool crawl = false, float baseStep = StepPerTick)
         {
             GetAxes(dir, out int dx, out int dy);
             if (dx == 0 && dy == 0) return;
 
-            float step = StepPerTick * (sprint ? SprintMultiplier : 1f);
+            float step = baseStep * (sprint ? SprintMultiplier : 1f);
             if (dx != 0 && dy != 0) step *= InvSqrt2; // диагональ не быстрее прямого хода
+            if (crawl) step *= CrawlMultiplier;       // лежащий ползёт медленнее (stateless ×0.7)
 
             // Оси раздельно: упёрлись по одной — скользим вдоль стены по другой.
             if (dx != 0) MoveAxisX(map, z, ref x, ref y, dx * step);
@@ -42,7 +47,7 @@ namespace Shared.Simulation
 
             int col = (int)MathF.Floor(nx + (dx > 0 ? CollisionRadius : -CollisionRadius));
             int row = (int)MathF.Floor(y);
-            if (map == null || !map.GetTile(col, row, z).Walkable) return; // впереди стена
+            if (map == null || map.GetTile(col, row, z).BlocksMovement) return; // впереди стена/закрытая дверь
 
             float ny = y + Math.Clamp((row + 0.5f) - y, -StepPerTick, StepPerTick);
             if (ny != y && !IsBlocked(map, x, ny, z)) y = ny;   // подцентровались по Y
@@ -57,7 +62,7 @@ namespace Shared.Simulation
 
             int row = (int)MathF.Floor(ny + (dy > 0 ? CollisionRadius : -CollisionRadius));
             int col = (int)MathF.Floor(x);
-            if (map == null || !map.GetTile(col, row, z).Walkable) return; // впереди стена
+            if (map == null || map.GetTile(col, row, z).BlocksMovement) return; // впереди стена/закрытая дверь
 
             float nx = x + Math.Clamp((col + 0.5f) - x, -StepPerTick, StepPerTick);
             if (nx != x && !IsBlocked(map, nx, y, z)) x = nx;   // подцентровались по X
@@ -85,7 +90,9 @@ namespace Shared.Simulation
         /// <summary>Половина «тела» игрока в тайлах (AABB-радиус). Строго &lt; 0.5, иначе застрянет в коридоре шириной 1.</summary>
         public const float CollisionRadius = 0.45f;
 
-        // Задевает ли «тело» игрока (квадрат 2*CollisionRadius вокруг cx,cy) непроходимый тайл на этаже z.
+        // Задевает ли «тело» игрока (квадрат 2*CollisionRadius вокруг cx,cy) блокирующий тайл на этаже z.
+        // Блок — по структуре (стена/окно/закрытая дверь, BlocksMovement), НЕ по полу: на дыру/пол можно зайти
+        // (падение — дело ProcessFalls; проход сквозь открытую дверь — свободен).
         private static bool IsBlocked(GridMap map, float cx, float cy, int z)
         {
             if (map == null || map.Chunks.Count == 0)
@@ -98,13 +105,13 @@ namespace Shared.Simulation
 
             for (int tx = minX; tx <= maxX; tx++)
                 for (int ty = minY; ty <= maxY; ty++)
-                    if (!map.GetTile(tx, ty, z).Walkable)
+                    if (map.GetTile(tx, ty, z).BlocksMovement)
                         return true;
 
             return false;
         }
 
-        /// <summary>IntentDirection → facing-байт Entity.Direction (N=0, S=1, E=2, W=3). None сохраняет текущий.</summary>
+        /// <summary>IntentDirection → facing-байт Direction (N=0, S=1, E=2, W=3). None сохраняет текущий.</summary>
         public static byte ToFacing(IntentDirection dir, byte currentFacing)
         {
             switch (dir)

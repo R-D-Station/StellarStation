@@ -4,8 +4,10 @@ using LiteNetLib.Utils;
 using Shared.Configs;
 using Shared.Messages;
 using Shared.Messages.Core;
+using Shared.Messages.Interaction;
 using Shared.Simulation;
 using Shared.World;
+using Server.Network.Interaction;
 
 namespace Server.Network;
 
@@ -31,6 +33,24 @@ public class GameServer
 
     private readonly List<NetPeer> _connectedPeersCache = new();
 
+    // Адресные интеракции: реестр обработчиков (перебор по порядку, первый взявший цель — стоп). StairHandler —
+    // единый источник логики лестниц: и legacy E (TryUseTile), и адресный InteractIntent-клик идут через него.
+    private readonly StairHandler _stairHandler = new();
+    private readonly IInteractionHandler[] _interactionHandlers;
+
+    // Переиспользуемые буферы горячего broadcast-пути (ноль аллокаций при установившемся числе клиентов).
+    private EntitySnapshot[] _broadcastEntities = Array.Empty<EntitySnapshot>();
+    private EntitySnapshot[] _perClientEntities = Array.Empty<EntitySnapshot>(); // entity-PVS: отфильтрованный набор recipient'а (ресайз только при росте)
+    private readonly MemoryStream _broadcastPayload = new();
+    private readonly BinaryWriter _broadcastPayloadWriter;
+    private readonly NetDataWriter _broadcastWriter = new();
+
+    // MTU-guard: снапшот на Sequenced (2.5-B) НЕ фрагментируется — при большом видимом наборе payload превысит MTU и
+    // начнёт молча теряться. Логируем предупреждение (throttled раз/5с), консервативный порог ~1200 (типичный MTU ~1400+
+    // минус заголовки; надёжной публичной константы в LiteNetLib 2.1 нет). Триггер под будущие дельты (план C).
+    private const int SnapshotMtuWarnBytes = 1200;
+    private uint _lastMtuWarnTick; // 0 = ещё не предупреждали
+
     public event Action<ClientConnection>? OnClientConnected;
     public event Action<ClientConnection>? OnClientDisconnected;
     public event Action<ClientConnection, MoveIntent>? OnMoveIntentReceived;
@@ -48,6 +68,8 @@ public class GameServer
         Console.WriteLine($"[Map] Spawn at ({_spawnX}, {_spawnY}, z{_spawnZ})");
         _clients = new Dictionary<NetPeer, ClientConnection>();
         _mainThreadActions = new ConcurrentQueue<Action>();
+        _broadcastPayloadWriter = new BinaryWriter(_broadcastPayload);
+        _interactionHandlers = new IInteractionHandler[] { _stairHandler };
     }
 
     public void Start()
@@ -146,6 +168,20 @@ public class GameServer
                     client.IntentQueue.Enqueue(intent);
                     break;
 
+                case MessageType.InteractIntent:
+                    try
+                    {
+                        var interact = new InteractIntent();
+                        interact.Deserialize(data);
+                        client.InteractQueue.Enqueue(interact);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Битый interact-пакет: лог, НЕ кикаем (request-only, не критично для сессии).
+                        Console.WriteLine($"[Server] Bad InteractIntent from #{client.ConnectionId}: {ex.Message}");
+                    }
+                    break;
+
                 default:
                     Console.WriteLine($"[Server] Unknown message type from #{client.ConnectionId}: {type}");
                     break;
@@ -169,6 +205,10 @@ public class GameServer
 
         while (_isRunning)
         {
+            // UnsyncedEvents остаётся false (дефолт) → все колбэки LiteNetLib (OnNetworkReceive/connect/
+            // disconnect) бегут СИНХРОННО здесь, на GameLoop-потоке. Поэтому статус-поля (State/Timers/
+            // DisableMovement/Facing/_clients/IntentQueue) одно-поточны и безопасны без локов. НЕ включать
+            // UnsyncedEvents без явной синхронизации — иначе реальные гонки по этим полям.
             _server?.PollEvents();
 
             while (_mainThreadActions.TryDequeue(out var action))
@@ -177,10 +217,15 @@ public class GameServer
             }
 
             ProcessIntents();
+            ProcessInteractions();
             ProcessUses();
+            ProcessFalls();
+            ProcessStatus();
+            ProcessCombat();
 
             _currentTick++;
             UpdateDoors();
+            ProcessStreaming(); // стрим карты по чанкам (2.3b включён; начальное окружение шлётся на логине синхронно)
             BroadcastWorldSnapshot();
 
             // Привязка к абсолютному времени, чтобы тик не плыл.
@@ -209,42 +254,166 @@ public class GameServer
         }
     }
 
-    /// <summary>Применяет по одному intent'у на клиента за тик; сбрасывает накопившийся хвост.</summary>
+    /// <summary>Дренирует ВСЮ накопленную очередь intent'ов каждого клиента за тик (catch-up после сетевого
+    /// столла: ReliableOrdered выгружает пачку в один PollEvents). Сервер применяет ровно то, что клиент уже
+    /// напредсказывал за те тики → позиции сходятся, ack = последний применённый seq → прун _pending корректен.
+    /// Пустая очередь → None-тик (Step держит кадэнс). Замена дропу головы, который двигал ack через невыполненные
+    /// seq → клиент прунил их как подтверждённые → одноразовый snap-back на восстановлении сети.</summary>
     private void ProcessIntents()
     {
-        const int maxQueued = 4; // защита от разрастания очереди
+        const int maxPerTick = 32; // предохранитель от флуда; за ним возможен редкий snap (логируем)
 
         foreach (var client in _clients.Values)
         {
-            // Сбрасываем накопившееся, оставляя только свежий intent.
-            while (client.IntentQueue.Count > maxQueued && client.IntentQueue.TryDequeue(out _)) { }
-
-            // Дефолт тика: нет ввода → Stand. Ниже перебьётся на Move, если позиция изменилась.
-            client.State = PlayerState.Stand;
-
-            if (client.IntentQueue.TryDequeue(out var intent))
+            int applied = 0;
+            while (applied < maxPerTick && client.IntentQueue.TryDequeue(out var intent))
             {
-                float x = client.X;
-                float y = client.Y;
+                ApplyClientIntent(client, intent, hasIntent: true);
+                applied++;
+            }
 
-                MovementLogic.Apply(_map, client.Z, ref x, ref y, intent.Direction, intent.Sprint);
-
-                // Сравнение new vs old (client.X/Y ещё не обновлены): Apply либо двигает на
-                // фиксированный StepPerTick, либо нет (детерминизм) — упор в стену даёт Stand.
-                bool moved = x != client.X || y != client.Y;
-
-                // Границы держит коллизия тайлов (Walkable); жёсткий clamp убран.
-
-                client.X = x;
-                client.Y = y;
-                client.Facing = MovementLogic.ToFacing(intent.Direction, client.Facing);
-                client.LastProcessedSequence = intent.Sequence;
-                client.State = moved ? PlayerState.Move : PlayerState.Stand;
-
-                // Бамп: упёрся в закрытую дверь по направлению ввода — открываем её.
-                OpenBumpedDoors(client, intent.Direction, intent.Sprint);
+            if (applied == 0)
+            {
+                ApplyClientIntent(client, default, hasIntent: false); // None-тик: Step None → Stand, без движения
+            }
+            else if (!client.IntentQueue.IsEmpty)
+            {
+                int dropped = 0;
+                while (client.IntentQueue.TryDequeue(out _)) dropped++;
+                Console.WriteLine($"[Server] intent flood #{client.ConnectionId}: applied {applied}/тик, dropped {dropped}");
             }
         }
+    }
+
+    /// <summary>Один шаг авторитетной симуляции по intent'у (или None-тик при hasIntent=false). Пайплайн
+    /// FsmLogic.Step → гейт MovementAllowed && !DisableMovement → MovementLogic.Apply → ToFacing → двери —
+    /// БАЙТ-В-БАЙТ как в клиентском PlayerPredictor (ApplyLocal/Reconcile). Менять — только синхронно с ним.</summary>
+    private void ApplyClientIntent(ClientConnection client, MoveIntent intent, bool hasIntent)
+    {
+        var dir = hasIntent ? intent.Direction : IntentDirection.None;
+
+        // reason — текущая причина лежания: KnockDown() ставит KnockedDown заранее (prev уже Laying), свежий
+        // toggle-вход в Laying помечаем Voluntary ниже. Stun/KnockedDown держатся таймерами (ProcessStatus).
+        var prev = client.State;
+        client.State = FsmLogic.Step(client.State, dir, layToggle: hasIntent && intent.LayToggle,
+                                     client.CurrentLayingReason, ref client.Timers);
+        if (client.State == PlayerState.Laying && prev != PlayerState.Laying)
+            client.CurrentLayingReason = LayingReason.Voluntary;
+
+        if (!hasIntent) return;
+
+        client.LastProcessedSequence = intent.Sequence; // intent потреблён — для реконсиляции
+        if (FsmLogic.MovementAllowed(client.State) && !client.DisableMovement)
+        {
+            float x = client.X, y = client.Y;
+            MovementLogic.Apply(_map, client.Z, ref x, ref y, intent.Direction, intent.Sprint,
+                                crawl: client.State == PlayerState.Laying, baseStep: client.Speed.CurrentValue);
+            client.X = x;
+            client.Y = y;
+            client.Facing = MovementLogic.ToFacing(intent.Direction, client.Facing);
+            // Бамп: упёрся в закрытую дверь по направлению ввода — открываем её.
+            OpenBumpedDoors(client, intent.Direction, intent.Sprint);
+        }
+    }
+
+    /// <summary>Дренирует очередь адресных интеракций каждого клиента (после ProcessIntents — дальность считается
+    /// от свежеприменённой позиции). Каждая: resolve цели → range-check → диспетч через реестр обработчиков.</summary>
+    private void ProcessInteractions()
+    {
+        const int maxPerTick = 32; // предохранитель от флуда кликами (за ним — редкий дроп хвоста, логируем)
+
+        foreach (var client in _clients.Values)
+        {
+            int applied = 0;
+            while (applied < maxPerTick && client.InteractQueue.TryDequeue(out var intent))
+            {
+                ResolveAndDispatchInteraction(client, in intent);
+                applied++;
+            }
+
+            if (applied == maxPerTick && !client.InteractQueue.IsEmpty)
+            {
+                int dropped = 0;
+                while (client.InteractQueue.TryDequeue(out _)) dropped++;
+                Console.WriteLine($"[Server] interact flood #{client.ConnectionId}: applied {applied}, dropped {dropped}");
+            }
+        }
+    }
+
+    /// <summary>Резолв цели интеракции в ЦЕЛЫЙ тайл, авторитетная проверка дальности и диспетч через реестр обработчиков.
+    /// Tile-цель — координаты из intent; Entity-цель — floor СЕРВЕРНОЙ позиции сущности по TargetNetId (клиентские Tile*
+    /// игнорируются — анти-чит). Вне дальности / нет сущности / нет обработчика — тихий дроп. public — юнит-тест напрямую.</summary>
+    public void ResolveAndDispatchInteraction(ClientConnection client, in InteractIntent intent)
+    {
+        int tx, ty, tz;
+        if (intent.TargetKind == (byte)InteractTargetKind.Entity)
+        {
+            if (!TryResolveEntityTile(intent.TargetNetId, out tx, out ty, out tz))
+                return; // нет такой сущности — тихий дроп
+        }
+        else
+        {
+            tx = intent.TileX;
+            ty = intent.TileY;
+            tz = intent.TileZ;
+        }
+
+        int px = (int)MathF.Floor(client.X);
+        int py = (int)MathF.Floor(client.Y);
+        if (!InteractionRules.InReach(px, py, client.Z, tx, ty, tz))
+            return; // вне дальности — тихий дроп (анти-telegrab)
+
+        var ctx = new InteractContext(_map, client, tx, ty, tz, intent.Verb, intent.HandIndex);
+        for (int i = 0; i < _interactionHandlers.Length; i++)
+        {
+            if (_interactionHandlers[i].TryHandle(in ctx))
+                return;
+        }
+        // ни один обработчик не взял цель (нет Special и т.п.) — тихий дроп
+    }
+
+    /// <summary>Тайл сущности по её NetId: floor СЕРВЕРНОЙ позиции игрока (в 4.1 сущности = игроки; в 4.3 — общий
+    /// _entities). false — сущность не найдена.</summary>
+    private bool TryResolveEntityTile(int netId, out int tx, out int ty, out int tz)
+    {
+        foreach (var c in _clients.Values)
+        {
+            if (c.PlayerNetId != netId) continue;
+            tx = (int)MathF.Floor(c.X);
+            ty = (int)MathF.Floor(c.Y);
+            tz = c.Z;
+            return true;
+        }
+        tx = ty = tz = 0;
+        return false;
+    }
+
+    /// <summary>Тик-таймеры server-only состояний: декремент Stun/KnockedDown, выход в Stand при истечении.
+    /// Зовётся раз/тик между ProcessUses и UpdateDoors. Выход из Stun/KnockedDown — только здесь (не предсказывается).</summary>
+    private void ProcessStatus()
+    {
+        foreach (var client in _clients.Values)
+        {
+            if (client.State == PlayerState.Stun)
+            {
+                if (--client.Timers.StunTicksRemaining <= 0)
+                    client.State = PlayerState.Stand;
+            }
+            else if (client.State == PlayerState.Laying && client.CurrentLayingReason == LayingReason.KnockedDown)
+            {
+                if (--client.Timers.KnockdownTicksRemaining <= 0)
+                {
+                    client.State = PlayerState.Stand;
+                    client.CurrentLayingReason = LayingReason.None;
+                }
+            }
+        }
+    }
+
+    /// <summary>Hook для combat (будущие этапы): отсюда Kill/SetUnconscious/ApplyStun/KnockDown по урону/health.
+    /// Сейчас no-op — combat/урон не реализованы (entry-API остаётся scaffolding, зовётся прямо/в тестах).</summary>
+    private void ProcessCombat()
+    {
     }
 
     /// <summary>Точка спавна: маркер Spawn, иначе ближайший к центру проходимый тайл. Нет карты → (0,0,0).</summary>
@@ -334,34 +503,87 @@ public class GameServer
         if (_clients.Count == 0)
             return;
 
-        // Общий список сущностей; собираем один раз.
-        var entities = _clients.Values.Select(c => new EntitySnapshot
-        {
-            NetId = c.PlayerNetId,
-            X = c.X,
-            Y = c.Y,
-            Z = c.Z,
-            Facing = c.Facing,
-            State = (byte)c.State
-        }).ToArray();
+        // Общий список сущностей — в переиспользуемый буфер (ресайз ТОЛЬКО при смене числа клиентов), in-place.
+        int count = _clients.Count;
+        if (_broadcastEntities.Length != count)
+            _broadcastEntities = new EntitySnapshot[count];
 
-        // Каждому клиенту — его LastProcessedInput для reconciliation.
+        int i = 0;
+        foreach (var c in _clients.Values)
+        {
+            _broadcastEntities[i++] = new EntitySnapshot
+            {
+                NetId = c.PlayerNetId,
+                X = c.X,
+                Y = c.Y,
+                Z = c.Z,
+                Facing = c.Facing,
+                State = (byte)c.State,
+                Reason = (byte)c.CurrentLayingReason,
+                Speed = c.Speed.CurrentValue
+            };
+        }
+
+        // Ёмкость PVS-буфера: максимум — все сущности тика (когда все в интересе). Ресайз только при росте.
+        if (_perClientEntities.Length < count)
+            _perClientEntities = new EntitySnapshot[count];
+
+        float interestR = SVars.Instance.EntityInterestRadius;
+        int interestZ = SVars.Instance.EntityInterestZDepth;
+
+        // Каждому клиенту — его LastProcessedInput + ТОЛЬКО сущности его интереса (entity-PVS): self всегда + spatial/Z.
         foreach (var client in _clients.Values)
         {
+            // Фильтр общего набора в переиспользуемый _perClientEntities (zero-alloc: без LINQ/List). self — безусловно.
+            int k = 0;
+            for (int e = 0; e < count; e++)
+            {
+                if (_broadcastEntities[e].NetId == client.PlayerNetId
+                    || InInterest(client.X, client.Y, client.Z, in _broadcastEntities[e], interestR, interestZ))
+                    _perClientEntities[k++] = _broadcastEntities[e];
+            }
+
             var snapshot = new WorldSnapshot
             {
                 ServerTick = _currentTick,
-                LastProcessedInput = client.LastProcessedSequence,
-                Entities = entities
+                LastProcessedInput = client.LastProcessedSequence
+                // Entities не задаём: overload WriteTo(writer, entities, count) берёт набор из _perClientEntities.
             };
 
-            byte[] snapshotData = snapshot.Serialize();
+            // Payload — в переиспользуемый MemoryStream через PVS-overload WriteTo (без per-entity alloc).
+            _broadcastPayload.SetLength(0);
+            snapshot.WriteTo(_broadcastPayloadWriter, _perClientEntities, k);
+            _broadcastPayloadWriter.Flush();
 
-            var writer = new NetDataWriter();
-            writer.Put((ushort)MessageType.WorldSnapshot);
-            writer.PutBytesWithLength(snapshotData);
-            client.Peer.Send(writer, DeliveryMethod.ReliableOrdered);
+            // MTU-guard: Sequenced не фрагментирует → большой payload молча теряется. Предупреждаем throttled (раз/5с).
+            if (_broadcastPayload.Length > SnapshotMtuWarnBytes
+                && (_lastMtuWarnTick == 0 || _currentTick - _lastMtuWarnTick >= (uint)_config.TickRate * 5))
+            {
+                Console.WriteLine($"[Server] WARN: snapshot payload {_broadcastPayload.Length}B > {SnapshotMtuWarnBytes}B " +
+                                  $"(client #{client.ConnectionId}, {k} сущностей) — Sequenced не фрагментирует, риск молчаливой потери; нужны дельты (план C)");
+                _lastMtuWarnTick = _currentTick;
+            }
+
+            // Кадр tag + length-prefixed payload — в переиспользуемый NetDataWriter. КАНАЛ Sequenced (2.5-B): свежайший
+            // full-state; потеря само-исцеляется следующим тиком (Reconcile пере-сидит безусловно). Интенты/двери/чанки —
+            // на своих reliable-каналах (НЕ трогаем). ТОЛЬКО этот Send — Sequenced.
+            _broadcastWriter.Reset();
+            _broadcastWriter.Put((ushort)MessageType.WorldSnapshot);
+            _broadcastWriter.PutBytesWithLength(_broadcastPayload.GetBuffer(), 0, (ushort)_broadcastPayload.Length);
+            client.Peer.Send(_broadcastWriter, DeliveryMethod.Sequenced);
         }
+    }
+
+    /// <summary>Попадает ли сущность e в зону интереса recipient'а в (cx,cy,cz): тот же диапазон этажей (|dz| ≤ zDepth)
+    /// И в радиусе (distance² ≤ R²). Self-случай (e.NetId==recipient) проверяет ВЫЗЫВАЮЩИЙ ДО этого — self включён
+    /// всегда, безусловно. Z сущности — float (целый этаж), приводим `(int)e.Z` как в клиентском Reconcile. Граница
+    /// радиуса включена (≤). public static — чистый предикат, юнит-тестируется напрямую (InternalsVisibleTo не настроен).</summary>
+    public static bool InInterest(float cx, float cy, int cz, in EntitySnapshot e, float radius, int zDepth)
+    {
+        int dz = (int)e.Z - cz;
+        if (Math.Abs(dz) > zDepth) return false;
+        float ddx = e.X - cx, ddy = e.Y - cy;
+        return ddx * ddx + ddy * ddy <= radius * radius;
     }
 
     public void UpdatePlayerPosition(ClientConnection client, float x, float y, int z, byte facing)
@@ -524,28 +746,147 @@ public class GameServer
         }
     }
 
-    /// <summary>Использовать тайл, на котором стоит игрок. Сейчас — лестницы (переход по Z).</summary>
+    /// <summary>Использовать тайл под игроком (legacy E): лестница под ногами через общий StairHandler
+    /// (тело вынесено — единый источник логики лестниц с адресным InteractIntent).</summary>
     private void TryUseTile(ClientConnection client)
     {
         int px = (int)MathF.Floor(client.X);
         int py = (int)MathF.Floor(client.Y);
-        int fromZ = client.Z;
-        var tile = _map.GetTile(px, py, fromZ);
+        var ctx = new InteractContext(_map, client, px, py, client.Z, (byte)InteractVerb.Primary, handIndex: 0);
+        _stairHandler.TryHandle(in ctx);
+    }
 
-        int targetZ;
-        if (tile.Special == TileSpecial.StairUp) targetZ = fromZ + 1;
-        else if (tile.Special == TileSpecial.StairDown) targetZ = fromZ - 1;
-        else return; // не лестница — ничего не делаем
+    /// <summary>Найти клетку высадки лестницы на targetZ: парный тайл (px,py) если walkable, иначе первый walkable-сосед
+    /// в порядке N/E/S/W. false — высаживаться некуда (гард «лестница в никуда»). public static — юнит-тестируется напрямую.</summary>
+    public static bool TryFindLanding(GridMap map, int px, int py, int targetZ, out int nx, out int ny)
+    {
+        if (map.GetTile(px, py, targetZ).Walkable) { nx = px; ny = py; return true; }        // парный тайл (как раньше)
+        if (map.GetTile(px, py + 1, targetZ).Walkable) { nx = px; ny = py + 1; return true; } // N
+        if (map.GetTile(px + 1, py, targetZ).Walkable) { nx = px + 1; ny = py; return true; } // E
+        if (map.GetTile(px, py - 1, targetZ).Walkable) { nx = px; ny = py - 1; return true; } // S
+        if (map.GetTile(px - 1, py, targetZ).Walkable) { nx = px - 1; ny = py; return true; } // W
+        nx = px; ny = py;
+        return false;
+    }
 
-        // Назначение — парная лестница в той же колонке. Переходим, только если там
-        // можно стоять (редактор ставит пару с полом; защита от «лестницы в никуда»).
-        var dest = _map.GetTile(px, py, targetZ);
-        if (!dest.Walkable) return;
+    /// <summary>Гравитация: падаем на этаж ниже, только если СТРОГО больше 50% футпринта игрока (коллизионный AABB
+    /// радиуса CollisionRadius) над IsFall-тайлами — т.е. частичное перекрытие края дыры держит. 1 этаж/тик (плавно;
+    /// многоэтажная дыра → несколько тиков). Guard от космоса: падаем ТОЛЬКО если на Z-1 существует чанк (не
+    /// GetTile→Space — сам этаж может быть, а тайл Space). Z серверный, не предсказывается. После Uses, до Status.</summary>
+    private void ProcessFalls()
+    {
+        const float r = MovementLogic.CollisionRadius; // «модель» падения = коллизионный футпринт (допущение: тот же R)
+        const float total = (2f * r) * (2f * r);       // полная площадь футпринта (2R)²
+        const float halfEps = 1e-4f;                   // float-допуск: ровно-50/50 (граница) ДЕРЖИТ, не падает
 
-        client.X = px + 0.5f;   // в центр парной лестницы на другом этаже
-        client.Y = py + 0.5f;
-        client.Z = targetZ;
-        Console.WriteLine($"[Stairs] #{client.ConnectionId}: z{fromZ} -> z{targetZ} at ({px},{py})");
+        foreach (var client in _clients.Values)
+        {
+            float minX = client.X - r, maxX = client.X + r;
+            float minY = client.Y - r, maxY = client.Y + r;
+
+            // Доля футпринта над IsFall-тайлами: суб-тайловое перекрытие по перекрытым тайлам (максимум 2×2).
+            float holeArea = 0f;
+            int tx0 = (int)MathF.Floor(minX), tx1 = (int)MathF.Floor(maxX);
+            int ty0 = (int)MathF.Floor(minY), ty1 = (int)MathF.Floor(maxY);
+            for (int tx = tx0; tx <= tx1; tx++)
+            {
+                float ox = MathF.Max(0f, MathF.Min(maxX, tx + 1) - MathF.Max(minX, tx));
+                if (ox <= 0f) continue;
+                for (int ty = ty0; ty <= ty1; ty++)
+                {
+                    if (!_map.GetTile(tx, ty, client.Z).IsFall) continue;
+                    float oy = MathF.Max(0f, MathF.Min(maxY, ty + 1) - MathF.Max(minY, ty));
+                    holeArea += ox * oy;
+                }
+            }
+
+            if (holeArea <= 0.5f * total + halfEps) continue; // ≤50% над дырами — край держит (ровно-50/50 держит)
+
+            // Guard от космоса (по центру-тайлу): падаем только если этаж ниже существует.
+            int px = (int)MathF.Floor(client.X);
+            int py = (int)MathF.Floor(client.Y);
+            if (_map.GetChunk(FloorDiv(px, Chunk.Size), FloorDiv(py, Chunk.Size), client.Z - 1) == null)
+                continue;
+
+            client.Z--; // 1 этаж за тик
+        }
+    }
+
+    // Floor-деление тайл→чанк (корректно для отрицательных; GridMap.FloorDiv приватен — реплицируем локально).
+    private static int FloorDiv(int a, int b)
+    {
+        int q = a / b;
+        if ((a % b != 0) && ((a < 0) != (b < 0))) q--;
+        return q;
+    }
+
+    // ── Стриминг карты по чанкам (2.3a) ────────────────────────────────────────────────────────────
+    // Троттлинг: перебор in-range не каждый тик. Таймаут выгрузки ≫ интервала, поэтому чанк под ногами
+    // (всегда in-range) рефрешится задолго до истечения — не «роняется».
+    private const uint StreamIntervalTicks = 15;
+    private readonly List<long> _streamUnloadScratch = new(); // буфер unload-ключей (мутировать set во время обхода нельзя)
+
+    /// <summary>Стрим карты (троттлинг): раз в StreamIntervalTicks прогнать per-client проход по всем клиентам.</summary>
+    private void ProcessStreaming()
+    {
+        if (_currentTick % StreamIntervalTicks != 0) return;
+        foreach (var client in _clients.Values)
+            StreamChunksToClient(client);
+    }
+
+    /// <summary>Один стрим-проход для клиента: слать in-range чанки (радиус × Z±depth) вокруг игрока (новые),
+    /// рефрешить их таймер, выгружать давно вне радиуса. Данные, не симуляция — Z-авторитет/предикт не задеты.
+    /// Зовётся из ProcessStreaming (троттлинг) И СИНХРОННО на логине (начальное окружение ДО первого шага игрока:
+    /// незагруженный чанк = Space = проходим → без этого предикт шёл бы сквозь ещё-не-пришедшие стены у фронтира).</summary>
+    public void StreamChunksToClient(ClientConnection client)
+    {
+        int radius = _config.StreamRadiusChunks;
+        int depth = _config.StreamZDepth;
+        // Секунды→тики, вверх (config сейчас целочислен; Ceiling — на случай дробной настройки в будущем).
+        int timeoutTicks = (int)Math.Ceiling(_config.ChunkUnloadTimeoutSec * (double)_config.TickRate);
+        int now = (int)_currentTick;
+
+        // Чанк игрока: тайл под ногами = floor(X/Y), затем тайл→чанк (как GridMap.GetTile). Floor корректен и
+        // при отрицательных координатах (в отличие от усечения (int)X).
+        int pcx = FloorDiv((int)MathF.Floor(client.X), Chunk.Size);
+        int pcy = FloorDiv((int)MathF.Floor(client.Y), Chunk.Size);
+        int pz = client.Z;
+
+        // In-range существующие чанки: новый — отправить целиком, любой — обновить last-in-range тик.
+        for (int dz = -depth; dz <= depth; dz++)
+        {
+            int z = pz + dz;
+            for (int dcx = -radius; dcx <= radius; dcx++)
+            {
+                int cx = pcx + dcx;
+                for (int dcy = -radius; dcy <= radius; dcy++)
+                {
+                    int cy = pcy + dcy;
+                    var chunk = _map.GetChunk(cx, cy, z);
+                    if (chunk == null) continue; // пустой чанк не шлём
+
+                    long key = GridMap.Key(cx, cy, z); // единый codec ключа (детерминизм с индексом карты)
+                    if (client.SentChunks.Add(key)) // впервые в радиусе → отправить
+                        SendToClient(client, new ChunkData { Chunk = chunk });
+                    client.ChunkLastInRangeTick[key] = now; // рефреш (и новому, и уже отправленному)
+                }
+            }
+        }
+
+        // Выгрузка: отправленные, но вне радиуса дольше таймаута. Собираем в буфер — set нельзя менять на обходе.
+        _streamUnloadScratch.Clear();
+        foreach (long key in client.SentChunks)
+        {
+            if (client.ChunkLastInRangeTick.TryGetValue(key, out int last) && now - last > timeoutTicks)
+                _streamUnloadScratch.Add(key);
+        }
+        foreach (long key in _streamUnloadScratch)
+        {
+            GridMap.UnpackKey(key, out int cx, out int cy, out int cz);
+            SendToClient(client, new ChunkUnload { ChunkX = cx, ChunkY = cy, Z = cz });
+            client.SentChunks.Remove(key);
+            client.ChunkLastInRangeTick.Remove(key);
+        }
     }
 
     /// <summary>Разослать сообщение всем клиентам (опционально по фильтру).</summary>

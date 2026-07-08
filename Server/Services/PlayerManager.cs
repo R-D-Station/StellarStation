@@ -1,4 +1,5 @@
 using Server.Network;
+using Shared.Configs;
 using Shared.Messages.Core;
 using Shared.Messages.Player;
 
@@ -31,19 +32,36 @@ namespace Server.Services
 
             Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} spawned at ({client.X}, {client.Y}, z{client.Z})");
 
-            // Сообщаем клиенту его NetId — чтобы он узнавал себя в WorldSnapshot.
-            _server.SendToClient(client, new LoginResponse { NetId = client.PlayerNetId });
+            // NetId (узнать себя в WorldSnapshot) + серверный TickRate (клиент тикает на нём → инвариант
+            // tickRate==TickRate по построению). SVars.Instance == _config GameLoop (Program.cs: GameServer(SVars.Instance)).
+            _server.SendToClient(client, new LoginResponse
+            {
+                NetId = client.PlayerNetId,
+                // Clamp к [1,255]: TickRate на проводе — byte. Sane-rate (≤60) проходит точно; абсурдный конфиг
+                // не усечётся в мусор (напр. 256→0 → клиент тикал бы на 1 TPS). >255 TPS не поддерживается.
+                TickRate = (byte)Math.Clamp(SVars.Instance.TickRate, 1, byte.MaxValue)
+            });
 
-            // Карта целиком сразу после логина (позже — стриминг по PVS).
-            _server.SendMap(client);
+            // Стрим карты по чанкам (2.3b): вместо всей карты шлём окружение игрока. СИНХРОННО на логине — чтобы
+            // чанки вокруг были у клиента ДО первого шага (иначе незагруженный чанк = Space = проходим → предикт
+            // сквозь ещё-не-пришедшие стены). Дальше ProcessStreaming (GameLoop) досылает/выгружает по движению.
+            _server.StreamChunksToClient(client);
             // Текущее состояние открытых дверей (карта статична, двери — рантайм).
             _server.SendOpenDoors(client);
 
-            // TODO: разослать новичка остальным игрокам (спавн)
+            // Catch-up новичку: кто уже в мире, кроме него самого (он уже в _players с L31).
+            foreach (var p in _players.Values)
+                if (p != client)
+                    _server.SendToClient(client, new PlayerJoined { NetId = p.PlayerNetId });
+
+            // Анонс новичка остальным (себе не шлём).
+            _server.BroadcastToAll(new PlayerJoined { NetId = client.PlayerNetId }, c => c != client);
         }
 
         private void OnClientDisconnected(ClientConnection client)
         {
+            // PlayerLeft ДО Remove. Пир уже снят из GameServer._clients → своё PlayerLeft не получит (корректно).
+            _server.BroadcastToAll(new PlayerLeft { NetId = client.PlayerNetId });
             _players.Remove(client.ConnectionId);
             Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} left");
         }

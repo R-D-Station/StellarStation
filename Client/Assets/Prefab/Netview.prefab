@@ -26,7 +26,7 @@ Transform:
   m_GameObject: {fileID: 1025228287478109249}
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 0, y: 0.01, z: 0}
+  m_LocalPosition: {x: 0, y: 0.1, z: 0}
   m_LocalScale: {x: 4, y: 4, z: 4}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -141,4 +141,28 @@ MonoBehaviour:
   _southSprite: {fileID: -525304849, guid: f0ab8d32e50f82e4b9dc97065a4d5914, type: 3}
   _eastSprite: {fileID: 1623338204, guid: f0ab8d32e50f82e4b9dc97065a4d5914, type: 3}
   _westSprite: {fileID: -1528376254, guid: f0ab8d32e50f82e4b9dc97065a4d5914, type: 3}
+  _northMoveSprite: {fileID: 0}
+  _southMoveSprite: {fileID: 0}
+  _eastMoveSprite: {fileID: 0}
+  _westMoveSprite: {fileID: 0}
+  _northStunSprite: {fileID: 0}
+  _southStunSprite: {fileID: 0}
+  _eastStunSprite: {fileID: 0}
+  _westStunSprite: {fileID: 0}
+  _northLayingSprite: {fileID: 0}
+  _southLayingSprite: {fileID: 0}
+  _eastLayingSprite: {fileID: 0}
+  _westLayingSprite: {fileID: 0}
+  _northKnockedDownSprite: {fileID: 0}
+  _southKnockedDownSprite: {fileID: 0}
+  _eastKnockedDownSprite: {fileID: 0}
+  _westKnockedDownSprite: {fileID: 0}
+  _northUnconsciousSprite: {fileID: 0}
+  _southUnconsciousSprite: {fileID: 0}
+  _eastUnconsciousSprite: {fileID: 0}
+  _westUnconsciousSprite: {fileID: 0}
+  _northDeadSprite: {fileID: 0}
+  _southDeadSprite: {fileID: 0}
+  _eastDeadSprite: {fileID: 0}
+  _westDeadSprite: {fileID: 0}
   _smoothing: 20

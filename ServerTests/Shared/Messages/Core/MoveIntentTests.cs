@@ -14,6 +14,7 @@ namespace ServerTests.Shared.Messages.Core
             {
                 Direction = IntentDirection.North,
                 Sprint = false,
+                LayToggle = true,
                 Sequence = 898316,
             };
 
@@ -23,7 +24,30 @@ namespace ServerTests.Shared.Messages.Core
 
             Assert.Equal(original.Direction, deserialized.Direction);
             Assert.Equal(original.Sprint, deserialized.Sprint);
+            Assert.Equal(original.LayToggle, deserialized.LayToggle);
             Assert.Equal(original.Sequence, deserialized.Sequence);
+        }
+
+        [Fact]
+        public void MoveIntent_LayToggleBit_RoundTrips()
+        {
+            // Бит LayToggle независим от Sprint — проверяем все 4 комбинации.
+            foreach (var (sprint, lay) in new[] { (false, false), (true, false), (false, true), (true, true) })
+            {
+                var original = new MoveIntent
+                {
+                    Direction = IntentDirection.East,
+                    Sprint = sprint,
+                    LayToggle = lay,
+                    Sequence = 5,
+                };
+
+                var deserialized = new MoveIntent();
+                deserialized.Deserialize(original.Serialize());
+
+                Assert.Equal(sprint, deserialized.Sprint);
+                Assert.Equal(lay, deserialized.LayToggle);
+            }
         }
 
         [Fact]
@@ -37,6 +61,7 @@ namespace ServerTests.Shared.Messages.Core
 
             Assert.Equal(original.Direction, deserialized.Direction);
             Assert.Equal(original.Sprint, deserialized.Sprint);
+            Assert.Equal(original.LayToggle, deserialized.LayToggle);
             Assert.Equal(original.Sequence, deserialized.Sequence);
         }
 
@@ -59,7 +84,7 @@ namespace ServerTests.Shared.Messages.Core
         public void Deserialize_TooShortData_ThrowsArgumentException()
         {
             var intent = new MoveIntent();
-            var tooShortData = new byte[3]; // меньше минимальных 6 байт
+            var tooShortData = new byte[3]; // меньше требуемых 7 байт
             Assert.Throws<ArgumentException>(() => intent.Deserialize(tooShortData));
         }
 
@@ -166,13 +191,14 @@ namespace ServerTests.Shared.Messages.Core
             Assert.Equal(10_000_000u, deserializedMax.Sequence);
         }
 
-        private static byte[] CreateTestData(byte direction, bool sprint, uint sequence)
+        private static byte[] CreateTestData(byte direction, bool sprint, uint sequence, bool layToggle = false)
         {
             using var ms = new MemoryStream();
             using var writer = new BinaryWriter(ms);
 
             writer.Write(direction);
             writer.Write(sprint);
+            writer.Write(layToggle);
             writer.Write(sequence);
 
             return ms.ToArray();
