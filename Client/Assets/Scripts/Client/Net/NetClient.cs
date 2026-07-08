@@ -59,5 +59,20 @@ namespace Client.Net
 
         /// <summary>«Использовать» (E): лестница/лифт под игроком. Без предсказания — z меняет сервер.</summary>
         public void SendUse() => _transport.Send(new UseIntent());
+
+        /// <summary>Адресная интеракция (клик по тайлу/сущности): request-only, ReliableOrdered, без Sequence/предсказания.</summary>
+        public void SendInteract(byte kind, byte verb, byte hand, int tileX, int tileY, int tileZ, int targetNetId)
+        {
+            _transport.Send(new InteractIntent
+            {
+                TargetKind = kind,
+                Verb = verb,
+                HandIndex = hand,
+                TileX = tileX,
+                TileY = tileY,
+                TileZ = tileZ,
+                TargetNetId = targetNetId
+            });
+        }
     }
 }

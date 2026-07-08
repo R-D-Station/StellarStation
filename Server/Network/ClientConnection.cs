@@ -1,6 +1,7 @@
 using LiteNetLib;
 using System.Collections.Concurrent;
 using Shared.Messages.Core;
+using Shared.Messages.Interaction;
 using Shared.Simulation;
 using Shared.Util;
 
@@ -73,6 +74,9 @@ namespace Server.Network
 
         // Очередь intent'ов; обрабатывается в GameLoop (по одному на тик).
         public readonly ConcurrentQueue<MoveIntent> IntentQueue = new();
+
+        // Очередь адресных интеракций (клик по тайлу/сущности); дренируется в ProcessInteractions (request-only).
+        public readonly ConcurrentQueue<InteractIntent> InteractQueue = new();
 
         // Стриминг карты (2.3a). SentChunks — ключи уже отправленных клиенту чанков (упаковка = GridMap-ключ).
         // ChunkLastInRangeTick — последний серверный тик, когда чанк был в радиусе (таймер выгрузки: долго вне

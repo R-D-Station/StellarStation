@@ -23,7 +23,7 @@ public enum MessageType : ushort
     UseIntent = 6,
 
     // Interaction (200-299)
-    ClickIntent = 200,
+    InteractIntent = 200, // адресный клик по тайлу/сущности (перепрофиль заглушки ClickIntent; wire-id стабилен)
     PickupItem = 201,
     DropItem = 202,
 

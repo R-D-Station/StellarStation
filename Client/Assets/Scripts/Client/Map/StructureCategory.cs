@@ -1,5 +1,2 @@
-namespace Client.Map
-{
-    /// <summary>Категория настенного объекта. Дверь/люк — открываемые.</summary>
-    public enum StructureCategory : byte { Wall = 0, Door = 1, Hatch = 2, Window = 3 }
-}
+// StructureCategory перенесён в Shared/World/StructureCategory.cs (W2).
+// Этот файл + .meta удаляет человек в Unity.

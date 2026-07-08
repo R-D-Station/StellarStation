@@ -10,13 +10,13 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2d6cf9811b15a89459575405665b1b61, type: 3}
-  m_Name: Ladder
+  m_Name: Ladder Up
   m_EditorClassIdentifier: Assembly-CSharp::Client.Map.StructureDefinition
-  Type: 1
-  DisplayName: Structure
-  Category: 0
-  Sprite: {fileID: 0}
-  Prefab: {fileID: 0}
+  Type: 4
+  DisplayName: "\u041B\u0435\u0441\u0442\u043D\u0438\u0446\u0430 \u2193"
+  Category: 4
+  Sprite: {fileID: 21300000, guid: a03e71787994704419c2e973f5f56b46, type: 3}
+  Prefab: {fileID: 1743938645548851642, guid: 5b5cc43160325704e8254781c32cb0a6, type: 3}
   OpenSprite: {fileID: 0}
   OpenPrefab: {fileID: 0}
   SideSprite: {fileID: 0}

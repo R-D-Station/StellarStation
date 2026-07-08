@@ -4,8 +4,10 @@ using LiteNetLib.Utils;
 using Shared.Configs;
 using Shared.Messages;
 using Shared.Messages.Core;
+using Shared.Messages.Interaction;
 using Shared.Simulation;
 using Shared.World;
+using Server.Network.Interaction;
 
 namespace Server.Network;
 
@@ -30,6 +32,11 @@ public class GameServer
     private uint _currentTick;
 
     private readonly List<NetPeer> _connectedPeersCache = new();
+
+    // Адресные интеракции: реестр обработчиков (перебор по порядку, первый взявший цель — стоп). StairHandler —
+    // единый источник логики лестниц: и legacy E (TryUseTile), и адресный InteractIntent-клик идут через него.
+    private readonly StairHandler _stairHandler = new();
+    private readonly IInteractionHandler[] _interactionHandlers;
 
     // Переиспользуемые буферы горячего broadcast-пути (ноль аллокаций при установившемся числе клиентов).
     private EntitySnapshot[] _broadcastEntities = Array.Empty<EntitySnapshot>();
@@ -62,6 +69,7 @@ public class GameServer
         _clients = new Dictionary<NetPeer, ClientConnection>();
         _mainThreadActions = new ConcurrentQueue<Action>();
         _broadcastPayloadWriter = new BinaryWriter(_broadcastPayload);
+        _interactionHandlers = new IInteractionHandler[] { _stairHandler };
     }
 
     public void Start()
@@ -160,6 +168,20 @@ public class GameServer
                     client.IntentQueue.Enqueue(intent);
                     break;
 
+                case MessageType.InteractIntent:
+                    try
+                    {
+                        var interact = new InteractIntent();
+                        interact.Deserialize(data);
+                        client.InteractQueue.Enqueue(interact);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Битый interact-пакет: лог, НЕ кикаем (request-only, не критично для сессии).
+                        Console.WriteLine($"[Server] Bad InteractIntent from #{client.ConnectionId}: {ex.Message}");
+                    }
+                    break;
+
                 default:
                     Console.WriteLine($"[Server] Unknown message type from #{client.ConnectionId}: {type}");
                     break;
@@ -195,6 +217,7 @@ public class GameServer
             }
 
             ProcessIntents();
+            ProcessInteractions();
             ProcessUses();
             ProcessFalls();
             ProcessStatus();
@@ -291,6 +314,78 @@ public class GameServer
             // Бамп: упёрся в закрытую дверь по направлению ввода — открываем её.
             OpenBumpedDoors(client, intent.Direction, intent.Sprint);
         }
+    }
+
+    /// <summary>Дренирует очередь адресных интеракций каждого клиента (после ProcessIntents — дальность считается
+    /// от свежеприменённой позиции). Каждая: resolve цели → range-check → диспетч через реестр обработчиков.</summary>
+    private void ProcessInteractions()
+    {
+        const int maxPerTick = 32; // предохранитель от флуда кликами (за ним — редкий дроп хвоста, логируем)
+
+        foreach (var client in _clients.Values)
+        {
+            int applied = 0;
+            while (applied < maxPerTick && client.InteractQueue.TryDequeue(out var intent))
+            {
+                ResolveAndDispatchInteraction(client, in intent);
+                applied++;
+            }
+
+            if (applied == maxPerTick && !client.InteractQueue.IsEmpty)
+            {
+                int dropped = 0;
+                while (client.InteractQueue.TryDequeue(out _)) dropped++;
+                Console.WriteLine($"[Server] interact flood #{client.ConnectionId}: applied {applied}, dropped {dropped}");
+            }
+        }
+    }
+
+    /// <summary>Резолв цели интеракции в ЦЕЛЫЙ тайл, авторитетная проверка дальности и диспетч через реестр обработчиков.
+    /// Tile-цель — координаты из intent; Entity-цель — floor СЕРВЕРНОЙ позиции сущности по TargetNetId (клиентские Tile*
+    /// игнорируются — анти-чит). Вне дальности / нет сущности / нет обработчика — тихий дроп. public — юнит-тест напрямую.</summary>
+    public void ResolveAndDispatchInteraction(ClientConnection client, in InteractIntent intent)
+    {
+        int tx, ty, tz;
+        if (intent.TargetKind == (byte)InteractTargetKind.Entity)
+        {
+            if (!TryResolveEntityTile(intent.TargetNetId, out tx, out ty, out tz))
+                return; // нет такой сущности — тихий дроп
+        }
+        else
+        {
+            tx = intent.TileX;
+            ty = intent.TileY;
+            tz = intent.TileZ;
+        }
+
+        int px = (int)MathF.Floor(client.X);
+        int py = (int)MathF.Floor(client.Y);
+        if (!InteractionRules.InReach(px, py, client.Z, tx, ty, tz))
+            return; // вне дальности — тихий дроп (анти-telegrab)
+
+        var ctx = new InteractContext(_map, client, tx, ty, tz, intent.Verb, intent.HandIndex);
+        for (int i = 0; i < _interactionHandlers.Length; i++)
+        {
+            if (_interactionHandlers[i].TryHandle(in ctx))
+                return;
+        }
+        // ни один обработчик не взял цель (нет Special и т.п.) — тихий дроп
+    }
+
+    /// <summary>Тайл сущности по её NetId: floor СЕРВЕРНОЙ позиции игрока (в 4.1 сущности = игроки; в 4.3 — общий
+    /// _entities). false — сущность не найдена.</summary>
+    private bool TryResolveEntityTile(int netId, out int tx, out int ty, out int tz)
+    {
+        foreach (var c in _clients.Values)
+        {
+            if (c.PlayerNetId != netId) continue;
+            tx = (int)MathF.Floor(c.X);
+            ty = (int)MathF.Floor(c.Y);
+            tz = c.Z;
+            return true;
+        }
+        tx = ty = tz = 0;
+        return false;
     }
 
     /// <summary>Тик-таймеры server-only состояний: декремент Stun/KnockedDown, выход в Stand при истечении.
@@ -651,27 +746,14 @@ public class GameServer
         }
     }
 
-    /// <summary>Использовать тайл, на котором стоит игрок. Сейчас — лестницы (переход по Z).</summary>
+    /// <summary>Использовать тайл под игроком (legacy E): лестница под ногами через общий StairHandler
+    /// (тело вынесено — единый источник логики лестниц с адресным InteractIntent).</summary>
     private void TryUseTile(ClientConnection client)
     {
         int px = (int)MathF.Floor(client.X);
         int py = (int)MathF.Floor(client.Y);
-        int fromZ = client.Z;
-        var tile = _map.GetTile(px, py, fromZ);
-
-        int targetZ;
-        if (tile.Special == TileSpecial.StairUp) targetZ = fromZ + 1;
-        else if (tile.Special == TileSpecial.StairDown) targetZ = fromZ - 1;
-        else return; // не лестница — ничего не делаем
-
-        // Высадка на targetZ: на парный тайл, если там можно стоять; иначе — на первый walkable-сосед (ладдер-проём
-        // наверху — блок-структура, на неё не встать → сходим рядом). Нет walkable — стоп (гард «лестница в никуда»).
-        if (!TryFindLanding(_map, px, py, targetZ, out int nx, out int ny)) return;
-
-        client.X = nx + 0.5f;
-        client.Y = ny + 0.5f;
-        client.Z = targetZ;
-        Console.WriteLine($"[Stairs] #{client.ConnectionId}: z{fromZ} -> z{targetZ} at ({nx},{ny})");
+        var ctx = new InteractContext(_map, client, px, py, client.Z, (byte)InteractVerb.Primary, handIndex: 0);
+        _stairHandler.TryHandle(in ctx);
     }
 
     /// <summary>Найти клетку высадки лестницы на targetZ: парный тайл (px,py) если walkable, иначе первый walkable-сосед

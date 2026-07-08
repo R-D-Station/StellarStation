@@ -3,11 +3,14 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using Shared.Messages.Core;
 using Shared.Messages.Player;
+using Shared.Messages.Interaction;
+using Client.Config;
 using Client.Net.View;
 using Client.Net.Prediction;
 using Client.Gameplay.Input;
 using Client.Gameplay.Entities;
 using Client.Gameplay.Camera;
+using Client.Gameplay.Interaction;
 using Shared.Simulation;
 using Shared.World;
 
@@ -28,6 +31,12 @@ namespace Client.Net
         [SerializeField] private FollowCamera _camera;
         [Tooltip("Опц.: туман войны (FOV). Пусто — без тумана.")]
         [SerializeField] private View.FovRenderer _fov;
+
+        [Tooltip("Опц.: камера для перевода клика в тайл. Пусто — Camera.main.")]
+        [SerializeField] private UnityEngine.Camera _clickCamera;
+
+        [Tooltip("Опц.: контроллер hover-подсказок (IMGUI). Пусто — без подсказок.")]
+        [SerializeField] private HoverHintController _hoverHint;
 
         private NetClient _net;
         private PlayerControl _controls;
@@ -182,6 +191,10 @@ namespace Client.Net
 
             if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
                 _net.SendUse();
+
+            HandleInteractionInput();
+
+            _hoverHint?.Tick(this);
         }
 
         /// <summary>Один серверный тик: ввод -> intent -> предсказание + отправка.</summary>
@@ -220,6 +233,92 @@ namespace Client.Net
             return iy > 0 ? IntentDirection.North
                  : iy < 0 ? IntentDirection.South
                  : IntentDirection.None;
+        }
+
+        // Камера для перевода клика в тайл; кэшируется на первом клике (Camera.main = tagged Find — только при нужде).
+        private UnityEngine.Camera ClickCamera
+        {
+            get
+            {
+                if (_clickCamera == null) _clickCamera = UnityEngine.Camera.main;
+                return _clickCamera;
+            }
+        }
+
+        /// <summary>Клик мыши → адресная интеракция (в Update, не в Tick): request-only, без предсказания. Экран→ЦЕЛЫЙ
+        /// тайл по камере на плоскости этажа игрока (строго PlayerPredictor.Z); опц. пик сущности, иначе цель-тайл.</summary>
+        private void HandleInteractionInput()
+        {
+            if (!_predictor.IsInitialized || Mouse.current == null) return;
+
+            bool primary = Mouse.current.leftButton.wasPressedThisFrame;
+            bool alt = Mouse.current.rightButton.wasPressedThisFrame;
+            if (!primary && !alt) return;
+
+            Vector2 screen = Mouse.current.position.ReadValue();
+            if (!TryResolveHoverTile(screen, out int tileX, out int tileY, out int pz)) return; // луч мимо плоскости этажа
+
+            byte verb = (byte)(alt && !primary ? InteractVerb.Alt : InteractVerb.Primary);
+
+            // Опц. пик чужой сущности на том же тайле этажа игрока; иначе — цель-тайл (TargetNetId=-1).
+            byte kind = (byte)InteractTargetKind.Tile;
+            int targetNetId = -1;
+            if (TryPickEntity(tileX, tileY, pz, out int pickedId))
+            {
+                kind = (byte)InteractTargetKind.Entity;
+                targetNetId = pickedId;
+            }
+
+            _net.SendInteract(kind, verb, 0, tileX, tileY, pz, targetNetId);
+        }
+
+        /// <summary>Экран→ЦЕЛЫЙ тайл по камере на плоскости ЭТАЖА игрока (строго PlayerPredictor.Z). ЕДИНЫЙ impl клика и
+        /// hover — чтобы они не расходились. tileZ = этаж игрока всегда; false — луч мимо плоскости (нет цели).</summary>
+        public bool TryResolveHoverTile(Vector2 screenPos, out int tileX, out int tileY, out int tileZ)
+        {
+            tileX = 0; tileY = 0;
+            tileZ = _predictor.Z;
+            var cam = ClickCamera;
+            if (cam == null) return false;
+
+            // Плоскость этажа игрока (Unity-Y = z*FloorHeight): тайл на СВОЁМ Z (2.5D — курсор может визуально попасть на др. этаж).
+            Ray ray = cam.ScreenPointToRay(screenPos);
+            var floorPlane = new Plane(Vector3.up, new Vector3(0f, tileZ * RenderConfig.FloorHeight, 0f));
+            if (!floorPlane.Raycast(ray, out float enter)) return false;
+
+            Vector3 hit = ray.GetPoint(enter);
+            tileX = Mathf.FloorToInt(hit.x); // Unity-X = серверный X
+            tileY = Mathf.FloorToInt(hit.z); // Unity-Z (глубина) = серверный Y
+            return true;
+        }
+
+        // Read-only поверхность для hover-hint: тайл игрока (floor(_predictor.X/Y), Z предиктора — reach-паритет в ОДНОМ месте),
+        // инициализация и доступ к тайлу карты (инкапсуляция _map).
+        public int PlayerTileX => Mathf.FloorToInt(_predictor.X);
+        public int PlayerTileY => Mathf.FloorToInt(_predictor.Y);
+        public int PlayerTileZ => _predictor.Z;
+        public bool IsInitialized => _predictor.IsInitialized;
+        public Tile GetTileAt(int x, int y, int z) => _map.GetTile(x, y, z);
+
+        /// <summary>Чужая сущность на тайле (tx,ty) этажа z по её вьюхе; первую подходящую — в pickedId (себя пропускаем).</summary>
+        private bool TryPickEntity(int tx, int ty, int z, out int pickedId)
+        {
+            foreach (var kv in _views)
+            {
+                if (kv.Key == LocalNetId) continue;
+                var view = kv.Value;
+                if (view == null) continue;
+                Vector3 p = view.transform.position;
+                if (Mathf.FloorToInt(p.x) == tx
+                    && Mathf.FloorToInt(p.z) == ty
+                    && Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == z)
+                {
+                    pickedId = kv.Key;
+                    return true;
+                }
+            }
+            pickedId = -1;
+            return false;
         }
 
         private void OnLoginResponse(LoginResponse login)
