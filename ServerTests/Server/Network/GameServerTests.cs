@@ -250,6 +250,38 @@ namespace ServerTests.Server.Network
             Assert.Equal($"TestKey_{_testPort}", _config.ConnectionKey);
         }
 
+        [Fact]
+        public void PlayerConnect_RegistersEntity_DisconnectRemoves()
+        {
+            _server.Start();
+            Thread.Sleep(50);
+
+            ClientConnection? spawned = null;
+            _server.OnClientConnected += c => spawned = c;
+
+            // Свой клиент-менеджер (держим и пампим сами) — чтобы connect/disconnect-пакеты реально ушли.
+            var clientListener = new EventBasedNetListener();
+            var clientManager = new NetManager(clientListener);
+            clientManager.Start();
+            var peer = clientManager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
+
+            // Регистрация в _entities идёт в OnPeerConnected на серверном PollEvents (GameLoop) — ждём.
+            for (int i = 0; i < 200 && _server.EntityCount == 0; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
+
+            Assert.Equal(1, _server.EntityCount);
+            Assert.NotNull(spawned);
+            Assert.True(spawned!.PlayerNetId > 0, "PlayerNetId выдан аллокатором (>0)");
+
+            // Дисконнект: клиент шлёт disconnect-пакет, пампим до Remove из реестра на сервере.
+            peer.Disconnect();
+            for (int i = 0; i < 200 && _server.EntityCount > 0; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
+            Assert.Equal(0, _server.EntityCount);
+
+            clientManager.Stop();
+            _server.Stop();
+            Thread.Sleep(50);
+        }
+
         private bool IsUdpPortInUse(int port)
         {
             try

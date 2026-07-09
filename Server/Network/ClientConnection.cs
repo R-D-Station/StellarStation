@@ -8,7 +8,7 @@ using Shared.Util;
 namespace Server.Network
 {
     /// <summary>Состояние подключённого клиента: пир, координаты игрока и очередь intent'ов.</summary>
-    public class ClientConnection
+    public class ClientConnection : IWorldEntity
     {
         public NetPeer Peer { get; set; }
         public int ConnectionId { get; set; }
@@ -17,6 +17,7 @@ namespace Server.Network
 
         // Состояние игрока
         public int PlayerNetId { get; set; }
+        public int NetId => PlayerNetId; // IWorldEntity: ключ общего реестра сущностей (= PlayerNetId)
         public float X { get; set; }
         public float Y { get; set; }
         public int Z { get; set; }
@@ -90,7 +91,7 @@ namespace Server.Network
             ConnectionId = connectionId;
             ConnectedAt = DateTime.UtcNow;
             LastActivity = DateTime.UtcNow;
-            PlayerNetId = connectionId;
+            // PlayerNetId НЕ ставим =connectionId: NetId отвязан от ConnectionId, его выдаёт GameServer из NetIdAllocator.
         }
     }
 }

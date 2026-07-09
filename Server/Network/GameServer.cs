@@ -31,6 +31,14 @@ public class GameServer
     private int _nextConnectionId = 1;
     private uint _currentTick;
 
+    // Общий монотонный аллокатор NetId + реестр всех сущностей мира (игроки; предметы — 4.4). NetId отвязан от
+    // ConnectionId. Мутируются только на GameLoop-потоке (OnPeerConnected/Disconnected бегут синхронно в PollEvents).
+    private readonly NetIdAllocator _netIdAllocator = new();
+    private readonly Dictionary<int, IWorldEntity> _entities = new();
+
+    /// <summary>Число сущностей в общем реестре (диагностика/тесты).</summary>
+    public int EntityCount => _entities.Count;
+
     private readonly List<NetPeer> _connectedPeersCache = new();
 
     // Адресные интеракции: реестр обработчиков (перебор по порядку, первый взявший цель — стоп). StairHandler —
@@ -123,7 +131,9 @@ public class GameServer
     private void OnPeerConnected(NetPeer peer)
     {
         var client = new ClientConnection(peer, _nextConnectionId++);
+        client.PlayerNetId = _netIdAllocator.Allocate(); // NetId из единого пула (не =ConnectionId)
         _clients[peer] = client;
+        _entities[client.PlayerNetId] = client;
 
         Console.WriteLine($"[Server] Client #{client.ConnectionId} connected from {peer.Address}");
 
@@ -136,6 +146,7 @@ public class GameServer
         if (_clients.TryGetValue(peer, out var client))
         {
             _clients.Remove(peer);
+            _entities.Remove(client.PlayerNetId);
             Console.WriteLine($"[Server] Client #{client.ConnectionId} disconnected: {disconnectInfo.Reason}");
 
             _mainThreadActions.Enqueue(() => OnClientDisconnected?.Invoke(client));
@@ -376,12 +387,11 @@ public class GameServer
     /// _entities). false — сущность не найдена.</summary>
     private bool TryResolveEntityTile(int netId, out int tx, out int ty, out int tz)
     {
-        foreach (var c in _clients.Values)
+        if (_entities.TryGetValue(netId, out var e))
         {
-            if (c.PlayerNetId != netId) continue;
-            tx = (int)MathF.Floor(c.X);
-            ty = (int)MathF.Floor(c.Y);
-            tz = c.Z;
+            tx = (int)MathF.Floor(e.X);
+            ty = (int)MathF.Floor(e.Y);
+            tz = e.Z;
             return true;
         }
         tx = ty = tz = 0;
@@ -503,15 +513,17 @@ public class GameServer
         if (_clients.Count == 0)
             return;
 
-        // Общий список сущностей — в переиспользуемый буфер (ресайз ТОЛЬКО при смене числа клиентов), in-place.
-        int count = _clients.Count;
-        if (_broadcastEntities.Length != count)
-            _broadcastEntities = new EntitySnapshot[count];
+        // Игроков в снапшот берём из общего реестра _entities (предметы 4.4 тоже в нём, но у них СВОЙ поток
+        // ItemSnapshot → в player-снапшот НЕ попадают: фильтр is ClientConnection). Буфер вмещает _entities.Count
+        // (верхняя граница), фактический count — число игроков. Ресайз — только при росте (без shrink-churn).
+        if (_broadcastEntities.Length < _entities.Count)
+            _broadcastEntities = new EntitySnapshot[_entities.Count];
 
-        int i = 0;
-        foreach (var c in _clients.Values)
+        int count = 0;
+        foreach (var entity in _entities.Values)
         {
-            _broadcastEntities[i++] = new EntitySnapshot
+            if (entity is not ClientConnection c) continue;
+            _broadcastEntities[count++] = new EntitySnapshot
             {
                 NetId = c.PlayerNetId,
                 X = c.X,
