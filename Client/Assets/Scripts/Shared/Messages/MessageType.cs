@@ -13,6 +13,7 @@ public enum MessageType : ushort
     TileUpdate = 5,
     MapChunk = 7,        // стриминг: один чанк карты (server→client)
     MapChunkUnload = 8,  // стриминг: выгрузить чанк (server→client)
+    ItemSnapshot = 9,    // отдельный PVS-поток наземных предметов (server→client)
 
     // Player (100-199)
     LoginRequest = 100,

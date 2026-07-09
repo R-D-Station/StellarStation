@@ -7,6 +7,7 @@ using Shared.Messages.Core;
 using Shared.Messages.Interaction;
 using Shared.Simulation;
 using Shared.World;
+using Shared.World.Items;
 using Server.Network.Interaction;
 
 namespace Server.Network;
@@ -58,6 +59,11 @@ public class GameServer
     // минус заголовки; надёжной публичной константы в LiteNetLib 2.1 нет). Триггер под будущие дельты (план C).
     private const int SnapshotMtuWarnBytes = 1200;
     private uint _lastMtuWarnTick; // 0 = ещё не предупреждали
+    private uint _lastItemMtuWarnTick; // 0 = ещё не предупреждали (свой троттл для ItemSnapshot-broadcast)
+
+    // Переиспользуемые буферы ItemSnapshot-broadcast (наземные предметы; параллельно player-буферам, ресайз только при росте).
+    private ItemInstance[] _broadcastItems = Array.Empty<ItemInstance>();
+    private ItemInstance[] _perClientItems = Array.Empty<ItemInstance>();
 
     public event Action<ClientConnection>? OnClientConnected;
     public event Action<ClientConnection>? OnClientDisconnected;
@@ -238,6 +244,7 @@ public class GameServer
             UpdateDoors();
             ProcessStreaming(); // стрим карты по чанкам (2.3b включён; начальное окружение шлётся на логине синхронно)
             BroadcastWorldSnapshot();
+            BroadcastItemSnapshot(); // отдельный PVS-поток наземных предметов (после player-снапшота)
 
             // Привязка к абсолютному времени, чтобы тик не плыл.
             nextTick += tickMs;
@@ -581,6 +588,111 @@ public class GameServer
             // на своих reliable-каналах (НЕ трогаем). ТОЛЬКО этот Send — Sequenced.
             _broadcastWriter.Reset();
             _broadcastWriter.Put((ushort)MessageType.WorldSnapshot);
+            _broadcastWriter.PutBytesWithLength(_broadcastPayload.GetBuffer(), 0, (ushort)_broadcastPayload.Length);
+            client.Peer.Send(_broadcastWriter, DeliveryMethod.Sequenced);
+        }
+    }
+
+    /// <summary>Спавн наземного предмета: аллокация NetId + регистрация в общем реестре. ТОЛЬКО на GameLoop-потоке. Возвращает NetId.</summary>
+    public int SpawnGroundItem(ushort itemDefId, byte stackCount, int cellX, int cellY, int z, byte placement = 0)
+    {
+        int id = _netIdAllocator.Allocate();
+        _entities[id] = new GroundItemEntity(id, itemDefId, stackCount, cellX, cellY, z, placement);
+        return id;
+    }
+
+    /// <summary>Снять наземный предмет из реестра по NetId. ТОЛЬКО на GameLoop-потоке. false — нет такого предмета
+    /// ИЛИ это не GroundItemEntity (игрока не трогаем).</summary>
+    public bool DespawnGroundItem(int netId)
+    {
+        if (_entities.TryGetValue(netId, out var e) && e is GroundItemEntity)
+            return _entities.Remove(netId);
+        return false;
+    }
+
+    /// <summary>Наземные предметы в зоне интереса позиции (cx,cy,cz) — та же выборка (is GroundItemEntity + InInterest),
+    /// что рассылает BroadcastItemSnapshot. Аллоцирует (НЕ горячий путь): для тестов и запросов (range-check подбора 4.4b/4.5).</summary>
+    public List<ItemInstance> GroundItemsInInterest(float cx, float cy, int cz)
+    {
+        float r = SVars.Instance.EntityInterestRadius;
+        int zDepth = SVars.Instance.EntityInterestZDepth;
+        var result = new List<ItemInstance>();
+        foreach (var entity in _entities.Values)
+        {
+            if (entity is not GroundItemEntity gi) continue;
+            var probe = new EntitySnapshot { X = gi.X, Y = gi.Y, Z = gi.Z };
+            if (InInterest(cx, cy, cz, in probe, r, zDepth))
+                result.Add(ToInstance(gi));
+        }
+        return result;
+    }
+
+    private static ItemInstance ToInstance(GroundItemEntity gi) => new ItemInstance
+    {
+        NetId = gi.NetId,
+        ItemDefId = gi.ItemDefId,
+        StackCount = gi.StackCount,
+        X = gi.CellX,
+        Y = gi.CellY,
+        Z = gi.Z,
+        Placement = gi.Placement
+    };
+
+    /// <summary>Рассылает наземные предметы в интересе каждого клиента ОТДЕЛЬНЫМ ItemSnapshot-потоком (Sequenced), НЕ смешивая
+    /// с player-WorldSnapshot. Нет предметов / клиент их не видит — не шлём (без wire-шума). Zero-alloc: переиспользуемые буферы.</summary>
+    private void BroadcastItemSnapshot()
+    {
+        if (_clients.Count == 0)
+            return;
+
+        // Все наземные предметы из общего реестра → буфер (вмещает _entities.Count; ресайз только при росте).
+        if (_broadcastItems.Length < _entities.Count)
+            _broadcastItems = new ItemInstance[_entities.Count];
+
+        int count = 0;
+        foreach (var entity in _entities.Values)
+            if (entity is GroundItemEntity gi)
+                _broadcastItems[count++] = ToInstance(gi);
+
+        if (count == 0)
+            return; // нет предметов — не шлём вовсе
+
+        if (_perClientItems.Length < count)
+            _perClientItems = new ItemInstance[count];
+
+        float interestR = SVars.Instance.EntityInterestRadius;
+        int interestZ = SVars.Instance.EntityInterestZDepth;
+
+        foreach (var client in _clients.Values)
+        {
+            // PVS: тот же InInterest, что у игроков. Позиция предмета — лёгкий EntitySnapshot-пробник (struct, без heap).
+            int k = 0;
+            for (int e = 0; e < count; e++)
+            {
+                var probe = new EntitySnapshot { X = _broadcastItems[e].X, Y = _broadcastItems[e].Y, Z = _broadcastItems[e].Z };
+                if (InInterest(client.X, client.Y, client.Z, in probe, interestR, interestZ))
+                    _perClientItems[k++] = _broadcastItems[e];
+            }
+
+            if (k == 0)
+                continue; // клиент не видит ни одного предмета — ему не шлём
+
+            var snapshot = new ItemSnapshot();
+            _broadcastPayload.SetLength(0);
+            snapshot.WriteTo(_broadcastPayloadWriter, _perClientItems, k);
+            _broadcastPayloadWriter.Flush();
+
+            // MTU-guard: тот же порог, свой троттл-тик (Sequenced не фрагментирует → большой payload теряется молча).
+            if (_broadcastPayload.Length > SnapshotMtuWarnBytes
+                && (_lastItemMtuWarnTick == 0 || _currentTick - _lastItemMtuWarnTick >= (uint)_config.TickRate * 5))
+            {
+                Console.WriteLine($"[Server] WARN: ItemSnapshot payload {_broadcastPayload.Length}B > {SnapshotMtuWarnBytes}B " +
+                                  $"(client #{client.ConnectionId}, {k} предметов) — Sequenced не фрагментирует, риск молчаливой потери");
+                _lastItemMtuWarnTick = _currentTick;
+            }
+
+            _broadcastWriter.Reset();
+            _broadcastWriter.Put((ushort)MessageType.ItemSnapshot);
             _broadcastWriter.PutBytesWithLength(_broadcastPayload.GetBuffer(), 0, (ushort)_broadcastPayload.Length);
             client.Peer.Send(_broadcastWriter, DeliveryMethod.Sequenced);
         }
