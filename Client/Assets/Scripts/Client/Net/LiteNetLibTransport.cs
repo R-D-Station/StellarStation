@@ -3,6 +3,7 @@ using LiteNetLib.Utils;
 using Shared.Messages;
 using Shared.Messages.Core;
 using Shared.Messages.Player;
+using Shared.Messages.Interaction;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -24,6 +25,7 @@ namespace Client.Net
         public event Action<ChunkData> OnChunkData;
         public event Action<ChunkUnload> OnChunkUnload;
         public event Action<ItemSnapshot> OnItemSnapshot;
+        public event Action<InventorySync> OnInventorySync;
 
 
         public bool IsConnected { get; private set; }
@@ -46,6 +48,7 @@ namespace Client.Net
             { MessageType.MapChunk, () => new ChunkData() },
             { MessageType.MapChunkUnload, () => new ChunkUnload() },
             { MessageType.ItemSnapshot, () => new ItemSnapshot() },
+            { MessageType.InventorySync, () => new InventorySync() },
         };
 
         public void Connect(string address, int port)
@@ -153,6 +156,10 @@ namespace Client.Net
 
                 case ItemSnapshot s:
                     OnItemSnapshot?.Invoke(s);
+                    break;
+
+                case InventorySync inv:
+                    OnInventorySync?.Invoke(inv);
                     break;
 
                 default:

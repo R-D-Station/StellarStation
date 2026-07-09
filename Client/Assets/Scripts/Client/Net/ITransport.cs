@@ -1,6 +1,7 @@
 using Shared.Messages;
 using Shared.Messages.Core;
 using Shared.Messages.Player;
+using Shared.Messages.Interaction;
 using System;
 
 namespace Client.Net
@@ -29,6 +30,9 @@ namespace Client.Net
 
         /// <summary>Отдельный PVS-поток наземных предметов (server→client, 4.4).</summary>
         event Action<ItemSnapshot> OnItemSnapshot;
+
+        /// <summary>Полный слепок инвентаря владельца (server→client, OWNER-ONLY, 4.5).</summary>
+        event Action<InventorySync> OnInventorySync;
 
         bool IsConnected { get; }
 

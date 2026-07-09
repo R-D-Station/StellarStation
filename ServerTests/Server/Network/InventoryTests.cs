@@ -189,8 +189,20 @@ namespace ServerTests.Server.Network
             map.SetTile(3, 3, 0, Tile.Floor());
             var server = StartServer(map);
 
+            // OnClientConnected бежит через _mainThreadActions → колбэк исполняется СИНХРОННО на GameLoop-потоке
+            // (см. GameLoop: PollEvents → drain _mainThreadActions → Process*). Мутируем X/Y/Z/Slots ПРЯМО в колбэке,
+            // а не с тест-потока: так запись гарантированно происходит до любого Process*(ProcessFalls и т.п.) того же
+            // тика и без гонки с GameLoop — не полагаемся на «сервер не успеет тикнуть» (было источником флейков 1/315).
             ClientConnection? spawned = null;
-            server.OnClientConnected += c => spawned = c;
+            server.OnClientConnected += c =>
+            {
+                c.X = 3.5f;
+                c.Y = 3.5f;
+                c.Z = 0;
+                c.Slots[InventorySlot.HandLeft] = new HeldItem { NetId = 501, ItemDefId = 7, StackCount = 1 };
+                c.Slots[InventorySlot.Belt] = new HeldItem { NetId = 502, ItemDefId = 8, StackCount = 5 };
+                spawned = c; // публикуем ссылку ПОСЛЕДНЕЙ (после того как поля уже выставлены)
+            };
 
             var clientListener = new EventBasedNetListener();
             var clientManager = new NetManager(clientListener);
@@ -199,13 +211,6 @@ namespace ServerTests.Server.Network
 
             for (int i = 0; i < 200 && spawned == null; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
             Assert.NotNull(spawned);
-
-            // Пока сервер не пампит нашего клиента дальше своих же тиков, безопасно мутировать напрямую (одно-поточный GameLoop).
-            spawned!.X = 3.5f;
-            spawned!.Y = 3.5f;
-            spawned!.Z = 0;
-            spawned!.Slots[InventorySlot.HandLeft] = new HeldItem { NetId = 501, ItemDefId = 7, StackCount = 1 };
-            spawned!.Slots[InventorySlot.Belt] = new HeldItem { NetId = 502, ItemDefId = 8, StackCount = 5 };
 
             bool disconnected = false;
             server.OnClientDisconnected += _ => disconnected = true;

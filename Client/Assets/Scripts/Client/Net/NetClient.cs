@@ -20,6 +20,7 @@ namespace Client.Net
         public event Action<ChunkData> OnChunkData;
         public event Action<ChunkUnload> OnChunkUnload;
         public event Action<ItemSnapshot> OnItemSnapshot;
+        public event Action<InventorySync> OnInventorySync;
         public event Action OnConnected;
         public event Action OnDisconnected;
 
@@ -39,6 +40,7 @@ namespace Client.Net
             _transport.OnChunkData += m => OnChunkData?.Invoke(m);
             _transport.OnChunkUnload += m => OnChunkUnload?.Invoke(m);
             _transport.OnItemSnapshot += s => OnItemSnapshot?.Invoke(s);
+            _transport.OnInventorySync += s => OnInventorySync?.Invoke(s);
         }
 
         public void Connect(string address, int port) => _transport.Connect(address, port);
@@ -76,5 +78,17 @@ namespace Client.Net
                 TargetNetId = targetNetId
             });
         }
+
+        /// <summary>Подобрать наземный предмет целиком (4.5): целевой хенд решает сервер (ActiveHand), не клиент.</summary>
+        public void SendPickup(int targetNetId) => _transport.Send(new PickupItem { TargetNetId = targetNetId });
+
+        /// <summary>Выбросить предмет из слота (4.5): сервер роняет под ноги (свои координаты), клиентские не принимаются.</summary>
+        public void SendDrop(byte slotIndex) => _transport.Send(new DropItem { SlotIndex = slotIndex });
+
+        /// <summary>Сменить активную руку (4.5): ActiveHand серверно-авторитетен, подсветка идёт по эхо InventorySync.</summary>
+        public void SendSwapHand(byte hand) => _transport.Send(new SwapHandRequest { Hand = hand });
+
+        /// <summary>Переместить предмет между слотами инвентаря (4.5).</summary>
+        public void SendMoveSlot(byte fromSlot, byte toSlot) => _transport.Send(new MoveSlotRequest { FromSlot = fromSlot, ToSlot = toSlot });
     }
 }
