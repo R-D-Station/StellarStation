@@ -88,3 +88,6 @@ ServerTests/coveragereport/
 
 Builds/
 /docs
+
+# mangled scratchpad artifacts (agent path collapse)
+/CUsers*

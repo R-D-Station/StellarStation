@@ -74,6 +74,11 @@ public class GameServer
     public float SpawnY => _spawnY;
     public int SpawnZ => _spawnZ;
 
+    /// <summary>TEMP (4.4b): на Start заспавнить тест-предмет у точки спавна — проверить ItemSnapshot в Play. Default OFF
+    /// (тесты EntityCount не задевает); включает Program.cs. Убрать при появлении лута/размещения (4.5).</summary>
+    public bool DevSpawnTestItems { get; set; }
+    private bool _devItemsSpawned;
+
     public GameServer(SVars config, GridMap? map = null)
     {
         _config = config;
@@ -97,6 +102,15 @@ public class GameServer
         _server = new NetManager(listener);
         _server.Start(_config.Port);
         _isRunning = true;
+
+        // TEMP dev-спавн (4.4b, убрать при появлении лута/размещения 4.5): 1 тест-предмет у точки спавна. Через
+        // _mainThreadActions → выполнится на GameLoop-потоке (инвариант «_entities мутируется только там»). За флагом (default OFF).
+        if (DevSpawnTestItems && !_devItemsSpawned)
+        {
+            _devItemsSpawned = true;
+            _mainThreadActions.Enqueue(() =>
+                SpawnGroundItem(1, 1, (int)MathF.Floor(_spawnX), (int)MathF.Floor(_spawnY), _spawnZ));
+        }
 
         Console.WriteLine($"[Server] Started on port {_config.Port}");
         Console.WriteLine($"[Server] Max players: {_config.MaxPlayers}");

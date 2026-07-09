@@ -19,6 +19,7 @@ namespace Client.Net
         public event Action<PlayerLeft> OnPlayerLeft;
         public event Action<ChunkData> OnChunkData;
         public event Action<ChunkUnload> OnChunkUnload;
+        public event Action<ItemSnapshot> OnItemSnapshot;
         public event Action OnConnected;
         public event Action OnDisconnected;
 
@@ -37,6 +38,7 @@ namespace Client.Net
             _transport.OnPlayerLeft += m => OnPlayerLeft?.Invoke(m);
             _transport.OnChunkData += m => OnChunkData?.Invoke(m);
             _transport.OnChunkUnload += m => OnChunkUnload?.Invoke(m);
+            _transport.OnItemSnapshot += s => OnItemSnapshot?.Invoke(s);
         }
 
         public void Connect(string address, int port) => _transport.Connect(address, port);

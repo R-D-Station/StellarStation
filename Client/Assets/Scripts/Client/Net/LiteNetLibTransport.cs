@@ -23,6 +23,7 @@ namespace Client.Net
         public event Action<PlayerLeft> OnPlayerLeft;
         public event Action<ChunkData> OnChunkData;
         public event Action<ChunkUnload> OnChunkUnload;
+        public event Action<ItemSnapshot> OnItemSnapshot;
 
 
         public bool IsConnected { get; private set; }
@@ -44,6 +45,7 @@ namespace Client.Net
             { MessageType.PlayerLeft, () => new PlayerLeft() },
             { MessageType.MapChunk, () => new ChunkData() },
             { MessageType.MapChunkUnload, () => new ChunkUnload() },
+            { MessageType.ItemSnapshot, () => new ItemSnapshot() },
         };
 
         public void Connect(string address, int port)
@@ -147,6 +149,10 @@ namespace Client.Net
 
                 case ChunkUnload cu:
                     OnChunkUnload?.Invoke(cu);
+                    break;
+
+                case ItemSnapshot s:
+                    OnItemSnapshot?.Invoke(s);
                     break;
 
                 default:

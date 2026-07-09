@@ -27,6 +27,9 @@ namespace Client.Net
         event Action<ChunkData> OnChunkData;
         event Action<ChunkUnload> OnChunkUnload;
 
+        /// <summary>Отдельный PVS-поток наземных предметов (server→client, 4.4).</summary>
+        event Action<ItemSnapshot> OnItemSnapshot;
+
         bool IsConnected { get; }
 
         void Connect(string address, int port);

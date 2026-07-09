@@ -6,6 +6,7 @@ using Shared.Messages.Player;
 using Shared.Messages.Interaction;
 using Client.Config;
 using Client.Net.View;
+using Client.Items;
 using Client.Net.Prediction;
 using Client.Gameplay.Input;
 using Client.Gameplay.Entities;
@@ -20,6 +21,12 @@ namespace Client.Net
     public class NetworkRunner : MonoBehaviour
     {
         [SerializeField] private NetEntityView _entityViewPrefab;
+
+        [Header("Предметы на земле (4.4)")]
+        [Tooltip("Префаб визуала наземного предмета (world-объект со SpriteRenderer).")]
+        [SerializeField] private ItemView _itemViewPrefab;
+        [Tooltip("Каталог предметов: спрайт/метаданные по ItemDefId.")]
+        [SerializeField] private ItemCatalog _itemCatalog;
 
         [Tooltip("Частота тиков. Дефолт до логина; затем перезаписывается серверным LoginResponse.TickRate.")]
         [SerializeField] private int _tickRate = 30;
@@ -41,6 +48,7 @@ namespace Client.Net
         private NetClient _net;
         private PlayerControl _controls;
         private readonly Dictionary<int, NetEntityView> _views = new Dictionary<int, NetEntityView>();
+        private readonly Dictionary<int, ItemView> _itemViews = new Dictionary<int, ItemView>(); // наземные предметы (свой реестр, отдельно от player-_views)
         private string _address = "127.0.0.1";
         private int _port = 7777;
 
@@ -53,6 +61,10 @@ namespace Client.Net
         // Backstop despawn: переиспользуемые буферы (без per-tick аллокаций — правило CLAUDE.md).
         private readonly HashSet<int> _seenIds = new HashSet<int>();
         private readonly List<int> _toRemove = new List<int>();
+
+        // Backstop despawn для предметов: свои переиспользуемые буферы (аналогично player-набору).
+        private readonly HashSet<int> _seenItemIds = new HashSet<int>();
+        private readonly List<int> _itemsToRemove = new List<int>();
 
         // ServerTick-guard (2.5-B): снапшот на Sequenced-канале → дропаем устаревший/переупорядоченный, чтобы Reconcile
         // не сел на СТАРЫЙ авторитет поверх свежего. _snapshotSeen пропускает ПЕРВЫЙ снапшот при любом стартовом тике.
@@ -81,6 +93,7 @@ namespace Client.Net
             _net.OnPlayerLeft += OnPlayerLeft;
             _net.OnChunkData += OnChunkData;
             _net.OnChunkUnload += OnChunkUnload;
+            _net.OnItemSnapshot += OnItemSnapshot;
 
             _controls = new PlayerControl();
 
@@ -416,6 +429,43 @@ namespace Client.Net
                 {
                     Destroy(view.gameObject);
                     _views.Remove(_toRemove[i]);
+                }
+            }
+        }
+
+        // Sequenced = свежий ПОЛНЫЙ набор наземных предметов в PVS: spawn/update по NetId + backstop-despawn
+        // вью, чьего id нет в снапшоте (предмет вышел из PVS / подобран). Отдельный реестр — player-путь не трогаем.
+        private void OnItemSnapshot(ItemSnapshot snap)
+        {
+            if (_itemViewPrefab == null || snap.Items == null) return; // префаб не назначен — тихо пропускаем (без NRE)
+
+            _seenItemIds.Clear();
+            for (int i = 0; i < snap.Items.Length; i++)
+            {
+                var item = snap.Items[i];
+                _seenItemIds.Add(item.NetId);
+
+                if (!_itemViews.TryGetValue(item.NetId, out var view))
+                {
+                    view = Instantiate(_itemViewPrefab, transform);
+                    view.Init(item.NetId);
+                    _itemViews.Add(item.NetId, view);
+                }
+                view.Apply(in item, _itemCatalog);
+            }
+
+            // Backstop despawn ПОСЛЕ обхода (без мутации реестра в цикле); буферы переиспользуются.
+            _itemsToRemove.Clear();
+            foreach (var kv in _itemViews)
+                if (!_seenItemIds.Contains(kv.Key))
+                    _itemsToRemove.Add(kv.Key);
+
+            for (int i = 0; i < _itemsToRemove.Count; i++)
+            {
+                if (_itemViews.TryGetValue(_itemsToRemove[i], out var view))
+                {
+                    Destroy(view.gameObject);
+                    _itemViews.Remove(_itemsToRemove[i]);
                 }
             }
         }
