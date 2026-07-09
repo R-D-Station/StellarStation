@@ -1,0 +1,88 @@
+ITEMSNAPSHOT WIRE ANALYSIS
+===========================
+
+Per-item layout (declared as 19 bytes):
+  NetId        int    4 bytes
+  ItemDefId    ushort 2 bytes
+  X            int    4 bytes
+  Y            int    4 bytes
+  Z            int    4 bytes
+  StackCount   byte   1 byte
+  ---
+  TOTAL:            19 bytes ✓
+
+Write order (ItemSnapshot.WriteItem):
+  1. NetId (4)
+  2. ItemDefId (2)
+  3. X (4)
+  4. Y (4)
+  5. Z (4)
+  6. StackCount (1)
+  = 19 bytes ✓
+
+Read order (ItemSnapshot.ReadItem):
+  1. NetId (4)
+  2. ItemDefId (2)
+  3. X (4)
+  4. Y (4)
+  5. Z (4)
+  6. StackCount (1)
+  = 19 bytes ✓
+
+Wire format (Serialize):
+  [count i32: 4 bytes] [count × 19 bytes]
+
+SECURITY ANALYSIS:
+1. Cap-before-alloc: MaxItems = 10000
+   - count validated: count < 0 || count > 10000 → throw ✓
+2. Block-length validation BEFORE allocation:
+   - long need = (long)count * PerItemSize (PerItemSize=19, count≤10000)
+   - Overflow: 10000 * 19 = 190,000 bytes, fits long safely ✓
+   - if (ms.Position + need > ms.Length) → throw BEFORE new[] ✓
+3. Tail validation:
+   - if (ms.Position != ms.Length) → throw on trailing bytes ✓
+4. Empty handling:
+   - count = 0 → Items = Array.Empty<ItemInstance>() ✓
+5. Null handling:
+   - if (data == null) throw ✓
+6. Min size check:
+   - if (data.Length < 4) throw ✓
+
+ROUND-TRIP SYMMETRY:
+WriteItem(netId, defId, x, y, z, stack):
+  → [4 bytes netId] [2 bytes defId] [4 bytes x] [4 bytes y] [4 bytes z] [1 byte stack]
+
+ReadItem():
+  ← [4 bytes netId] [2 bytes defId] [4 bytes x] [4 bytes y] [4 bytes z] [1 byte stack]
+  = 19 bytes exact match ✓
+
+Placement field:
+  - Defined in ItemInstance struct (byte Placement)
+  - NOT serialized in MVP (set to 0 on ReadItem line 93)
+  - NOT included in PerItemSize=19
+  - RESERVED for block-world future (line 14 ItemInstance.cs comment)
+  - No risk: field hidden from wire format ✓
+
+WorldSnapshot comparison:
+  - ItemSnapshot: [count i32] [count × 19 bytes]
+  - WorldSnapshot: [ServerTick u32] [LastProcessedInput u32] [count i32] [count × EntitySnapshot.SerializedSize]
+  - Both: cap-before-alloc (10000), block-length validation before new[], tail check ✓
+  - ItemSnapshot follows identical discipline ✓
+
+MESSAGEHANDLER REGISTRATION:
+  - MessageType.ItemSnapshot = 9 (unique, no collision in Core band 0-99)
+  - OnNetworkReceive: NO handler for ItemSnapshot (server-only RX, client-only TX)
+    → Correct: server generates, client receives via broadcast (not OnNetworkReceive path)
+  - BroadcastItemSnapshot: ships via Sequenced channel to all clients in range
+    → Correct: separate stream from WorldSnapshot ✓
+
+GroundItemEntity:
+  - Implements IWorldEntity (X/Y float, Z int)
+  - NetId, ItemDefId, StackCount, CellX/Y, Z, Placement
+  - Not ClientConnection → filtered out of WorldSnapshot ✓
+  - Separate Spawn/Despawn API (not mixed with player logic) ✓
+
+ENTITY FILTERING IN BROADCASTS:
+  - BroadcastWorldSnapshot: filters `if (entity is not ClientConnection)` → excludes GroundItemEntity ✓
+  - BroadcastItemSnapshot: filters `if (entity is GroundItemEntity gi)` → includes only ground items ✓
+  - No leakage between streams ✓

@@ -14,5 +14,9 @@ namespace Client.Items
 
         [Tooltip("Спрайт наземного предмета.")]
         public Sprite Sprite;
+
+        // Размер предмета как ДОЛЯ тайла (1 = целый тайл); мировой размер = RenderScale·TileSize. Инспектор показывает %↔юниты (EditorCoder).
+        [SerializeField] private float _renderScale = 1f;
+        public float RenderScale => _renderScale;
     }
 }

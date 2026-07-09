@@ -37,6 +37,15 @@ namespace Client.Net.View
                 {
                     var def = catalog.For(data.ItemDefId);
                     _spriteRenderer.sprite = def != null ? def.Sprite : null;
+
+                    if (def != null)
+                    {
+                        // Спрайт рендерится в RenderScale·TileSize НЕЗАВИСИМО от импорта — нормируем по натуральному мир-размеру спрайта.
+                        float target = def.RenderScale * RenderConfig.TileSize;
+                        var spr = _spriteRenderer.sprite; // уже назначен выше
+                        float native = spr != null ? Mathf.Max(spr.bounds.size.x, spr.bounds.size.y) : 1f;
+                        transform.localScale = native > 0.0001f ? Vector3.one * (target / native) : Vector3.one;
+                    }
                 }
             }
         }

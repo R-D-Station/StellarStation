@@ -313,6 +313,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Client.Net.NetworkRunner
   _entityViewPrefab: {fileID: 3239489999927283050, guid: c76554bb290174846ab59c0d69ab81d9, type: 3}
+  _itemViewPrefab: {fileID: 3838010216627023794, guid: 889cac84fa8f33343a2984d5ed651c49, type: 3}
+  _itemCatalog: {fileID: 11400000, guid: 907a125d66e99ac48909657e5676eea9, type: 2}
   _tickRate: 30
   _mapRenderer: {fileID: 1824954097}
   _camera: {fileID: 2039717654}
