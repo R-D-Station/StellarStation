@@ -22,8 +22,8 @@ namespace Client.UI.Inventory
 
         [Tooltip("Каталог предметов: спрайт по ItemDefId.")]
         [SerializeField] private ItemCatalog _catalog;
-        [Tooltip("Спрайт пустого слота.")]
-        [SerializeField] private Sprite _emptySlot;
+        [Tooltip("Спрайт пустого слота, порядок = InventorySlot 0=ЛевРука..5=Спина.")]
+        [SerializeField] private Sprite[] _emptySlots = new Sprite[InventorySlot.SlotCount];
         [Tooltip("Раннер — источник SendDrop по клику кнопки слота.")]
         [SerializeField] private NetworkRunner _runner;
 
@@ -75,8 +75,9 @@ namespace Client.UI.Inventory
         {
             if (_icons != null && slot >= 0 && slot < _icons.Length && _icons[slot] != null)
             {
-                _icons[slot].sprite = _emptySlot;
-                _icons[slot].enabled = _emptySlot != null;
+                Sprite empty = (_emptySlots != null && slot >= 0 && slot < _emptySlots.Length) ? _emptySlots[slot] : null;
+                _icons[slot].sprite = empty;
+                _icons[slot].enabled = empty != null;
             }
             if (_counts != null && slot >= 0 && slot < _counts.Length && _counts[slot] != null)
                 _counts[slot].gameObject.SetActive(false);

@@ -586,6 +586,16 @@ namespace Client.Net
                 }
             }
 
+            // Проактивно снести наземный вью подобранного предмета: авторитетный «держишь это» уже пришёл. При подборе
+            // ПОСЛЕДНЕГО предмета в PVS интерес пуст → BroadcastItemSnapshot (4.4a «empty→не шлём») снапшот НЕ шлёт →
+            // OnItemSnapshot (подавление/backstop) не вызывается → иначе ground-вью висел бы. Итерируем _heldNetIds, мутируем _itemViews (разные коллекции).
+            foreach (int heldId in _heldNetIds)
+                if (_itemViews.TryGetValue(heldId, out var groundView))
+                {
+                    Destroy(groundView.gameObject);
+                    _itemViews.Remove(heldId);
+                }
+
             if (_inventoryHud != null) _inventoryHud.Apply(in sync);
         }
 
