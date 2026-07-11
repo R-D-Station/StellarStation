@@ -68,7 +68,7 @@ namespace ServerTests.Shared.Messages.Core
             };
 
             var serialized = original.Serialize();
-            Assert.Equal(23, serialized.Length);
+            Assert.Equal(EntitySnapshot.SerializedSize, serialized.Length);
 
             var deserialized = new EntitySnapshot();
             deserialized.Deserialize(serialized);
@@ -181,7 +181,7 @@ namespace ServerTests.Shared.Messages.Core
             Assert.Equal(10, snapshot.TileY);
         }
 
-        private static byte[] CreateTestData(int netId, float x, float y, float z, byte facing, byte state, byte reason = 0, float speed = 0.1f)
+        private static byte[] CreateTestData(int netId, float x, float y, float z, byte facing, byte state, byte reason = 0, float speed = 0.1f, float vz = 0f)
         {
             using var ms = new MemoryStream();
             using var writer = new BinaryWriter(ms);
@@ -193,7 +193,8 @@ namespace ServerTests.Shared.Messages.Core
             writer.Write(facing);
             writer.Write(state);
             writer.Write(reason);
-            writer.Write(speed); // 23 байта: иначе length-check (23) сработает раньше NaN-check
+            writer.Write(speed);
+            writer.Write(vz); // 27 байт: иначе length-check (27) сработает раньше NaN-check
 
             return ms.ToArray();
         }

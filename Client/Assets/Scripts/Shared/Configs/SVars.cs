@@ -24,6 +24,10 @@ public class SVars
     /// <summary>Путь к файлу карты (.smap), грузится на старте. Нет файла — сервер поднимется без коллизии.</summary>
     public string MapPath = "station.smap";
 
+    /// <summary>Блок-мир (B2): движение по BlockMovementLogic на DevBlockWorld; тайл-стрим/falls/двери отключены.
+    /// Клиент узнаёт режим из LoginResponse и строит тот же дев-мир локально.</summary>
+    public bool BlocksWorld = false;
+
     /// <summary>Стриминг: радиус видимых чанков вокруг игрока по осям X/Y (в чанках, окно (2R+1)²).</summary>
     public int StreamRadiusChunks = 2;
 

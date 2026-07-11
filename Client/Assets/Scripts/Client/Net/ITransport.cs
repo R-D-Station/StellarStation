@@ -34,6 +34,11 @@ namespace Client.Net
         /// <summary>Полный слепок инвентаря владельца (server→client, OWNER-ONLY, 4.5).</summary>
         event Action<InventorySync> OnInventorySync;
 
+        /// <summary>Блочный стрим (фаза C): секция / секция ушла / пакет дельт (server→client).</summary>
+        event Action<BlockChunkData> OnBlockChunkData;
+        event Action<BlockSectionGone> OnBlockSectionGone;
+        event Action<BlockUpdateBatch> OnBlockUpdateBatch;
+
         bool IsConnected { get; }
 
         void Connect(string address, int port);

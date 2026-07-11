@@ -3,11 +3,13 @@ using System.IO;
 
 namespace Shared.Messages.Player
 {
-    /// <summary>Ответ сервера при подключении: присвоенный игроку NetId + серверный TickRate (для предсказания).</summary>
+    /// <summary>Ответ сервера при подключении: NetId игрока, серверный TickRate и режим мира (B2).</summary>
     public struct LoginResponse : INetMessage
     {
         public int NetId;
         public byte TickRate; // серверный SVars.TickRate — клиент тикает на нём (enforcement инварианта tickRate==TickRate)
+        public bool BlocksWorld; // сервер в блок-режиме: мир стримится секциями (фаза C), предикт — блочной логикой
+        public byte ShapesMode;  // формы блоков: 0 = DevBlockWorld (полигон), 1 = каталог (карта из редактора)
 
         public MessageType Type => MessageType.LoginResponse;
 
@@ -18,6 +20,8 @@ namespace Shared.Messages.Player
 
             writer.Write(NetId);
             writer.Write(TickRate);
+            writer.Write(BlocksWorld);
+            writer.Write(ShapesMode);
 
             return ms.ToArray();
         }
@@ -27,8 +31,8 @@ namespace Shared.Messages.Player
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "LoginResponse data cannot be null");
 
-            // NetId(4) + TickRate(1) = 5 байт
-            const int expectedSize = 5;
+            // NetId(4) + TickRate(1) + BlocksWorld(1) + ShapesMode(1) = 7 байт
+            const int expectedSize = 7;
 
             if (data.Length != expectedSize)
                 throw new ArgumentException($"Invalid data size: expected {expectedSize} bytes, got {data.Length} bytes", nameof(data));
@@ -40,6 +44,8 @@ namespace Shared.Messages.Player
 
                 NetId = reader.ReadInt32();
                 TickRate = reader.ReadByte();
+                BlocksWorld = reader.ReadBoolean();
+                ShapesMode = reader.ReadByte();
 
                 if (ms.Position != ms.Length)
                     throw new InvalidOperationException($"Unexpected extra data: {ms.Length - ms.Position} bytes remaining");

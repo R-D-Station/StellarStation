@@ -14,6 +14,10 @@ public enum MessageType : ushort
     MapChunk = 7,        // стриминг: один чанк карты (server→client)
     MapChunkUnload = 8,  // стриминг: выгрузить чанк (server→client)
     ItemSnapshot = 9,    // отдельный PVS-поток наземных предметов (server→client)
+    BlockMapData = 10,   // ВЫВЕДЕН (был блоб-мост B2 до стрима); id зарезервирован, не переиспользовать
+    BlockChunkData = 11,   // фаза C: одна секция 16³ (server→client, ReliableOrdered)
+    BlockSectionGone = 12, // фаза C: секция ушла — вне радиуса (забудь) либо опустела (воздух)
+    BlockUpdateBatch = 13, // фаза C: пакет дельт блоков одного тика (server→client, держателям секций)
 
     // Player (100-199)
     LoginRequest = 100,

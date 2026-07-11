@@ -79,11 +79,47 @@ public class GameServer
     public bool DevSpawnTestItems { get; set; }
     private bool _devItemsSpawned;
 
+    /// <summary>Блок-мир (B2): карта v10 по MapPath либо дев-полигон. Клиент получает копию блобом при логине.</summary>
+    public Shared.World.Blocks.BlockGrid? BlockWorld { get; private set; }
+
+    /// <summary>Формы блоков движения: каталог (карта из редактора) или DevBlockWorld (полигон).</summary>
+    public Shared.Simulation.Blocks.IBlockShapes BlockShapes { get; private set; } = Shared.World.Blocks.DevBlockWorld.Shapes;
+
+    /// <summary>Режим форм для клиента (LoginResponse.ShapesMode: 0=Dev, 1=каталог).</summary>
+    public byte BlockShapesMode { get; private set; }
+
+    // Дельты блоков текущего тика (каскад/двери/стройка) + опустевшие секции; рассылка — держателям (в.44/112).
+    private readonly List<BlockUpdateBatch.Entry> _blockTickUpdates = new();
+    private readonly HashSet<long> _blockEmptiedTick = new();
+    private readonly List<BlockUpdateBatch.Entry> _blockPerClient = new();
+    private readonly List<long> _blockUnloadBuffer = new();
+
+    public float BlockSpawnX { get; private set; }
+    public float BlockSpawnY { get; private set; }
+    public float BlockSpawnZ { get; private set; }
+
     public GameServer(SVars config, GridMap? map = null)
     {
         _config = config;
         _map = map ?? new GridMap(); // пустая карта = мир без коллизии
         (_spawnX, _spawnY, _spawnZ) = FindSpawn(_map);
+        if (config.BlocksWorld)
+        {
+            (BlockWorld, bool fromFile) = Services.BlockWorldSource.Load(config.MapPath);
+            BlockShapes = fromFile ? Shared.Simulation.Blocks.BlockCatalogShapes.Instance
+                                   : Shared.World.Blocks.DevBlockWorld.Shapes;
+            BlockShapesMode = fromFile ? (byte)1 : (byte)0;
+
+            BlockWorld.BlockChanged += OnBlockWorldChanged; // подписка ПОСЛЕ построения мира — стартовые SetBlock не дельты
+
+            (BlockSpawnX, BlockSpawnY, BlockSpawnZ) = Shared.World.Blocks.BlockWorldSpawn.Find(
+                BlockWorld, t => Shared.World.Blocks.BlockCatalog.Get(t).IsMarker,
+                Shared.World.Blocks.DevBlockWorld.SpawnX,
+                Shared.World.Blocks.DevBlockWorld.SpawnY,
+                Shared.World.Blocks.DevBlockWorld.SpawnZ);
+            Console.WriteLine($"[Map] BlocksWorld: {BlockWorld.Sections.Count} sections, " +
+                              $"spawn ({BlockSpawnX}, y{BlockSpawnY}, {BlockSpawnZ})");
+        }
         Console.WriteLine($"[Map] Spawn at ({_spawnX}, {_spawnY}, z{_spawnZ})");
         _clients = new Dictionary<NetPeer, ClientConnection>();
         _mainThreadActions = new ConcurrentQueue<Action>();
@@ -326,13 +362,21 @@ public class GameServer
             ProcessDrops();
             ProcessSlotOps();
             ProcessUses();
-            ProcessFalls();
+            if (!_config.BlocksWorld) ProcessFalls(); // тайл-падения; в блок-мире гравитация внутри Step
             ProcessStatus();
             ProcessCombat();
 
             _currentTick++;
-            UpdateDoors();
-            ProcessStreaming(); // стрим карты по чанкам (2.3b включён; начальное окружение шлётся на логине синхронно)
+            if (!_config.BlocksWorld) UpdateDoors(); // тайл-двери
+            if (_config.BlocksWorld)
+            {
+                ProcessBlockStreaming();   // окно секций вокруг игроков (фаза C)
+                BroadcastBlockUpdates();   // дельты тика — держателям секций (после стрима: канал упорядочит)
+            }
+            else
+            {
+                ProcessStreaming(); // тайл-стрим
+            }
             BroadcastWorldSnapshot();
             BroadcastItemSnapshot(); // отдельный PVS-поток наземных предметов (после player-снапшота)
 
@@ -407,6 +451,30 @@ public class GameServer
                                      client.CurrentLayingReason, ref client.Timers);
         if (client.State == PlayerState.Laying && prev != PlayerState.Laying)
             client.CurrentLayingReason = LayingReason.Voluntary;
+
+        // Блок-мир (B2): физика тикает КАЖДЫЙ тик (None-тик = гравитация без ввода — серверный failsafe
+        // варианта A). Ветка зеркалит PlayerPredictor.ApplyBlockStep байт-в-байт — менять только синхронно.
+        if (_config.BlocksWorld)
+        {
+            bool canMove = FsmLogic.MovementAllowed(client.State) && !client.DisableMovement;
+            var input = new Shared.Simulation.Blocks.BlockMoveInput(
+                canMove && hasIntent ? dir : IntentDirection.None,
+                sprint: hasIntent && intent.Sprint,
+                jump: canMove && hasIntent && intent.Jump,
+                crawl: client.State == PlayerState.Laying);
+            Shared.Simulation.Blocks.BlockMovementLogic.Step(BlockWorld!, BlockShapes, ref client.Mover, in input);
+            // Зеркало в legacy-поля (тайл-раскладка): X=X, Y=глубина плана (Mover.Z), Z=целый блок высоты (Mover.Y).
+            client.X = client.Mover.X;
+            client.Y = client.Mover.Z;
+            client.Z = (int)MathF.Floor(client.Mover.Y);
+            if (hasIntent)
+            {
+                client.LastProcessedSequence = intent.Sequence;
+                if (canMove)
+                    client.Facing = MovementLogic.ToFacing(intent.Direction, client.Facing);
+            }
+            return;
+        }
 
         if (!hasIntent) return;
 
@@ -758,12 +826,13 @@ public class GameServer
             {
                 NetId = c.PlayerNetId,
                 X = c.X,
-                Y = c.Y,
-                Z = c.Z,
+                Y = _config.BlocksWorld ? c.Mover.Y : c.Y, // блок-мир: Y = непрерывная высота (оси Unity)
+                Z = _config.BlocksWorld ? c.Mover.Z : c.Z, // блок-мир: Z = глубина плана
                 Facing = c.Facing,
                 State = (byte)c.State,
                 Reason = (byte)c.CurrentLayingReason,
-                Speed = c.Speed.CurrentValue
+                Speed = c.Speed.CurrentValue,
+                VY = _config.BlocksWorld ? c.Mover.VY : 0f
             };
         }
 
@@ -782,7 +851,9 @@ public class GameServer
             for (int e = 0; e < count; e++)
             {
                 if (_broadcastEntities[e].NetId == client.PlayerNetId
-                    || InInterest(client.X, client.Y, client.Z, in _broadcastEntities[e], interestR, interestZ))
+                    || (_config.BlocksWorld
+                        ? InInterestBlocks(client.X, client.Y, client.Z, in _broadcastEntities[e], interestR, interestZ)
+                        : InInterest(client.X, client.Y, client.Z, in _broadcastEntities[e], interestR, interestZ)))
                     _perClientEntities[k++] = _broadcastEntities[e];
             }
 
@@ -971,6 +1042,126 @@ public class GameServer
         if (Math.Abs(dz) > zDepth) return false;
         float ddx = e.X - cx, ddy = e.Y - cy;
         return ddx * ddx + ddy * ddy <= radius * radius;
+    }
+
+    /// <summary>Интерес в блок-мире (оси Unity в снапшоте: Y — высота, Z — план). Аргументы клиента —
+    /// его legacy-поля (X, Y=глубина плана, Z=целый блок высоты) — зеркалятся из Mover каждый тик.</summary>
+    public static bool InInterestBlocks(float cx, float czPlan, int cyBlock, in EntitySnapshot e, float radius, int yDepth)
+    {
+        int dy = (int)MathF.Floor(e.Y) - cyBlock;
+        if (Math.Abs(dy) > yDepth) return false;
+        float ddx = e.X - cx, ddz = e.Z - czPlan;
+        return ddx * ddx + ddz * ddz <= radius * radius;
+    }
+
+    // Дельта тика: итоговое состояние позиции (читаем назад из мира) + учёт опустевших секций.
+    private void OnBlockWorldChanged(int x, int y, int z)
+    {
+        _blockTickUpdates.Add(new BlockUpdateBatch.Entry
+        {
+            X = x,
+            Y = y,
+            Z = z,
+            BlockType = BlockWorld!.GetBlock(x, y, z),
+            State = BlockWorld.GetState(x, y, z)
+        });
+        long key = Shared.World.Blocks.BlockGrid.KeyOfBlock(x, y, z);
+        if (!BlockWorld.Sections.ContainsKey(key))
+            _blockEmptiedTick.Add(key);
+    }
+
+    /// <summary>Синхронный первичный стрим окна секций (логин) — до первого шага игрока (стопор фронтира).</summary>
+    public void StreamBlockSectionsToClient(ClientConnection client) => StreamBlockWindow(client);
+
+    // Окно секций вокруг каждого игрока: досылка новых + выгрузка по таймауту вне радиуса.
+    private void ProcessBlockStreaming()
+    {
+        int timeoutTicks = Math.Max(1, _config.ChunkUnloadTimeoutSec * _config.TickRate);
+
+        foreach (var client in _clients.Values)
+        {
+            StreamBlockWindow(client);
+
+            _blockUnloadBuffer.Clear();
+            foreach (var kv in client.BlockSectionLastInRange)
+                if (_currentTick - kv.Value > timeoutTicks)
+                    _blockUnloadBuffer.Add(kv.Key);
+
+            foreach (long key in _blockUnloadBuffer)
+            {
+                client.SentBlockSections.Remove(key);
+                client.BlockSectionLastInRange.Remove(key);
+                Shared.World.Blocks.BlockGrid.UnpackKey(key, out int cx, out int cy, out int cz);
+                SendToClient(client, new BlockSectionGone
+                {
+                    Cx = cx, Cy = cy, Cz = cz,
+                    Reason = BlockSectionGone.OutOfRange
+                });
+            }
+        }
+    }
+
+    private void StreamBlockWindow(ClientConnection client)
+    {
+        int pcx = FloorDivInt((int)MathF.Floor(client.Mover.X), Shared.World.Blocks.ChunkSection.Size);
+        int pcy = FloorDivInt((int)MathF.Floor(client.Mover.Y), Shared.World.Blocks.ChunkSection.Size);
+        int pcz = FloorDivInt((int)MathF.Floor(client.Mover.Z), Shared.World.Blocks.ChunkSection.Size);
+        const int r = Shared.World.Blocks.BlockStreaming.RadiusSections;
+        const int h = Shared.World.Blocks.BlockStreaming.HeightSections;
+
+        for (int cx = pcx - r; cx <= pcx + r; cx++)
+            for (int cz = pcz - r; cz <= pcz + r; cz++)
+                for (int cy = pcy - h; cy <= pcy + h; cy++)
+                {
+                    long key = Shared.World.Blocks.BlockGrid.Key(cx, cy, cz);
+                    client.BlockSectionLastInRange[key] = (int)_currentTick;
+
+                    var section = BlockWorld!.GetSection(cx, cy, cz);
+                    if (section == null || client.SentBlockSections.Contains(key))
+                        continue; // пустые не шлём (клиент считает окно воздухом), отправленные не дублируем
+
+                    client.SentBlockSections.Add(key);
+                    SendToClient(client, new BlockChunkData { Cx = cx, Cy = cy, Cz = cz, Section = section });
+                }
+    }
+
+    // Рассылка дельт тика держателям секций; опустевшие секции — явный Emptied (в.21).
+    private void BroadcastBlockUpdates()
+    {
+        if (_blockTickUpdates.Count == 0 && _blockEmptiedTick.Count == 0)
+            return;
+
+        foreach (var client in _clients.Values)
+        {
+            _blockPerClient.Clear();
+            for (int i = 0; i < _blockTickUpdates.Count; i++)
+            {
+                var e = _blockTickUpdates[i];
+                if (client.SentBlockSections.Contains(Shared.World.Blocks.BlockGrid.KeyOfBlock(e.X, e.Y, e.Z)))
+                    _blockPerClient.Add(e);
+            }
+            if (_blockPerClient.Count > 0)
+                SendToClient(client, new BlockUpdateBatch { Entries = _blockPerClient.ToArray() });
+
+            foreach (long key in _blockEmptiedTick)
+            {
+                if (!client.SentBlockSections.Contains(key))
+                    continue;
+                // Секция теперь чистый воздух: контент у клиента очищается, «знание» секции сохраняется.
+                Shared.World.Blocks.BlockGrid.UnpackKey(key, out int cx, out int cy, out int cz);
+                SendToClient(client, new BlockSectionGone { Cx = cx, Cy = cy, Cz = cz, Reason = BlockSectionGone.Emptied });
+            }
+        }
+
+        _blockTickUpdates.Clear();
+        _blockEmptiedTick.Clear();
+    }
+
+    private static int FloorDivInt(int a, int b)
+    {
+        int q = a / b;
+        if ((a % b != 0) && ((a < 0) != (b < 0))) q--;
+        return q;
     }
 
     public void UpdatePlayerPosition(ClientConnection client, float x, float y, int z, byte facing)

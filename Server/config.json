@@ -4,5 +4,7 @@
   "maxPlayers": 100,
   "tickRate": 30,
   "connectionKey": "VGVzdF9zZXJ2ZXIx",
-  "mapPath": "Map/station.smap"
+  "mapPath": "Map/block-station.smap",
+  "BlocksWorld": true,
+  "EntityInterestZDepth": 6
 }

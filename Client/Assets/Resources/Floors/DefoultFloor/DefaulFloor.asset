@@ -1,0 +1,33 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7289315cb1fa77d47b386409f0123cc7, type: 3}
+  m_Name: DefaulFloor
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.FloorDefinition
+  Type: 1
+  DisplayName: "\u041F\u043E\u043B"
+  Sprite: {fileID: 21300000, guid: e2e41efd3c2d51040ae85a1ccfe839cf, type: 3}
+  Prefab: {fileID: 5886712932950718308, guid: 4b605fb98c9d75a42b883ecdda07d8b6, type: 3}
+  TopMap: {fileID: 2800000, guid: a680f83a0bfe93b4383b3df3c4514d1a, type: 3}
+  BackingMap: {fileID: 2800000, guid: e2e41efd3c2d51040ae85a1ccfe839cf, type: 3}
+  BlocksVerticalSight: 1
+  SealsVertical: 1
+  Connection:
+    UseConnections: 1
+    ConnectsToSameType: 1
+    ConnectsToOtherFloors: 0
+    ConnectOnlyToTypes: 
+    MeshSingle: {fileID: 5886712932950718308, guid: 4b605fb98c9d75a42b883ecdda07d8b6, type: 3}
+    MeshEnd: {fileID: 4488766033248980518, guid: 6a7c028fb46cdfb4394f621e7f2a0f14, type: 3}
+    MeshStraight: {fileID: 6226776728167343289, guid: 7e248c3bbe4c23a4fa9649528bdcc192, type: 3}
+    MeshCorner: {fileID: 4376710111407018939, guid: aa277530c42d5d04bb661b3674505bd8, type: 3}
+    MeshT: {fileID: 2476352247093195437, guid: b711e138dfcfd00419f207312c6bdb0a, type: 3}
+    MeshCross: {fileID: 8947755035325840453, guid: 751f3cc5fadca154b850c9c66adc2e3b, type: 3}

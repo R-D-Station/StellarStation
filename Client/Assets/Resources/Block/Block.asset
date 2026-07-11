@@ -1,0 +1,41 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2a5ba86ce8fa84d4aa708dd205f2ef8f, type: 3}
+  m_Name: Block
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockDefinition
+  Type: 1
+  DisplayName: Block
+  Category: 0
+  SealsFaces: 63
+  OpaqueFaces: 63
+  CollisionBoxes:
+  - Center: {x: 0.5, y: 0.5, z: 0.5}
+    Size: {x: 1, y: 1, z: 1}
+  DeconstructStages: 1
+  Size: {x: 1, y: 1, z: 1}
+  Connection:
+    UseConnections: 0
+    ConnectsToSameType: 1
+    ConnectsToOtherConnected: 1
+    MeshSingle: {fileID: 0}
+    MeshEnd: {fileID: 0}
+    MeshStraight: {fileID: 0}
+    MeshCorner: {fileID: 0}
+    MeshT: {fileID: 0}
+    MeshCross: {fileID: 0}
+  TopMap: {fileID: 0}
+  BackingMap: {fileID: 0}
+  TopMapCountX: 5
+  TopMapCountY: 2
+  Prefab: {fileID: 2518296575683283705, guid: 0c1a7e7c8b3e8c9479fe9a2d280fa1b5, type: 3}
+  Pivot: 1
+  EditorSprite: {fileID: 670628118, guid: c4982b31397650a4fa46aeb1e7957101, type: 3}

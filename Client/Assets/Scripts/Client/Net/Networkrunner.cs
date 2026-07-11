@@ -109,6 +109,9 @@ namespace Client.Net
             _net = new NetClient(transport);
             _net.OnWorldSnapshot += OnSnapshot;
             _net.OnLoginResponse += OnLoginResponse;
+            _net.OnBlockChunkData += OnBlockChunkData;
+            _net.OnBlockSectionGone += OnBlockSectionGone;
+            _net.OnBlockUpdateBatch += OnBlockUpdateBatch;
             _net.OnMapData += OnMapData;
             _net.OnTileUpdate += OnTileUpdate;
             _net.OnPlayerJoined += OnPlayerJoined;
@@ -201,6 +204,10 @@ namespace Client.Net
             if (_controls.Player.ToggleLaying.WasPressedThisFrame())
                 _layTogglePending = true;
 
+            // Прыжок — тоже one-shot по НАЖАТИЮ (не по зажатию): латч на кадре, потребление одним тиком.
+            if (BlocksWorld && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
+                _jumpPending = true;
+
             // Тик-луп фиксированной частоты: предсказание не зависит от FPS. Стартует только ПОСЛЕ логина —
             // к этому моменту _tickRate выставлен серверным TickRate (LoginResponse), интервал корректен.
             if (LocalNetId >= 0)
@@ -215,7 +222,31 @@ namespace Client.Net
 
             if (_localView != null && _predictor.IsInitialized)
             {
-                _localView.SetPredicted(_predictor.X, _predictor.Y, _predictor.Z, _predictor.Facing, _predictor.State, _predictor.Reason);
+                _localView.SetPredicted(_predictor.X, _predictor.Y, _predictor.ZF, _predictor.Facing, _predictor.State, _predictor.Reason);
+            }
+
+            // Cut-away (D2): гасим слои над головой в кольце вокруг предсказанной позиции. Прыжковый фриз:
+            // от отрыва и пока не приземлились/не опустились ниже старта — срез заморожен (слои не дёргаются).
+            // Сущности — «купол видимости»: r = базовый радиус − потеря за каждый блок разницы высот
+            // (непрерывно, без floor — иначе мигание при прыжках; вниз симметрично). Себя не трогаем.
+            if (BlocksWorld && _blockRenderer != null && _predictor.IsInitialized)
+            {
+                bool airborne = _predictor.Airborne;
+                if (airborne && !_wasAirborne)
+                    _airStartY = _predictor.Y;
+                _wasAirborne = airborne;
+
+                if (!(airborne && _predictor.Y >= _airStartY - 0.001f))
+                    _blockRenderer.UpdateCutaway(_predictor.X, _predictor.Y, _predictor.ZF);
+                foreach (var kv in _views)
+                {
+                    if (kv.Key == LocalNetId) continue;
+                    Vector3 p = kv.Value.transform.position;
+                    float r = RenderConfig.EntityViewRadius
+                              - RenderConfig.EntityViewLossPerBlock * Mathf.Abs(p.y - _predictor.Y);
+                    float dx = p.x - _predictor.X, dz = p.z - _predictor.ZF;
+                    kv.Value.SetCulled(r <= 0f || dx * dx + dz * dz > r * r);
+                }
             }
 
             if (_fov != null && _predictor.IsInitialized)
@@ -257,15 +288,24 @@ namespace Client.Net
             bool layToggle = _layTogglePending;
             _layTogglePending = false;
 
-            // Decouple send-vs-step: молчим только в полном покое (Stand + нет ввода/toggle). Иначе шлём единый
-            // MoveIntent/тик — в т.ч. «стоп»-None, чтобы переход Move/Laying→Stand доехал до сервера.
-            if (dir == IntentDirection.None && !layToggle && _predictor.State == (byte)PlayerState.Stand)
+            // Прыжок (блок-мир): one-shot по нажатию (латч в Update); прыжок в воздухе не буферится — бит уйдёт
+            // ближайшим тиком и погаснет о гейт Grounded.
+            bool jump = _jumpPending;
+            _jumpPending = false;
+
+            // Decouple send-vs-step: молчим только в полном покое (Stand + нет ввода/toggle) И на опоре — в воздухе
+            // интент обязателен каждый тик (вариант A: серверная гравитация без вводов реконсилилась бы снапом).
+            if (dir == IntentDirection.None && !layToggle && !jump && !_predictor.Airborne
+                && _predictor.State == (byte)PlayerState.Stand)
                 return;
 
+            // Центр «известного» окна стрима — предсказанная позиция (стопор фронтира считается от неё).
+            _streamWorld?.SetCenter(_predictor.X, _predictor.Y, _predictor.ZF);
+
             // Шлём на сервер и сразу предсказываем локально с тем же Sequence.
-            uint seq = _net.SendMove(dir, sprint, layToggle);
+            uint seq = _net.SendMove(dir, sprint, layToggle, jump);
             if (_predictor.IsInitialized)
-                _predictor.ApplyLocal(seq, dir, sprint, layToggle);
+                _predictor.ApplyLocal(seq, dir, sprint, layToggle, jump);
         }
 
         private static IntentDirection ToIntent(Vector2 move)
@@ -426,7 +466,98 @@ namespace Client.Net
             _tickRate = Mathf.Max(1, login.TickRate);
             _tickAccumulator = 0f;
             LocalNetId = login.NetId;
-            Debug.Log($"[NetworkRunner] My NetId = {LocalNetId}, tickRate = {_tickRate}");
+
+            // Блок-мир (фаза C): мир пустой, секции стримятся следом (ReliableOrdered — порядок гарантирован);
+            // нестримленный объём для предикта — solid-стопор (StreamedBlockWorld, в.20).
+            BlocksWorld = login.BlocksWorld;
+            if (login.BlocksWorld && _blockGrid == null)
+            {
+                NetEntityView.BlocksMode = true;
+                _blockGrid = new Shared.World.Blocks.BlockGrid();
+                _streamWorld = new Client.Map.StreamedBlockWorld(_blockGrid);
+                var baseShapes = login.ShapesMode == 1
+                    ? (Shared.Simulation.Blocks.IBlockShapes)Shared.Simulation.Blocks.BlockCatalogShapes.Instance
+                    : Shared.World.Blocks.DevBlockWorld.Shapes;
+                _blockShapes = baseShapes;
+                _predictor.SetBlockWorld(_streamWorld, new Client.Map.ShapesWithUnknown(baseShapes));
+                _blockRenderer = gameObject.AddComponent<Client.Map.BlockRenderer>();
+                _blockRenderer.Init(_blockGrid, baseShapes);
+            }
+
+            Debug.Log($"[NetworkRunner] My NetId = {LocalNetId}, tickRate = {_tickRate}, blocks = {BlocksWorld}");
+        }
+
+        /// <summary>Блок-режим клиента (из LoginResponse): вьюхи/пикинг читают масштаб вертикали через это.</summary>
+        public static bool BlocksWorld { get; private set; }
+
+        private Shared.World.Blocks.BlockGrid _blockGrid;
+        private Client.Map.StreamedBlockWorld _streamWorld;
+        private Shared.Simulation.Blocks.IBlockShapes _blockShapes;
+        private Client.Map.BlockRenderer _blockRenderer;
+        private bool _jumpPending; // one-shot прыжок (латч в Update, потребление в Tick — как _layTogglePending)
+        private bool _wasAirborne; // прыжковый фриз среза: детект отрыва
+        private float _airStartY;  // высота в момент отрыва (фриз, пока не опустились ниже)
+
+        private void OnBlockChunkData(BlockChunkData msg)
+        {
+            if (_blockGrid == null) return;
+            _blockGrid.AddSection(msg.Cx, msg.Cy, msg.Cz, msg.Section);
+            _streamWorld.MarkReceived(msg.Cx, msg.Cy, msg.Cz);
+            _blockRenderer.ApplySection(msg.Cx, msg.Cy, msg.Cz);
+            RefreshSectionNeighbors(msg.Cx, msg.Cy, msg.Cz);
+        }
+
+        private void OnBlockSectionGone(BlockSectionGone msg)
+        {
+            if (_blockGrid == null) return;
+            _blockGrid.RemoveSection(msg.Cx, msg.Cy, msg.Cz);
+            if (msg.Reason == BlockSectionGone.OutOfRange)
+                _streamWorld.Forget(msg.Cx, msg.Cy, msg.Cz); // Emptied: «знание» сохраняем (секция = воздух)
+            _blockRenderer.ApplySection(msg.Cx, msg.Cy, msg.Cz);
+            RefreshSectionNeighbors(msg.Cx, msg.Cy, msg.Cz);
+        }
+
+        // Кромка стрима: у секций-соседей автотайл/маски углов/верх-гейты и классификация граней считались,
+        // когда этой секции ещё/уже не было (GetBlock=0) — перечитываем. ApplySection отсутствующей = no-op.
+        // 8 по плану (диагонали — маски углов) + верх/низ.
+        private void RefreshSectionNeighbors(int cx, int cy, int cz)
+        {
+            for (int dz = -1; dz <= 1; dz++)
+                for (int dx = -1; dx <= 1; dx++)
+                    if (dx != 0 || dz != 0)
+                        _blockRenderer.ApplySection(cx + dx, cy, cz + dz);
+            _blockRenderer.ApplySection(cx, cy + 1, cz);
+            _blockRenderer.ApplySection(cx, cy - 1, cz);
+        }
+
+        private void OnBlockUpdateBatch(BlockUpdateBatch msg)
+        {
+            if (_blockGrid == null || msg.Entries == null) return;
+            foreach (var e in msg.Entries)
+            {
+                _blockGrid.SetBlock(e.X, e.Y, e.Z, e.BlockType);
+                if (e.BlockType != 0)
+                    _blockGrid.SetState(e.X, e.Y, e.Z, e.State);
+                _blockRenderer.ApplyBlockChange(e.X, e.Y, e.Z);
+            }
+        }
+
+        // Вьюха сущности: префаб из сцены; без него (пустая дев-сцена блок-мира) — рантайм-капсула,
+        // чтобы дев-режим работал вообще без ручных привязок.
+        private NetEntityView CreateEntityView()
+        {
+            if (_entityViewPrefab != null)
+                return Instantiate(_entityViewPrefab, transform);
+
+            var go = new GameObject("EntityView(dev)");
+            go.transform.SetParent(transform, false);
+            go.AddComponent<SpriteRenderer>(); // NetEntityView ждёт компонент; спрайтов нет — тело рисует капсула
+            var body = GameObject.CreatePrimitive(PrimitiveType.Capsule);
+            Destroy(body.GetComponent<Collider>());
+            body.transform.SetParent(go.transform, false);
+            body.transform.localScale = new Vector3(0.8f, 0.7f, 0.8f); // примитив высотой 2 → 1.4 (рост игрока)
+            body.transform.localPosition = new Vector3(0f, 0.7f, 0f);  // ноги — в позиции вьюхи
+            return go.AddComponent<NetEntityView>();
         }
 
         /// <summary>Явный анонс входа: пред-создаём вьюху чужого (снапшот её потом наполнит). Себя — пропускаем.</summary>
@@ -434,7 +565,7 @@ namespace Client.Net
         {
             if (msg.NetId == LocalNetId || _views.ContainsKey(msg.NetId)) return;
 
-            var view = Instantiate(_entityViewPrefab, transform);
+            var view = CreateEntityView();
             view.Init(msg.NetId);
             _views.Add(msg.NetId, view);
         }
@@ -472,12 +603,12 @@ namespace Client.Net
                 {
                     // Свой игрок: reconciliation, без интерполяционного буфера. State сидируется в предиктор
                     // (seed для running-state нити), а вьюха берёт ПРЕДСКАЗАННЫЙ _predictor.State.
-                    _predictor.Reconcile(e.X, e.Y, (int)e.Z, e.Facing, e.State, e.Reason, e.Speed, snap.LastProcessedInput);
-                    if (_mapRenderer != null) _mapRenderer.SetActiveZ(_predictor.Z);
+                    _predictor.Reconcile(e.X, e.Y, e.Z, e.VY, e.Facing, e.State, e.Reason, e.Speed, snap.LastProcessedInput);
+                    if (_mapRenderer != null && !BlocksWorld) _mapRenderer.SetActiveZ(_predictor.Z);
 
                     if (_localView == null)
                     {
-                        _localView = Instantiate(_entityViewPrefab, transform);
+                        _localView = CreateEntityView();
                         _localView.Init(e.NetId);
                         _views[e.NetId] = _localView;
                         if (_camera != null) _camera.SetTarget(_localView.transform);
@@ -487,7 +618,7 @@ namespace Client.Net
 
                 if (!_views.TryGetValue(e.NetId, out var view))
                 {
-                    view = Instantiate(_entityViewPrefab, transform);
+                    view = CreateEntityView();
                     view.Init(e.NetId);
                     _views.Add(e.NetId, view);
                 }

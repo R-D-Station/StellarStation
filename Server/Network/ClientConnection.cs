@@ -42,6 +42,10 @@ namespace Server.Network
         // предиктор берёт её как baseStep (клиент НЕ реконструирует и НЕ мутирует скорость локально).
         public AdvancedValue Speed = new AdvancedValue(MovementLogic.StepPerTick);
 
+        // Блок-мир (B2): кинематика игрока в осях Unity (Y — высота, VY, Grounded); legacy-поля X/Y/Z выше
+        // зеркалятся из неё каждый тик (X=X, Y=Mover.Z план, Z=floor(Mover.Y)).
+        public Shared.Simulation.Blocks.BlockMoverState Mover;
+
         // Рантайм-модификаторы скорости (scaffolding; баффы/предметы — триггеров нет, зовётся прямо/в тестах).
         // Через СКЕЙЛЫ (∏ScaleSequentially) — минуют намеренно-оставленный double-add UpdateValue(float).
         public void AddSpeedScale(float scale) => Speed.AddScaleSum(scale);
@@ -105,6 +109,10 @@ namespace Server.Network
         // радиуса → ChunkUnload + прун из обоих наборов). Одно-поточно (мутируются только на GameLoop-потоке).
         public readonly HashSet<long> SentChunks = new();
         public readonly Dictionary<long, int> ChunkLastInRangeTick = new();
+
+        // Блочный стрим (фаза C): отправленные клиенту секции (адресация дельт — в.44B) + таймер выгрузки.
+        public readonly HashSet<long> SentBlockSections = new();
+        public readonly Dictionary<long, int> BlockSectionLastInRange = new();
 
         public ClientConnection(NetPeer peer, int connectionId)
         {

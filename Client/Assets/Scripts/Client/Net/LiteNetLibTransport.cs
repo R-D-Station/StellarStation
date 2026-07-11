@@ -26,6 +26,9 @@ namespace Client.Net
         public event Action<ChunkUnload> OnChunkUnload;
         public event Action<ItemSnapshot> OnItemSnapshot;
         public event Action<InventorySync> OnInventorySync;
+        public event Action<BlockChunkData> OnBlockChunkData;
+        public event Action<BlockSectionGone> OnBlockSectionGone;
+        public event Action<BlockUpdateBatch> OnBlockUpdateBatch;
 
 
         public bool IsConnected { get; private set; }
@@ -49,6 +52,9 @@ namespace Client.Net
             { MessageType.MapChunkUnload, () => new ChunkUnload() },
             { MessageType.ItemSnapshot, () => new ItemSnapshot() },
             { MessageType.InventorySync, () => new InventorySync() },
+            { MessageType.BlockChunkData, () => new BlockChunkData() },
+            { MessageType.BlockSectionGone, () => new BlockSectionGone() },
+            { MessageType.BlockUpdateBatch, () => new BlockUpdateBatch() },
         };
 
         public void Connect(string address, int port)
@@ -160,6 +166,18 @@ namespace Client.Net
 
                 case InventorySync inv:
                     OnInventorySync?.Invoke(inv);
+                    break;
+
+                case BlockChunkData bc:
+                    OnBlockChunkData?.Invoke(bc);
+                    break;
+
+                case BlockSectionGone bg:
+                    OnBlockSectionGone?.Invoke(bg);
+                    break;
+
+                case BlockUpdateBatch bu:
+                    OnBlockUpdateBatch?.Invoke(bu);
                     break;
 
                 default:
