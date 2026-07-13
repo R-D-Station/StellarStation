@@ -6,10 +6,7 @@ using Client.Map;
 
 namespace Client.Editor.Inspectors
 {
-    /// <summary>
-    /// SceneView-кисть блок-карты для <see cref="BlockMapAuthoring"/>: горизонтальный слой = высота Y,
-    /// ЛКМ — красить выбранный тип, Shift+ЛКМ — стирать, [ / ] — слой вниз/вверх. Alt не перехватываем (орбита).
-    /// </summary>
+    /// <summary>SceneView-кисть блок-карты <see cref="BlockMapAuthoring"/>: слой = высота Y, ЛКМ красит / Shift+ЛКМ стирает / [ ] меняют слой.</summary>
     [CustomEditor(typeof(BlockMapAuthoring))]
     public sealed class BlockMapAuthoringEditor : UnityEditor.Editor
     {
@@ -24,6 +21,14 @@ namespace Client.Editor.Inspectors
         private string[] _paletteNames;
         private int _paletteIndex;
 
+        // Палитра, сгруппированная по категории — источник двух списков кисти (Категория → Блок).
+        private Shared.World.Blocks.BlockCategory[] _categories;
+        private string[] _categoryNames;
+        private int[][] _paletteByCategory;
+        private string[][] _blockNamesByCategory;
+        private int _categoryIndex;
+        private int _blockIndex;
+
         private void OnEnable()
         {
             BlockDefinitionResolver.Invalidate(); // ассеты могли добавиться/переехать — кэш визуала заново
@@ -33,6 +38,41 @@ namespace Client.Editor.Inspectors
             _paletteNames = new string[_palette.Length];
             for (int i = 0; i < _palette.Length; i++)
                 _paletteNames[i] = $"{_palette[i].Type} — {_palette[i].DisplayName}";
+            BuildCategoryGroups();
+        }
+
+        // Одноразовая раскладка палитры по категориям (порядок enum, счётчик блоков в подписи).
+        private void BuildCategoryGroups()
+        {
+            var order = new List<Shared.World.Blocks.BlockCategory>();
+            var buckets = new Dictionary<Shared.World.Blocks.BlockCategory, List<int>>();
+            for (int i = 0; i < _palette.Length; i++)
+            {
+                var c = _palette[i].Category;
+                if (!buckets.TryGetValue(c, out var list))
+                {
+                    list = new List<int>();
+                    buckets[c] = list;
+                    order.Add(c);
+                }
+                list.Add(i);
+            }
+            order.Sort((a, b) => ((byte)a).CompareTo((byte)b));
+
+            _categories = order.ToArray();
+            _categoryNames = new string[_categories.Length];
+            _paletteByCategory = new int[_categories.Length][];
+            _blockNamesByCategory = new string[_categories.Length][];
+            for (int ci = 0; ci < _categories.Length; ci++)
+            {
+                var list = buckets[_categories[ci]];
+                _categoryNames[ci] = $"{_categories[ci]} ({list.Count})";
+                _paletteByCategory[ci] = list.ToArray();
+                var names = new string[list.Count];
+                for (int k = 0; k < list.Count; k++)
+                    names[k] = _paletteNames[list[k]];
+                _blockNamesByCategory[ci] = names;
+            }
         }
 
         public override void OnInspectorGUI()
@@ -69,8 +109,14 @@ namespace Client.Editor.Inspectors
             }
             else
             {
-                _paletteIndex = Mathf.Clamp(_paletteIndex, 0, _palette.Length - 1);
-                _paletteIndex = EditorGUILayout.Popup(new GUIContent("Блок"), _paletteIndex, _paletteNames);
+                _categoryIndex = Mathf.Clamp(_categoryIndex, 0, _categories.Length - 1);
+                int newCat = EditorGUILayout.Popup(new GUIContent("Категория"), _categoryIndex, _categoryNames);
+                if (newCat != _categoryIndex) { _categoryIndex = newCat; _blockIndex = 0; }
+
+                var inCat = _paletteByCategory[_categoryIndex];
+                _blockIndex = Mathf.Clamp(_blockIndex, 0, inCat.Length - 1);
+                _blockIndex = EditorGUILayout.Popup(new GUIContent("Блок"), _blockIndex, _blockNamesByCategory[_categoryIndex]);
+                _paletteIndex = inCat[_blockIndex];
             }
 
             if (!t.IsLoaded)

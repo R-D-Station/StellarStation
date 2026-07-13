@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2356951915484873759}
   - component: {fileID: 1146371517115275965}
+  - component: {fileID: 7219888593961550287}
   m_Layer: 0
   m_Name: FloorCorner
   m_TagString: Untagged
@@ -30,8 +31,8 @@ Transform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
-  - {fileID: 3282517652033807946}
   - {fileID: 3838570235006396929}
+  - {fileID: 3282517652033807946}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &1146371517115275965
@@ -47,6 +48,23 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockBoundsAuthoring
   Target: {fileID: 11400000, guid: 8e03011a63dacb44082faf4334066f54, type: 2}
+  Editing: 0
+--- !u!114 &7219888593961550287
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4376710111407018939}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e5de7bd68b91f1d4f8156fa5cf65a8bc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockMaterials
+  TopRenderers:
+  - {fileID: 4327810972138900172}
+  WallRenderers:
+  - {fileID: 1943274115328501118}
 --- !u!1 &6834862938359518346
 GameObject:
   m_ObjectHideFlags: 0
@@ -201,5 +219,10 @@ PrefabInstance:
 --- !u!4 &3282517652033807946 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 1130295289111426295, guid: fc86deb92ef9abf4a95e8101c67d4ab1, type: 3}
+  m_PrefabInstance: {fileID: 2459605286888149693}
+  m_PrefabAsset: {fileID: 0}
+--- !u!23 &4327810972138900172 stripped
+MeshRenderer:
+  m_CorrespondingSourceObject: {fileID: 2174461112119236721, guid: fc86deb92ef9abf4a95e8101c67d4ab1, type: 3}
   m_PrefabInstance: {fileID: 2459605286888149693}
   m_PrefabAsset: {fileID: 0}

@@ -6,5 +6,5 @@
   "connectionKey": "VGVzdF9zZXJ2ZXIx",
   "mapPath": "Map/block-station.smap",
   "BlocksWorld": true,
-  "EntityInterestZDepth": 6
+  "EntityInterestZDepth": 6,
 }

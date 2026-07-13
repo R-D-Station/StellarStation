@@ -1,11 +1,6 @@
 namespace Shared.World.Blocks
 {
-    /// <summary>
-    /// Мульти-блок (объект из нескольких позиций одного типа): части адресуются part-битами state-канала
-    /// (2 бита → до 4 частей, т.е. размеры 1..2 по осям при sx·sy·sz ≤ 4; дверь 2×1×2 = 4 части).
-    /// Якорь — часть 0. Порядок частей: ширина (локальный X), затем глубина (локальный Z), затем высота.
-    /// Поворот — facing state-канала: шаги 90° по часовой вокруг Y; при 0 ширина → +X, глубина → +Z.
-    /// </summary>
+    /// <summary>Мульти-блок: части адресуются part-битами state-канала (до 4, якорь — часть 0), поворот — facing.</summary>
     public static class MultiBlock
     {
         public const int MaxParts = 4; // ёмкость part-бит
@@ -42,6 +37,23 @@ namespace Shared.World.Blocks
             PartToLocal(part, sx, sz, out int w, out int y, out int d);
             RotateLocal(w, d, facing, out dx, out dz);
             dy = y;
+        }
+
+        /// <summary>План-центр футпринта относительно якоря при facing — тот же пивот, что у визуала мульти-блока.</summary>
+        public static void FootprintCenterOffset(int sx, int sz, int facing, out float cx, out float cz)
+        {
+            int parts = PartCount(sx, 1, sz); // план — высота не влияет
+            int minX = int.MaxValue, maxX = int.MinValue, minZ = int.MaxValue, maxZ = int.MinValue;
+            for (int p = 0; p < parts; p++)
+            {
+                PartWorldOffset(p, sx, sz, facing, out int dx, out _, out int dz);
+                if (dx < minX) minX = dx;
+                if (dx > maxX) maxX = dx;
+                if (dz < minZ) minZ = dz;
+                if (dz > maxZ) maxZ = dz;
+            }
+            cx = (minX + maxX + 1) * 0.5f;
+            cz = (minZ + maxZ + 1) * 0.5f;
         }
 
         /// <summary>Позиция якоря по позиции части (part и facing — из state-байта этой части).</summary>

@@ -67,6 +67,7 @@ MeshRenderer:
   m_RendererPriority: 0
   m_Materials:
   - {fileID: 2100000, guid: 33c9e93130ebe86419956fd612af2f72, type: 2}
+  - {fileID: 2100000, guid: 0c68e58f556efd345a051a8001250618, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0
@@ -100,6 +101,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1694213259643985855}
   - component: {fileID: 1191099476717231050}
+  - component: {fileID: 3549374228327557792}
   m_Layer: 0
   m_Name: WallStraight
   m_TagString: Untagged
@@ -137,6 +139,23 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockBoundsAuthoring
   Target: {fileID: 11400000, guid: 9b879309924dffb478962919f06236ab, type: 2}
+  Editing: 0
+--- !u!114 &3549374228327557792
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 9044213943688244232}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e5de7bd68b91f1d4f8156fa5cf65a8bc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockMaterials
+  TopRenderers:
+  - {fileID: 7048329594237844369}
+  WallRenderers:
+  - {fileID: 2489403187195380406}
 --- !u!1001 &9222684499726296032
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -194,6 +213,11 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: fc86deb92ef9abf4a95e8101c67d4ab1, type: 3}
+--- !u!23 &7048329594237844369 stripped
+MeshRenderer:
+  m_CorrespondingSourceObject: {fileID: 2174461112119236721, guid: fc86deb92ef9abf4a95e8101c67d4ab1, type: 3}
+  m_PrefabInstance: {fileID: 9222684499726296032}
+  m_PrefabAsset: {fileID: 0}
 --- !u!4 &8093552525265295127 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 1130295289111426295, guid: fc86deb92ef9abf4a95e8101c67d4ab1, type: 3}

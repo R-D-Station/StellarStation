@@ -1,0 +1,47 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2a5ba86ce8fa84d4aa708dd205f2ef8f, type: 3}
+  m_Name: Floor
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockDefinition
+  Type: 8
+  DisplayName: FutureFloor
+  Category: 1
+  SealsFaces: 63
+  OpaqueFaces: 63
+  CoversBlockBelow: 1
+  CollisionBoxes:
+  - Center: {x: 0.5, y: 0.5, z: 0.5}
+    Size: {x: 1, y: 1, z: 1}
+  CollisionBoxesOpen: []
+  Opening: 0
+  TriggerBoxes: []
+  DoorCloseDelay: 1
+  DeconstructStages: 0
+  Size: {x: 1, y: 1, z: 1}
+  Connection:
+    UseConnections: 1
+    ConnectsToSameType: 1
+    ConnectsToTypes: 
+    MeshSingle: {fileID: 5886712932950718308, guid: bb63e47510d2dae44a79edcfc8a04990, type: 3}
+    MeshEnd: {fileID: 4488766033248980518, guid: e9b26938535dabc4fb16e193eb276d72, type: 3}
+    MeshStraight: {fileID: 6226776728167343289, guid: 710bc5a21fd84c5479524cb94eccc5d8, type: 3}
+    MeshCorner: {fileID: 4376710111407018939, guid: ca28bedacac11644885a5e669bcc572e, type: 3}
+    MeshT: {fileID: 2476352247093195437, guid: 8ed9a51f5080679479d0775b4ace6dfc, type: 3}
+    MeshCross: {fileID: 8947755035325840453, guid: c0574f1883ac05e48a5cffacf1e3e483, type: 3}
+  TopMap: {fileID: 2800000, guid: 605a57112d943b844a3be3cea3b6478e, type: 3}
+  BackingMap: {fileID: 2800000, guid: c9b6b5d4a6101e84e9252be154ecb790, type: 3}
+  TopMapCountX: 5
+  TopMapCountY: 2
+  TopCalibration: {fileID: 11400000, guid: d62ddf4f9f455cb47974dcdcfffe2f98, type: 2}
+  Prefab: {fileID: 5886712932950718308, guid: bb63e47510d2dae44a79edcfc8a04990, type: 3}
+  Pivot: 1
+  EditorSprite: {fileID: 0}

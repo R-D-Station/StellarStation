@@ -6,11 +6,7 @@ using Client.Map;
 
 namespace Client.Editor.Inspectors
 {
-    /// <summary>
-    /// Редактирование AABB блока для <see cref="BlockBoundsAuthoring"/>: числовые Центр/Размер по каждому
-    /// боксу + хендлы в SceneView (à la BoxCollider; блок центрирован на объекте — сдвиг ±0.5).
-    /// Оси Unity: X/Z — план, Y — высота; координаты бокса [0..1].
-    /// </summary>
+    /// <summary>Редактирование боксов <see cref="BlockBoundsAuthoring"/>: числа + SceneView-хендлы для выбранного набора (коллизия/открытая/триггеры).</summary>
     [CustomEditor(typeof(BlockBoundsAuthoring))]
     public sealed class BlockBoundsAuthoringEditor : UnityEditor.Editor
     {
@@ -28,26 +24,30 @@ namespace Client.Editor.Inspectors
                 return;
             }
 
-            // Числовая правка боксов SO прямо здесь (оси Unity: Y — высота; блок [0..1]).
-            EditorGUILayout.Space(8);
-            EditorGUILayout.LabelField("Боксы (оси Unity, Y = высота)", EditorStyles.boldLabel);
-            var boxes = def.CollisionBoxes ?? System.Array.Empty<BlockDefinition.CollisionBox>();
+            var set = authoring.Editing;
+            var boxes = authoring.Boxes(set) ?? System.Array.Empty<BlockDefinition.CollisionBox>();
+            bool clamp = set != BlockBoundsAuthoring.BoxSet.Trigger; // триггеры могут выходить за габарит
 
-            foreach (var b in boxes)
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField($"Боксы: {Label(set)} (оси Unity, Y = высота)", EditorStyles.boldLabel);
+
+            if (clamp)
             {
-                Vector3 min = b.Center - b.Size * 0.5f;
-                Vector3 max = b.Center + b.Size * 0.5f;
                 var sv = def.Size;
-                if (min.x < -0.001f || min.y < -0.001f || min.z < -0.001f ||
-                    max.x > sv.x + 0.001f || max.y > sv.y + 0.001f || max.z > sv.z + 0.001f)
+                foreach (var b in boxes)
                 {
-                    EditorGUILayout.HelpBox(
-                        $"Бокс за габаритом объекта [0..{sv.x}]×[0..{sv.y}]×[0..{sv.z}]. Коллизия авторится " +
-                        "по ВСЕМУ объекту (Size) — кодоген сам нарежет её по частям.",
-                        MessageType.Warning);
-                    break;
+                    Vector3 min = b.Center - b.Size * 0.5f, max = b.Center + b.Size * 0.5f;
+                    if (min.x < -0.001f || min.y < -0.001f || min.z < -0.001f ||
+                        max.x > sv.x + 0.001f || max.y > sv.y + 0.001f || max.z > sv.z + 0.001f)
+                    {
+                        EditorGUILayout.HelpBox(
+                            $"Бокс за габаритом [0..{sv.x}]×[0..{sv.y}]×[0..{sv.z}] — кодоген нарежет по частям.",
+                            MessageType.Warning);
+                        break;
+                    }
                 }
             }
+
             int removeAt = -1;
             for (int i = 0; i < boxes.Length; i++)
             {
@@ -62,7 +62,7 @@ namespace Client.Editor.Inspectors
                 }
                 if (EditorGUI.EndChangeCheck())
                 {
-                    Undo.RecordObject(def, "Edit collision box");
+                    Undo.RecordObject(def, "Edit box");
                     boxes[i].Center = center;
                     boxes[i].Size = size;
                     EditorUtility.SetDirty(def);
@@ -74,19 +74,19 @@ namespace Client.Editor.Inspectors
             {
                 if (GUILayout.Button("+ бокс"))
                 {
-                    Undo.RecordObject(def, "Add collision box");
+                    Undo.RecordObject(def, "Add box");
                     var list = new System.Collections.Generic.List<BlockDefinition.CollisionBox>(boxes)
                         { BlockDefinition.CollisionBox.Full };
-                    def.CollisionBoxes = list.ToArray();
+                    Assign(def, set, list.ToArray());
                     EditorUtility.SetDirty(def);
                 }
                 if (GUILayout.Button("Квантовать 1/16"))
                 {
-                    Undo.RecordObject(def, "Quantize collision boxes");
+                    Undo.RecordObject(def, "Quantize boxes");
                     for (int i = 0; i < boxes.Length; i++)
                     {
-                        Vector3 min = Quantize(boxes[i].Center - boxes[i].Size * 0.5f, def.Size);
-                        Vector3 max = Quantize(boxes[i].Center + boxes[i].Size * 0.5f, def.Size);
+                        Vector3 min = Quantize(boxes[i].Center - boxes[i].Size * 0.5f, def.Size, clamp);
+                        Vector3 max = Quantize(boxes[i].Center + boxes[i].Size * 0.5f, def.Size, clamp);
                         boxes[i].Center = (min + max) * 0.5f;
                         boxes[i].Size = max - min;
                     }
@@ -96,10 +96,10 @@ namespace Client.Editor.Inspectors
 
             if (removeAt >= 0)
             {
-                Undo.RecordObject(def, "Remove collision box");
+                Undo.RecordObject(def, "Remove box");
                 var list = new System.Collections.Generic.List<BlockDefinition.CollisionBox>(boxes);
                 list.RemoveAt(removeAt);
-                def.CollisionBoxes = list.ToArray();
+                Assign(def, set, list.ToArray());
                 EditorUtility.SetDirty(def);
             }
         }
@@ -108,36 +108,63 @@ namespace Client.Editor.Inspectors
         {
             var authoring = (BlockBoundsAuthoring)target;
             var def = authoring.Target;
-            if (def == null || def.CollisionBoxes == null)
+            if (def == null)
+                return;
+            var set = authoring.Editing;
+            var boxes = authoring.Boxes(set);
+            if (boxes == null)
                 return;
 
             using (new Handles.DrawingScope(authoring.transform.localToWorldMatrix))
             {
-                Handles.color = new Color(0.2f, 1f, 0.4f, 0.9f);
-                for (int i = 0; i < def.CollisionBoxes.Length; i++)
+                Handles.color = BlockBoundsAuthoring.SetColor(set);
+                for (int i = 0; i < boxes.Length; i++)
                 {
-                    // Оси совпадают с Unity; блок центрирован на объекте — только сдвиг ±0.5.
-                    _handle.center = BlockBoundsAuthoring.BoxCenterToLocal(def.CollisionBoxes[i].Center);
-                    _handle.size = def.CollisionBoxes[i].Size;
+                    // Тот же сдвиг object→local, что и в гизмо (пивот = центр низа футпринта).
+                    _handle.center = BlockBoundsAuthoring.ObjectToLocal(boxes[i].Center, def.Size);
+                    _handle.size = boxes[i].Size;
 
                     EditorGUI.BeginChangeCheck();
                     _handle.DrawHandle();
                     if (EditorGUI.EndChangeCheck())
                     {
-                        Undo.RecordObject(def, "Edit collision box");
-                        def.CollisionBoxes[i].Center = BlockBoundsAuthoring.LocalToBoxCenter(_handle.center);
-                        def.CollisionBoxes[i].Size = _handle.size;
+                        Undo.RecordObject(def, "Edit box");
+                        boxes[i].Center = BlockBoundsAuthoring.LocalToObject(_handle.center, def.Size);
+                        boxes[i].Size = _handle.size;
                         EditorUtility.SetDirty(def);
                     }
                 }
             }
         }
 
-        // Кламп — в габарит объекта (object-space [0..Size]), не в один блок.
-        private static Vector3 Quantize(Vector3 v, Vector3Int size)
-            => new Vector3(Q(v.x, size.x), Q(v.y, size.y), Q(v.z, size.z));
+        private static void Assign(BlockDefinition def, BlockBoundsAuthoring.BoxSet set,
+                                   BlockDefinition.CollisionBox[] boxes)
+        {
+            switch (set)
+            {
+                case BlockBoundsAuthoring.BoxSet.Open: def.CollisionBoxesOpen = boxes; break;
+                case BlockBoundsAuthoring.BoxSet.Trigger: def.TriggerBoxes = boxes; break;
+                default: def.CollisionBoxes = boxes; break;
+            }
+        }
 
-        private static float Q(float v, int maxUnits) => Mathf.Clamp(Mathf.Round(v * 16f), 0f, 16f * maxUnits) / 16f;
+        private static string Label(BlockBoundsAuthoring.BoxSet set) => set switch
+        {
+            BlockBoundsAuthoring.BoxSet.Open => "открытая коллизия",
+            BlockBoundsAuthoring.BoxSet.Trigger => "триггеры",
+            _ => "коллизия"
+        };
+
+        // Триггеры не клампятся в габарит (могут торчать за грань), коллизия/открытая — клампятся.
+        private static Vector3 Quantize(Vector3 v, Vector3Int size, bool clamp)
+            => new Vector3(Q(v.x, size.x, clamp), Q(v.y, size.y, clamp), Q(v.z, size.z, clamp));
+
+        private static float Q(float v, int maxUnits, bool clamp)
+        {
+            float q = Mathf.Round(v * 16f);
+            if (clamp) q = Mathf.Clamp(q, 0f, 16f * maxUnits);
+            return q / 16f;
+        }
     }
 }
 #endif

@@ -31,6 +31,15 @@ namespace Shared.World.Blocks
         Marker = 7
     }
 
+    /// <summary>Как открывается дверь/люк (для Category Door/Hatch).</summary>
+    public enum DoorOpening : byte
+    {
+        /// <summary>Сама — при входе игрока в триггер-объём.</summary>
+        Auto = 0,
+        /// <summary>Взаимодействием игрока (будущий контент).</summary>
+        Interact = 1
+    }
+
     /// <summary>AABB коллизии в block-local координатах (оси Unity: Y — высота), квантование 1/16 (значения 0..16).</summary>
     public readonly struct BlockBox
     {
@@ -60,6 +69,25 @@ namespace Shared.World.Blocks
             => new BlockBox(MinZ, MinY, (byte)(16 - MaxX), MaxZ, MaxY, (byte)(16 - MinX));
     }
 
+    /// <summary>Триггер-объём двери в object-space (1/16 блока, facing 0); signed — может выходить за габарит.</summary>
+    public readonly struct TriggerBox
+    {
+        public readonly short MinX, MinY, MinZ, MaxX, MaxY, MaxZ;
+
+        public TriggerBox(short minX, short minY, short minZ, short maxX, short maxY, short maxZ)
+        {
+            MinX = minX; MinY = minY; MinZ = minZ;
+            MaxX = maxX; MaxY = maxY; MaxZ = maxZ;
+        }
+
+        public float MinXf => MinX / 16f;
+        public float MinYf => MinY / 16f;
+        public float MinZf => MinZ / 16f;
+        public float MaxXf => MaxX / 16f;
+        public float MaxYf => MaxY / 16f;
+        public float MaxZf => MaxZ / 16f;
+    }
+
     /// <summary>Данные типа блока (Shared-зеркало BlockDefinition; генерируется кодогеном из SO).</summary>
     public sealed class BlockInfo
     {
@@ -75,8 +103,18 @@ namespace Shared.World.Blocks
         public readonly byte SizeX, SizeY, SizeZ;
 
         // Боксы по [part][facing]: кодоген даёт нарезку facing=0, повороты предвычисляются в ктор.
+        // _boxes — закрытое состояние, _boxesOpen — открытое (только для Openable; иначе не используется).
         private readonly BlockBox[][][] _boxes;
+        private readonly BlockBox[][][] _boxesOpen;
 
+        /// <summary>Как открывается (Door/Hatch): сама/взаимодействием.</summary>
+        public readonly DoorOpening Opening;
+        /// <summary>Задержка автозакрытия двери (сек) после выхода игрока из триггера.</summary>
+        public readonly float CloseDelay;
+        /// <summary>Триггер-объёмы авто-двери (object-space, facing 0); пусто — нет триггера.</summary>
+        public readonly TriggerBox[] Triggers;
+
+        /// <summary>Занимает больше одной позиции.</summary>
         public bool IsMulti => SizeX * SizeY * SizeZ > 1;
         public int PartCount => _boxes.Length;
 
@@ -97,9 +135,12 @@ namespace Shared.World.Blocks
         /// <summary>Боксы якорной части при facing 0 (совместимость/простые случаи).</summary>
         public BlockBox[] Boxes => _boxes[0][0];
 
-        /// <summary>Боксы конкретной части с учётом поворота (part/facing — из state-байта позиции).</summary>
-        public BlockBox[] GetBoxes(int part, int facing)
-            => _boxes[part < _boxes.Length ? part : 0][facing & 3];
+        /// <summary>Боксы части при facing (закрытое состояние). part/facing — из state-байта позиции.</summary>
+        public BlockBox[] GetBoxes(int part, int facing) => GetBoxes(part, facing, false);
+
+        /// <summary>Боксы части с учётом поворота и состояния Open (открытая дверь → набор _boxesOpen).</summary>
+        public BlockBox[] GetBoxes(int part, int facing, bool open)
+            => (open && Openable ? _boxesOpen : _boxes)[part < _boxes.Length ? part : 0][facing & 3];
 
         public BlockInfo(ushort id, string name, BlockCategory category,
             BlockFaceFlags sealsFaces, BlockFaceFlags opaqueFaces, byte deconstructStages, BlockBox[] boxes,
@@ -109,10 +150,12 @@ namespace Shared.World.Blocks
         {
         }
 
-        /// <summary>Основной ктор: боксы по частям (facing 0, порядок частей — MultiBlock).</summary>
+        /// <summary>Основной ктор: боксы по частям (facing 0) плюс опционально открытое состояние двери.</summary>
         public BlockInfo(ushort id, string name, BlockCategory category,
             BlockFaceFlags sealsFaces, BlockFaceFlags opaqueFaces, byte deconstructStages, BlockBox[][] partBoxes,
-            byte sizeX = 1, byte sizeY = 1, byte sizeZ = 1)
+            byte sizeX = 1, byte sizeY = 1, byte sizeZ = 1,
+            BlockBox[][] partBoxesOpen = null, DoorOpening opening = DoorOpening.Auto,
+            TriggerBox[] triggers = null, float closeDelay = 0f)
         {
             Id = id;
             Name = name;
@@ -123,32 +166,41 @@ namespace Shared.World.Blocks
             SizeX = sizeX;
             SizeY = sizeY;
             SizeZ = sizeZ;
+            Opening = opening;
+            CloseDelay = closeDelay;
+            Triggers = triggers ?? System.Array.Empty<TriggerBox>();
 
             if (partBoxes == null || partBoxes.Length == 0)
                 partBoxes = new[] { System.Array.Empty<BlockBox>() };
 
-            _boxes = new BlockBox[partBoxes.Length][][];
-            for (int p = 0; p < partBoxes.Length; p++)
+            _boxes = BuildRotations(partBoxes, partBoxes.Length);
+            _boxesOpen = BuildRotations(partBoxesOpen, partBoxes.Length); // пусто по части, если не задано
+        }
+
+        // Предвычислить повороты боксов частей: [part][facing] из facing-0 набора (RotatedCW по шагам).
+        private static BlockBox[][][] BuildRotations(BlockBox[][] partBoxes, int partCount)
+        {
+            var result = new BlockBox[partCount][][];
+            for (int p = 0; p < partCount; p++)
             {
-                var f0 = partBoxes[p] ?? System.Array.Empty<BlockBox>();
-                _boxes[p] = new BlockBox[4][];
-                _boxes[p][0] = f0;
+                var f0 = (partBoxes != null && p < partBoxes.Length ? partBoxes[p] : null)
+                         ?? System.Array.Empty<BlockBox>();
+                result[p] = new BlockBox[4][];
+                result[p][0] = f0;
                 for (int f = 1; f < 4; f++)
                 {
-                    var prev = _boxes[p][f - 1];
+                    var prev = result[p][f - 1];
                     var rot = new BlockBox[prev.Length];
                     for (int i = 0; i < prev.Length; i++)
                         rot[i] = prev[i].RotatedCW();
-                    _boxes[p][f] = rot;
+                    result[p][f] = rot;
                 }
             }
+            return result;
         }
     }
 
-    /// <summary>
-    /// Каталог типов блоков: id → данные. Наполняется из сгенерированного BlockCatalogData
-    /// (кодоген из BlockDefinition SO — единственный источник, руками не заполнять).
-    /// </summary>
+    /// <summary>Каталог типов блоков: id → данные, наполняется сгенерированным BlockCatalogData.</summary>
     public static class BlockCatalog
     {
         /// <summary>Air (id 0): без коллизии, без граней.</summary>
@@ -165,6 +217,7 @@ namespace Shared.World.Blocks
             return map;
         }
 
+        /// <summary>Число зарегистрированных типов (включая Air).</summary>
         public static int Count => _byId.Count;
 
         /// <summary>Данные типа; неизвестный id безопасно даёт Air (карта новее каталога).</summary>

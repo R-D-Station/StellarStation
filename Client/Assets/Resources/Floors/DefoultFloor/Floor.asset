@@ -17,9 +17,14 @@ MonoBehaviour:
   Category: 1
   SealsFaces: 63
   OpaqueFaces: 63
+  CoversBlockBelow: 1
   CollisionBoxes:
   - Center: {x: 0.5, y: 0.5, z: 0.5}
     Size: {x: 1, y: 1, z: 1}
+  CollisionBoxesOpen: []
+  Opening: 0
+  TriggerBoxes: []
+  DoorCloseDelay: 1
   DeconstructStages: 0
   Size: {x: 1, y: 1, z: 1}
   Connection:
@@ -32,10 +37,11 @@ MonoBehaviour:
     MeshCorner: {fileID: 4376710111407018939, guid: aa277530c42d5d04bb661b3674505bd8, type: 3}
     MeshT: {fileID: 2476352247093195437, guid: b711e138dfcfd00419f207312c6bdb0a, type: 3}
     MeshCross: {fileID: 8947755035325840453, guid: 751f3cc5fadca154b850c9c66adc2e3b, type: 3}
-  TopMap: {fileID: 2800000, guid: a680f83a0bfe93b4383b3df3c4514d1a, type: 3}
-  BackingMap: {fileID: 2800000, guid: e2e41efd3c2d51040ae85a1ccfe839cf, type: 3}
+  TopMap: {fileID: 2800000, guid: 09460d0c08afa584cbb0c289176d866f, type: 3}
+  BackingMap: {fileID: 2800000, guid: 952fbe0c5edf9534789ac3e0af0250ed, type: 3}
   TopMapCountX: 5
   TopMapCountY: 2
+  TopCalibration: {fileID: 11400000, guid: d62ddf4f9f455cb47974dcdcfffe2f98, type: 2}
   Prefab: {fileID: 5886712932950718308, guid: 4b605fb98c9d75a42b883ecdda07d8b6, type: 3}
   Pivot: 1
   EditorSprite: {fileID: 0}

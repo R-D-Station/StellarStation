@@ -1,0 +1,61 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2a5ba86ce8fa84d4aa708dd205f2ef8f, type: 3}
+  m_Name: Door_1x2
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockDefinition
+  Type: 6
+  DisplayName: Door_2x1
+  Category: 4
+  SealsFaces: 63
+  OpaqueFaces: 255
+  CoversBlockBelow: 0
+  CollisionBoxes:
+  - Center: {x: 0.5, y: 0.5, z: 0.5}
+    Size: {x: 1, y: 0.5, z: 0.5}
+  - Center: {x: 0.5, y: 1.5, z: 0.5}
+    Size: {x: 1, y: 1, z: 0.5}
+  CollisionBoxesOpen:
+  - Center: {x: 0.03125, y: 0.5, z: 0.5}
+    Size: {x: 0.0625, y: 1, z: 0.5}
+  - Center: {x: 0.03125, y: 1.5, z: 0.5}
+    Size: {x: 0.0625, y: 1, z: 0.5}
+  - Center: {x: 0.96875, y: 0.5, z: 0.5}
+    Size: {x: 0.0625, y: 1, z: 0.5}
+  - Center: {x: 0.96875, y: 1.5, z: 0.5}
+    Size: {x: 0.0625, y: 1, z: 0.5}
+  Opening: 0
+  TriggerBoxes:
+  - Center: {x: 0.5, y: 1, z: -0.5}
+    Size: {x: 1, y: 2, z: 1.5}
+  - Center: {x: 0.5, y: 1, z: 1.5}
+    Size: {x: 1, y: 2, z: 1.5}
+  DoorCloseDelay: 5
+  DeconstructStages: 0
+  Size: {x: 1, y: 2, z: 1}
+  Connection:
+    UseConnections: 0
+    ConnectsToSameType: 0
+    ConnectsToOtherConnected: 0
+    MeshSingle: {fileID: 0}
+    MeshEnd: {fileID: 0}
+    MeshStraight: {fileID: 0}
+    MeshCorner: {fileID: 0}
+    MeshT: {fileID: 0}
+    MeshCross: {fileID: 0}
+  TopMap: {fileID: 0}
+  BackingMap: {fileID: 0}
+  TopMapCountX: 5
+  TopMapCountY: 2
+  TopCalibration: {fileID: 0}
+  Prefab: {fileID: 1950560432707846408, guid: 73d3ad0b25647274daa43085194024fc, type: 3}
+  Pivot: 0
+  EditorSprite: {fileID: 0}

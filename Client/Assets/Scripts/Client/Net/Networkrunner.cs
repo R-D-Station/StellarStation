@@ -535,10 +535,21 @@ namespace Client.Net
             if (_blockGrid == null || msg.Entries == null) return;
             foreach (var e in msg.Entries)
             {
+                ushort oldType = _blockGrid.GetBlock(e.X, e.Y, e.Z);
+                byte oldState = _blockGrid.GetState(e.X, e.Y, e.Z);
                 _blockGrid.SetBlock(e.X, e.Y, e.Z, e.BlockType);
                 if (e.BlockType != 0)
                     _blockGrid.SetState(e.X, e.Y, e.Z, e.State);
-                _blockRenderer.ApplyBlockChange(e.X, e.Y, e.Z);
+
+                // Тоггл двери (тот же тип, изменился ТОЛЬКО бит Open) → анимация на живом инстансе, без пересборки
+                // секции (иначе аниматор сбрасывается в дефолт). Коллизия уже верна — грид обновлён выше.
+                bool doorOpenOnly = e.BlockType != 0 && e.BlockType == oldType
+                    && (byte)(oldState ^ e.State) == Shared.World.Blocks.BlockState.Open
+                    && Shared.World.Blocks.BlockCatalog.Get(e.BlockType).Openable;
+                if (doorOpenOnly)
+                    _blockRenderer.ApplyDoorState(e.X, e.Y, e.Z, e.BlockType, e.State);
+                else
+                    _blockRenderer.ApplyBlockChange(e.X, e.Y, e.Z);
             }
         }
 

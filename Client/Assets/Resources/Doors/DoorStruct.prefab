@@ -27,8 +27,8 @@ Transform:
   m_GameObject: {fileID: 565430929307479732}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 50, y: 50, z: 50}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 2558763705399027114}
@@ -144,7 +144,7 @@ Transform:
   m_GameObject: {fileID: 1728292994546623711}
   serializedVersion: 2
   m_LocalRotation: {x: -0.5, y: 0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: -0.018000001, y: 0.02, z: 0.000000002730437}
+  m_LocalPosition: {x: -0.001999999, y: 0.02, z: 0.000000002730437}
   m_LocalScale: {x: 1, y: 0.99999994, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -225,6 +225,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1178281523720985522}
+  - component: {fileID: 2009228982422369073}
   m_Layer: 0
   m_Name: DoorStruct
   m_TagString: Untagged
@@ -248,6 +249,20 @@ Transform:
   - {fileID: 8303858300238420726}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2009228982422369073
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1950560432707846408}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0f511d3d69749914294cfd37d2481ae1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockBoundsAuthoring
+  Target: {fileID: 11400000, guid: 7b122f6454d7e14409aebcebf6fec63e, type: 2}
+  Editing: 2
 --- !u!1 &3391172807223977370
 GameObject:
   m_ObjectHideFlags: 0
@@ -273,7 +288,7 @@ Transform:
   m_GameObject: {fileID: 3391172807223977370}
   serializedVersion: 2
   m_LocalRotation: {x: -0.5, y: 0.5, z: 0.5, w: 0.5}
-  m_LocalPosition: {x: 0.036000002, y: 0.02, z: 0.000000002730437}
+  m_LocalPosition: {x: 0.019, y: 0.02, z: 0.000000002730437}
   m_LocalScale: {x: 1, y: 0.99999994, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:

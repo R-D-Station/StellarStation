@@ -9,10 +9,14 @@ namespace Shared.World.Blocks
     {
         internal static BlockInfo[] Build() => new BlockInfo[]
         {
-            new BlockInfo(1, "Block", BlockCategory.Generic, (BlockFaceFlags)63, (BlockFaceFlags)63, 1, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1),
-            new BlockInfo(2, "Slab", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 1, new BlockBox[][] { new[] { new BlockBox(0, 12, 0, 16, 16, 16) } }, 1, 1, 1),
-            new BlockInfo(3, "IronWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) }, new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 2, 1),
-            new BlockInfo(4, "Floor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1),
+            new BlockInfo(1, "Block", BlockCategory.Generic, (BlockFaceFlags)63, (BlockFaceFlags)63, 1, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
+            new BlockInfo(2, "SlapFloor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 8, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
+            new BlockInfo(3, "IronWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) }, new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 2, 1, new BlockBox[][] { System.Array.Empty<BlockBox>(), System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
+            new BlockInfo(4, "Floor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
+            new BlockInfo(5, "Door_2x2", BlockCategory.Door, (BlockFaceFlags)63, (BlockFaceFlags)255, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 16, 16, 12) } }, 2, 2, 1, new BlockBox[][] { new[] { new BlockBox(0, 0, 4, 4, 16, 12) }, new[] { new BlockBox(12, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 4, 16, 12) }, new[] { new BlockBox(12, 0, 4, 16, 16, 12) } }, DoorOpening.Auto, new TriggerBox[] { new TriggerBox(0, 0, -20, 32, 32, 4), new TriggerBox(0, 0, 12, 32, 32, 36) }, 5.0f),
+            new BlockInfo(6, "Door_2x1", BlockCategory.Door, (BlockFaceFlags)63, (BlockFaceFlags)255, 0, new BlockBox[][] { new[] { new BlockBox(0, 4, 4, 16, 12, 12) }, new[] { new BlockBox(0, 0, 4, 16, 16, 12) } }, 1, 2, 1, new BlockBox[][] { new[] { new BlockBox(0, 0, 4, 1, 16, 12), new BlockBox(15, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 1, 16, 12), new BlockBox(15, 0, 4, 16, 16, 12) } }, DoorOpening.Auto, new TriggerBox[] { new TriggerBox(0, 0, -20, 16, 32, 4), new TriggerBox(0, 0, 12, 16, 32, 36) }, 5.0f),
+            new BlockInfo(7, "IronHelpWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
+            new BlockInfo(8, "FutureFloor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
         };
     }
 }

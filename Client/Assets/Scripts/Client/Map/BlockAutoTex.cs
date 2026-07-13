@@ -4,12 +4,7 @@ using Shared.World.Blocks;
 
 namespace Client.Map
 {
-    /// <summary>
-    /// Автотекстуринг верха блока — порт тайлового TileReader-пайплайна: форма по 4 план-соседям
-    /// (BlockShapeResolver) + слой углов (правило тайлов: оба кардинала соединены, диагональ — нет;
-    /// кодировка WallCornerCode как есть). Квад верха крутится мешем на 90°·steps, углы компенсируются
-    /// CompensateRotateForMesh — та же единая точка калибровки, что у тайлов. Общее для рендера и редактора.
-    /// </summary>
+    /// <summary>Автотекстуринг верхней грани блока: форма+углы по план-соседям в дочерний TileReader-меш префаба (порт тайлового автотайла).</summary>
     public static class BlockAutoTex
     {
         private static readonly int TopMapId = Shader.PropertyToID("_TopMap");
@@ -21,41 +16,63 @@ namespace Client.Map
         private static readonly int CountXId = Shader.PropertyToID("_count_x");
         private static readonly int CountYId = Shader.PropertyToID("_count_y");
 
-        private static Material _material;
+        private static Shader _tileReader;
         private static MaterialPropertyBlock _mpb;
 
-        /// <summary>Общий материал верха (Custom/TileReader — шейдер тайлового верха, переиспользуем).</summary>
-        public static Material Material
+        /// <summary>Перекрыт ли верх блока объектом сверху (воздух и CoversBlockBelow=false — не перекрывают).</summary>
+        public static bool CoveredAbove(BlockGrid grid, int x, int y, int z)
         {
-            get
-            {
-                if (_material == null)
-                {
-                    var shader = Shader.Find("Custom/TileReader");
-                    _material = shader != null ? new Material(shader) : null;
-                    if (_material != null)
-                    {
-                        // Дефолты шейдера _count_x/_count_y = 0 → деление на ноль в UV; страховка на не-MPB потребителей.
-                        _material.SetFloat(CountXId, 5f);
-                        _material.SetFloat(CountYId, 2f);
-                    }
-                }
-                return _material;
-            }
+            ushort above = grid.GetBlock(x, y, z);
+            if (above == 0)
+                return false;
+            var d = BlockDefinitionResolver.Find(above);
+            return d == null || d.CoversBlockBelow;
         }
 
-        /// <summary>Сосед соединён (та же высота, план): тот же тип либо оба с автотайлом (правила Connection).</summary>
+        /// <summary>Дочерний меш префаба на шейдере Custom/TileReader (верх-грид). Null → префаб верх не несёт.</summary>
+        public static MeshRenderer FindTopRenderer(GameObject instance)
+        {
+            if (_tileReader == null)
+                _tileReader = Shader.Find("Custom/TileReader");
+            if (_tileReader == null || instance == null)
+                return null;
+            var rends = instance.GetComponentsInChildren<MeshRenderer>(true);
+            for (int i = 0; i < rends.Length; i++)
+            {
+                var m = rends[i].sharedMaterial;
+                if (m != null && m.shader == _tileReader)
+                    return rends[i];
+            }
+            return null;
+        }
+
+        /// <summary>Соединён ли сосед автотайлом: свой тип (ConnectsToSameType) или явный список ConnectsToTypes, и его основание на том же уровне (localY==0).</summary>
         public static bool ConnectsTo(BlockGrid grid, BlockDefinition selfDef, ushort selfType, int x, int y, int z)
         {
             ushort other = grid.GetBlock(x, y, z);
             if (other == 0)
                 return false;
-            if (selfDef.Connection != null && selfDef.Connection.ConnectsToSameType && other == selfType)
-                return true;
-            if (selfDef.Connection == null || !selfDef.Connection.ConnectsToOtherConnected)
+
+            var otherDef = other == selfType ? selfDef : BlockDefinitionResolver.Find(other);
+            if (otherDef != null)
+            {
+                MultiBlock.PartToLocal(BlockState.GetPart(grid.GetState(x, y, z)),
+                    otherDef.Size.x, otherDef.Size.z, out _, out int localY, out _);
+                if (localY != 0)
+                    return false;
+            }
+
+            var conn = selfDef.Connection;
+            if (conn == null)
                 return false;
-            var otherDef = BlockDefinitionResolver.Find(other);
-            return otherDef != null && otherDef.Connection != null && otherDef.Connection.UseConnections;
+            if (conn.ConnectsToSameType && other == selfType)
+                return true;
+            var list = conn.ConnectsToTypes;
+            if (list != null)
+                for (int i = 0; i < list.Length; i++)
+                    if (list[i] == other)
+                        return true;
+            return false;
         }
 
         /// <summary>Форма/повороты/маска углов блока по соседям (мир N = +Z).</summary>
@@ -106,38 +123,32 @@ namespace Client.Map
             { Shape = shape; Steps = steps; Cur = cur; CurCorner = curCorner; Rotate = rotate; }
         }
 
-        /// <summary>Настроить квад верха: позиция/поворот (90°·steps вокруг Y, лицом вверх) + MPB TileReader.
-        /// topY — мировая высота верхней грани (верх коллизии блока).</summary>
-        public static TopParams ConfigureQuad(GameObject quad, BlockDefinition def, int x, int z, float topY,
-                                              WallShape shape, int steps, byte cornerMask)
+        /// <summary>Кормит дочерний TileReader-меш верхом через MPB; visible=false гасит грид (_alpha=0).</summary>
+        public static TopParams FeedTopMesh(MeshRenderer r, BlockDefinition def,
+                                            WallShape shape, int steps, byte cornerMask, bool visible)
         {
+            _mpb ??= new MaterialPropertyBlock();
+            _mpb.Clear();
+            if (!visible)
+            {
+                _mpb.SetFloat(AlphaId, 0f);
+                r.SetPropertyBlock(_mpb);
+                return default;
+            }
+
             var (curCorner, cornerRotate) = WallCornerCode.EncodeCorners(cornerMask);
-            // Калибровка атласа: доп. четверть основного слоя крутит квад целиком (угловой слой компенсируется
-            // через effSteps), доп. четверть угла добавляется к финальному _rotate.
-            var cal = def.TopCalibration;
-            int effSteps = (steps + (cal != null ? cal.Main(shape) : 0)) & 3;
-
-            quad.transform.SetPositionAndRotation(
-                new Vector3(x + 0.5f, topY + 0.002f, z + 0.5f),
-                Quaternion.Euler(0f, 90f * effSteps, 0f) * Quaternion.Euler(90f, 0f, 0f));
-
             bool isFloor = def.Category == BlockCategory.Floor;
             int floorBase = isFloor ? WallCornerCode.FloorCornerBaseQuarter : 0;
+            var cal = def.TopCalibration;
+            // effSteps = steps(префаб) + mainQ — на неё же завязана компенсация углового слоя ниже.
+            int mainQ = cal != null ? cal.Main(shape) : 0;
+            int effSteps = (steps + mainQ) & 3;
             byte rotate = (byte)((WallCornerCode.CompensateRotateForMesh(cornerRotate, effSteps)
                 + floorBase + WallCornerCode.ShapeCornerQuarter(isFloor, shape, curCorner)
                 + (cal != null ? cal.Corner(shape, curCorner) : 0)) & 3);
             int cur = WallCornerCode.CurFromShape(shape);
 
-            var r = quad.GetComponent<MeshRenderer>();
-            if (r == null)
-                return new TopParams(shape, effSteps, cur, curCorner, rotate);
-            if (Material != null)
-                r.sharedMaterial = Material;
-
-            // Блок строим С НУЛЯ (без GetPropertyBlock): пул квадов общий на все типы — слитый старый
-            // блок утёк бы (_DownTex прошлой аренды). Текстуры задаём ВСЕГДА (null → black, как дефолт шейдера).
-            _mpb ??= new MaterialPropertyBlock();
-            _mpb.Clear();
+            // MPB строим С НУЛЯ: пул префабов переиспользуется между типами → мержить старый блок нельзя.
             _mpb.SetTexture(TopMapId, def.TopMap != null ? (Texture)def.TopMap : Texture2D.blackTexture);
             _mpb.SetTexture(DownTexId, def.BackingMap != null ? (Texture)def.BackingMap : Texture2D.blackTexture);
             _mpb.SetInteger(CurId, cur);
@@ -147,22 +158,75 @@ namespace Client.Map
             _mpb.SetInteger(CountYId, Mathf.Max(1, def.TopMapCountY));
             _mpb.SetFloat(AlphaId, 1f);
             r.SetPropertyBlock(_mpb);
+
+            ApplyMainRotation(r, mainQ);
             return new TopParams(shape, effSteps, cur, curCorner, rotate);
         }
 
-        /// <summary>Высота верхней грани блока (максимальный top его коллизии; без боксов — полный блок).</summary>
-        public static float TopHeight(Shared.Simulation.Blocks.IBlockShapes shapes, ushort type, byte state)
+        // Сброс к запечённой позе перед доворотом — иначе поза копится при переиспользовании инстанса из пула.
+        private static void ApplyMainRotation(MeshRenderer r, int mainQ)
         {
-            var boxes = shapes.GetBoxes(type, state);
-            float top = 1f;
-            if (boxes.Length > 0)
+            var t = r.transform;
+            var origin = t.GetComponent<TopMeshOrigin>();
+            if (origin == null)
             {
-                top = 0f;
-                for (int i = 0; i < boxes.Length; i++)
-                    if (boxes[i].MaxYf > top)
-                        top = boxes[i].MaxYf;
+                origin = t.gameObject.AddComponent<TopMeshOrigin>();
+                origin.LocalPos = t.localPosition;
+                origin.LocalRot = t.localRotation;
+                origin.Captured = true;
             }
-            return top;
+            t.localPosition = origin.LocalPos;
+            t.localRotation = origin.LocalRot;
+            if ((mainQ & 3) == 0)
+                return;
+            var c = r.bounds.center;
+            t.RotateAround(new Vector3(c.x, t.position.y, c.z), Vector3.up, 90f * mainQ);
+        }
+
+        /// <summary>Кормит боковой (WallRenderers) меш через MPB — SideMap в _TopMap поверх own-параметров материала стены (_count/подложка своя, физического поворота нет).</summary>
+        public static void FeedSideMesh(MeshRenderer r, BlockDefinition def, WallShape shape, byte cornerMask)
+        {
+            r.GetPropertyBlock(_mpb);
+            if (def.SideMap != null)
+                _mpb.SetTexture(TopMapId, def.SideMap);
+            r.SetPropertyBlock(_mpb);
+        }
+
+        /// <summary>Кормит все рендереры верха/боков блока через BlockMaterials-холдер (или FindTopRenderer-фолбэк без холдера).</summary>
+        public static TopParams FeedGrids(GameObject instance, BlockGrid grid, BlockDefinition def, ushort type,
+                                          int x, int y, int z, int rotSteps, out byte corners)
+        {
+            corners = 0;
+            if (instance == null || def == null)
+                return default;
+
+            var holder = instance.GetComponentInChildren<BlockMaterials>(true);
+            MeshRenderer fallbackTop = holder == null ? FindTopRenderer(instance) : null;
+            if (holder == null && fallbackTop == null)
+                return default;
+
+            bool topVisible = def.TopMap != null && !CoveredAbove(grid, x, y + def.Size.y, z);
+            Resolve(grid, def, type, x, y, z, out var shape, out _, out corners);
+
+            if (holder == null)
+                return topVisible
+                    ? FeedTopMesh(fallbackTop, def, shape, rotSteps, corners, true)
+                    : FeedTopMesh(fallbackTop, def, WallShape.Single, 0, 0, false);
+
+            TopParams result = default;
+            var tops = holder.TopRenderers;
+            if (tops != null)
+                for (int i = 0; i < tops.Length; i++)
+                    if (tops[i] != null)
+                        result = topVisible
+                            ? FeedTopMesh(tops[i], def, shape, rotSteps, corners, true)
+                            : FeedTopMesh(tops[i], def, WallShape.Single, 0, 0, false);
+            var walls = holder.WallRenderers;
+            if (walls != null)
+                for (int i = 0; i < walls.Length; i++)
+                    if (walls[i] != null)
+                        FeedSideMesh(walls[i], def, shape, corners);
+            return result;
         }
     }
 }

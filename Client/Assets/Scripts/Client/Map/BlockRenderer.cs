@@ -5,25 +5,10 @@ using Shared.World.Blocks;
 
 namespace Client.Map
 {
-    /// <summary>
-    /// Рендер блок-мира (фаза D1): визуал на блок — префаб из BlockDefinition (пивот = центр низа) либо
-    /// серые кубы по коллизионным боксам. Корень на секцию, обновление посекционно от стрим-событий;
-    /// объекты ПУЛЯТСЯ (дельты не порождают Instantiate/Destroy-шторм). Маркер-блоки в игре не рисуются.
-    /// Оси блок-мира = оси Unity. Cut-away (D2) вешается поверх этого слоя.
-    /// </summary>
+    /// <summary>Рендер блок-мира: пуленый визуал на блок (префаб/куб) посекционно + cut-away поверх слоя.</summary>
     public sealed class BlockRenderer : MonoBehaviour
     {
-        private struct Visual
-        {
-            public GameObject Go;
-            public GameObject PrefabKey; // null = куб из общего пула
-            public Renderer[] Renderers; // кэш для cut-away гейта
-            public int X, Y, Z;
-            public int BaseY;  // основание solid-стека блока: уровень, «на котором он стоит» (фильтр этажей)
-            public bool Hidden;
-        }
-
-        /// <summary>Радиус кольца скрытия потолка вокруг игрока (блоков, chebyshev по плану). Тюнинг D2.</summary>
+        /// <summary>Радиус кольца скрытия потолка вокруг игрока (блоков, chebyshev по плану).</summary>
         private const int CutRingRadius = 10;
         private const float CutMoveThreshold = 0.2f;
 
@@ -61,9 +46,8 @@ namespace Client.Map
         private BlockGrid _grid;
         private IBlockShapes _shapes;
         private Transform _root;
-        private readonly Dictionary<long, List<Visual>> _sections = new();
+        private readonly Dictionary<long, List<BlockView>> _sections = new();
         private readonly Stack<GameObject> _cubePool = new();
-        private GameObject _quadPoolKey; // сентинел PrefabKey квадов верха — пулятся через _prefabPools
         private readonly Dictionary<GameObject, Stack<GameObject>> _prefabPools = new();
 
         // Кэш материалов по цвету: не мутируем материал примитива и не плодим инстанс на куб.
@@ -83,12 +67,6 @@ namespace Client.Map
             _sections.Clear();
             _root = new GameObject("BlockWorld").transform;
             _root.SetParent(transform, false);
-            if (_quadPoolKey == null)
-            {
-                _quadPoolKey = new GameObject("QuadPoolKey");
-                _quadPoolKey.SetActive(false);
-                _quadPoolKey.transform.SetParent(transform, false);
-            }
 
             foreach (var key in grid.Sections.Keys)
             {
@@ -119,7 +97,7 @@ namespace Client.Map
 
             if (visuals == null)
             {
-                visuals = new List<Visual>();
+                visuals = new List<BlockView>();
                 _sections[key] = visuals;
             }
 
@@ -135,8 +113,7 @@ namespace Client.Map
                     }
         }
 
-        /// <summary>Точечная дельта: перестраиваем секцию блока и секции-соседи, чьи визуалы зависят от
-        /// изменившейся ячейки (автотайл/маска углов — план и диагональ; верх-гейт — низ; базы стеков — верх).</summary>
+        /// <summary>Точечная дельта: перестроить секцию блока и секции-соседи, чьи визуалы от него зависят.</summary>
         public void ApplyBlockChange(int x, int y, int z)
         {
             BlockGrid.UnpackKey(BlockGrid.KeyOfBlock(x, y, z), out int cx, out int cy, out int cz);
@@ -157,44 +134,47 @@ namespace Client.Map
                 ApplySection(cx, cy + 1, cz);
         }
 
-        // Текстурный верх (автотекстуринг): квад TileReader над блоком, если задан TopMap и верх открыт.
-        private void SpawnTopQuad(List<Visual> visuals, BlockDefinition def, ushort type, int x, int y, int z, int baseY)
+        /// <summary>Дельта «изменился только Open» у двери: тоггл аниматора на живом инстансе без пересборки секции.</summary>
+        public void ApplyDoorState(int x, int y, int z, ushort type, byte state)
         {
-            if (def == null || def.TopMap == null || _grid.GetBlock(x, y + 1, z) != 0)
+            var info = BlockCatalog.Get(type);
+            Shared.World.Blocks.MultiBlock.AnchorOf(x, y, z, Shared.World.Blocks.BlockState.GetPart(state),
+                info.SizeX, info.SizeZ, Shared.World.Blocks.BlockState.GetFacing(state),
+                out int ax, out int ay, out int az);
+
+            BlockGrid.UnpackKey(BlockGrid.KeyOfBlock(ax, ay, az), out int cx, out int cy, out int cz);
+            if (!_sections.TryGetValue(BlockGrid.Key(cx, cy, cz), out var visuals))
                 return;
 
-            BlockAutoTex.Resolve(_grid, def, type, x, y, z, out var shape, out int steps, out byte corners);
-            float topY = y + BlockAutoTex.TopHeight(_shapes, type, _grid.GetState(x, y, z));
-
-            var quad = RentQuad();
-            BlockAutoTex.ConfigureQuad(quad, def, x, z, topY, shape, steps, corners);
-            visuals.Add(new Visual
+            bool open = Shared.World.Blocks.BlockState.GetOpen(state);
+            for (int i = 0; i < visuals.Count; i++)
             {
-                Go = quad, PrefabKey = _quadPoolKey, Renderers = quad.GetComponentsInChildren<Renderer>(true),
-                X = x, Y = y, Z = z, BaseY = baseY
-            });
-        }
-
-        private GameObject RentQuad()
-        {
-            if (_prefabPools.TryGetValue(_quadPoolKey, out var pool) && pool.Count > 0)
-            {
-                var pooled = pool.Pop();
-                pooled.SetActive(true);
-                return pooled;
+                var v = visuals[i];
+                if (v.X != ax || v.Y != ay || v.Z != az || v.DoorAnim == null)
+                    continue;
+                if (v.DoorOpen != open)
+                    v.PlayDoor(open);
+                return;
             }
-            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            Destroy(quad.GetComponent<Collider>());
-            quad.transform.SetParent(_root, false);
-            return quad;
         }
 
-        private void SpawnBlock(List<Visual> visuals, int x, int y, int z, ushort type)
+        private static BlockView EnsureView(GameObject go)
+            => go.GetComponent<BlockView>() ?? go.AddComponent<BlockView>();
+
+        // Делегирует BlockAutoTex.FeedGrids (верх+бок через BlockMaterials); пишет top-параметры в view (дебаг).
+        private void FeedTopMesh(GameObject instance, BlockDefinition def, ushort type, int x, int y, int z,
+                                 int rotSteps, BlockView view)
+        {
+            var p = BlockAutoTex.FeedGrids(instance, _grid, def, type, x, y, z, rotSteps, out byte corners);
+            if (view != null)
+                view.SetTopDebug(in p, corners);
+        }
+
+        private void SpawnBlock(List<BlockView> visuals, int x, int y, int z, ushort type)
         {
             int baseY = FindStackBase(x, y, z); // статично до изменения мира — секция тогда перестроится
 
             var def = BlockDefinitionResolver.Find(type);
-            SpawnTopQuad(visuals, def, type, x, y, z, baseY); // текстурный верх — независимо от тела
 
             // Автотайл: меш и поворот по 4 план-соседям (BlockShapeResolver, база — соединением на север).
             GameObject prefab = BlockAutoTex.ResolveMesh(_grid, def, type, x, y, z, out int rotSteps);
@@ -222,13 +202,15 @@ namespace Client.Map
                 }
 
                 var go = RentPrefab(prefab);
-                BlockFaceTex.Feed(go, def);
                 go.transform.SetPositionAndRotation(pos, rot);
-                visuals.Add(new Visual
-                {
-                    Go = go, PrefabKey = prefab, Renderers = go.GetComponentsInChildren<Renderer>(true),
-                    X = x, Y = y, Z = z, BaseY = baseY
-                });
+
+                var view = EnsureView(go);
+                view.Bind(x, y, z, baseY, prefab); // данные + кэш рендереров
+                FeedTopMesh(go, def, type, x, y, z, rotSteps, view); // грид + top-debug
+                if (def != null && def.Openable) // дверь-якорь: аниматор для тоггла без пересборки (снап на спавне — внутри SetDoor)
+                    view.SetDoor(go.GetComponentInChildren<Animator>(true),
+                                 Shared.World.Blocks.BlockState.GetOpen(_grid.GetState(x, y, z)));
+                visuals.Add(view);
                 return;
             }
 
@@ -244,16 +226,13 @@ namespace Client.Map
                     y + (b.MinYf + b.MaxYf) * 0.5f,
                     z + (b.MinZf + b.MaxZf) * 0.5f);
                 SetColor(cube, new Color(t, t, t));
-                visuals.Add(new Visual
-                {
-                    Go = cube, PrefabKey = null, Renderers = cube.GetComponentsInChildren<Renderer>(true),
-                    X = x, Y = y, Z = z, BaseY = baseY
-                });
+                var view = EnsureView(cube);
+                view.Bind(x, y, z, baseY, null);
+                visuals.Add(view);
             }
         }
 
-        /// <summary>Cut-away: скрыть всё выше глаз, чей стек стоит выше нашего уровня (+1), в кольце вокруг
-        /// игрока. Стены своего уровня не гасятся никогда. Звать каждый кадр — пересчёт по порогу движения.</summary>
+        /// <summary>Cut-away: скрыть блоки выше глаз чужого стека в кольце вокруг игрока (звать каждый кадр).</summary>
         public void UpdateCutaway(float px, float py, float pz)
         {
             float eyeY = py + Shared.Simulation.Blocks.BlockMovementConfig.StandHeight; // срез над головой
@@ -281,7 +260,7 @@ namespace Client.Map
                 for (int i = 0; i < visuals.Count; i++)
                 {
                     var v = visuals[i];
-                    if (!BaseRuleHide(in v, eyeY, refY, px, pz))
+                    if (!BaseRuleHide(v, eyeY, refY, px, pz))
                         continue;
                     int lx = v.X - _cutOriginX;
                     int lz = v.Z - _cutOriginZ;
@@ -293,31 +272,22 @@ namespace Client.Map
                 }
             }
 
-            // Пасс 2: применяем базу + кап стен — блок выше глаз гаснет, если рядом (8-смежность) вырез
-            // начался не выше него: стены не торчат «колодцем» над срезанным потолком.
+            // Пасс 2: база + кап стен (сосед вскрыт не выше — гасим, чтобы стены не торчали колодцем).
             foreach (var kv in _sections)
             {
                 var visuals = kv.Value;
                 for (int i = 0; i < visuals.Count; i++)
                 {
                     var v = visuals[i];
-                    bool hide = BaseRuleHide(in v, eyeY, refY, px, pz)
+                    bool hide = BaseRuleHide(v, eyeY, refY, px, pz)
                                 || (v.Y >= eyeY && NeighborCutAtOrBelow(v.X, v.Z, v.Y));
-                    if (hide == v.Hidden)
-                        continue;
-                    v.Hidden = hide;
-                    visuals[i] = v;
-                    for (int r = 0; r < v.Renderers.Length; r++)
-                        if (v.Renderers[r] != null)
-                            v.Renderers[r].enabled = !hide;
+                    v.SetHidden(hide); // no-op если не изменилось; инвариант enabled — внутри
                 }
             }
         }
 
-        // Режем всё выше глаз, чей стек СТОИТ выше нашего уровня (+1 — антресоли свои): потолок, перекрытие,
-        // стены и мебель верхнего этажа уходят разом; стены СВОЕГО уровня (база ≤ refY+1) — полные, кольцо
-        // ограничивает разлёт.
-        private bool BaseRuleHide(in Visual v, float eyeY, float refY, float px, float pz)
+        // Базовое правило: гасим верхний этаж целиком (база стека выше нашего +1), кольцо ограничивает разлёт.
+        private bool BaseRuleHide(BlockView v, float eyeY, float refY, float px, float pz)
             => v.Y >= eyeY
                && v.BaseY >= refY + 2
                && Mathf.Max(Mathf.Abs(v.X + 0.5f - px), Mathf.Abs(v.Z + 0.5f - pz)) <= CutRingRadius;
@@ -366,20 +336,17 @@ namespace Client.Map
             return go;
         }
 
-        private void ReturnToPool(in Visual v)
+        private void ReturnToPool(BlockView v)
         {
-            if (v.Go == null)
+            if (v == null || v.gameObject == null)
                 return;
-            // Инвариант пула: возвращаем с ВКЛЮЧЁННЫМИ рендерерами (cut-away гасит их выборочно —
-            // иначе утечка «навсегда невидимых» блоков, см. урок pool-renderer-enabled-leak).
-            if (v.Hidden && v.Renderers != null)
-                for (int r = 0; r < v.Renderers.Length; r++)
-                    if (v.Renderers[r] != null)
-                        v.Renderers[r].enabled = true;
-            v.Go.SetActive(false);
+            // Инвариант пула: возврат с ВКЛЮЧЁННЫМИ рендерерами (cut-away гасит выборочно — иначе утечка
+            // «навсегда невидимых» блоков, урок pool-renderer-enabled-leak) — внутри ResetForPool.
+            v.ResetForPool();
+            v.gameObject.SetActive(false);
             if (v.PrefabKey == null)
             {
-                _cubePool.Push(v.Go);
+                _cubePool.Push(v.gameObject);
             }
             else
             {
@@ -388,7 +355,7 @@ namespace Client.Map
                     pool = new Stack<GameObject>();
                     _prefabPools[v.PrefabKey] = pool;
                 }
-                pool.Push(v.Go);
+                pool.Push(v.gameObject);
             }
         }
 

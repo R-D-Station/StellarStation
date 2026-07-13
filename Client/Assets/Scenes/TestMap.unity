@@ -537,7 +537,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockMapAuthoring
   MapPath: Assets/Map/block-station.smap
-  ShowVisualsInHierarchy: 0
+  ShowVisualsInHierarchy: 1
   BrushInterval: 0.1
   ShowBakedCeilings: 0
   ShowBakedFloors: 0

@@ -5,8 +5,7 @@ using Client.Map;
 
 namespace Client.Editor.Inspectors
 {
-    /// <summary>Инспектор <see cref="TopGridCalibration"/>: таблица доп. поворотов — строки формы,
-    /// колонки: основной слой + типы соединительных углов.</summary>
+    /// <summary>Инспектор <see cref="TopGridCalibration"/>: таблица доп. поворотов (строки — форма, колонки — основной слой и типы углов).</summary>
     [CustomEditor(typeof(TopGridCalibration))]
     public sealed class TopGridCalibrationEditor : UnityEditor.Editor
     {

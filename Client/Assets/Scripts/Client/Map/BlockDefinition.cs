@@ -13,28 +13,38 @@ namespace Client.Map
         [Tooltip("Категория: Door/Hatch — открываемые; Marker — невидимый триггер-блок (виден только в редакторе).")]
         public BlockCategory Category = BlockCategory.Generic;
 
-        [Header("Грани")]
+        /// <summary>Открываемый (дверь/люк) — зеркало BlockInfo.Openable.</summary>
+        public bool Openable => Category == BlockCategory.Door || Category == BlockCategory.Hatch;
+
         [Tooltip("Герметичные грани (атмос). Оси Unity: YPos = верх, YNeg = низ.")]
         public BlockFaceFlags SealsFaces = BlockFaceFlags.All;
         [Tooltip("Непрозрачные грани (обзор/окклюзия/потолок-детект).")]
         public BlockFaceFlags OpaqueFaces = BlockFaceFlags.All;
+        [Tooltip("Скрывает текстурный верх блока ПОД собой (стена на полу прячет верх пола). Выключи для тонких/сквозных объектов (дверь), чтобы пол под ними оставался виден.")]
+        public bool CoversBlockBelow = true;
 
-        [Header("Коллизия")]
-        [Tooltip("AABB в осях Unity (Y — высота), координаты блока [0..1]. Пусто = без коллизии. Квантуется 1/16 при кодогене.")]
+        [Tooltip("AABB в осях Unity (Y — высота), object-space [0..Size]. Пусто = без коллизии. Квантуется 1/16 при кодогене.")]
         public CollisionBox[] CollisionBoxes = { CollisionBox.Full };
+        [Tooltip("Коллизия в ОТКРЫТОМ состоянии (двери). Пусто = проходима насквозь. Object-space [0..Size].")]
+        public CollisionBox[] CollisionBoxesOpen = System.Array.Empty<CollisionBox>();
 
-        [Header("Деконструкция")]
+        [Tooltip("Как открывается: сама (при входе в триггер) или взаимодействием.")]
+        public DoorOpening Opening = DoorOpening.Auto;
+        [Tooltip("Триггер-объёмы авто-двери (object-space; МОГУТ выходить за габарит — ловят подход игрока). Пусто = нет авто-открытия.")]
+        public CollisionBox[] TriggerBoxes = System.Array.Empty<CollisionBox>();
+        [Tooltip("Задержка автозакрытия (сек) после выхода игрока из триггера.")]
+        public float DoorCloseDelay = 1f;
+
         [Tooltip("Число стадий (0 = не деконструируется). Рецепты/инструменты — будущий контент.")]
         public byte DeconstructStages = 0;
 
-        [Header("Размер")]
         [Tooltip("Габарит объекта в блоках (X — ширина, Y — высота, Z — глубина). Оси 1..2, частей ≤ 4 (ёмкость part-бит). Дверь = 2×2×1.")]
         public Vector3Int Size = Vector3Int.one;
 
-        [Header("Соединения (autotiling)")]
         public BlockConnectionData Connection = new BlockConnectionData();
 
-        [Header("Верх (шейдер TileReader)")]
+        [Tooltip("Блок использует грид-систему TileReader (верх/бок). Выкл → грид-поля скрыты в инспекторе.")]
+        public bool UseGrid = true;
         [Tooltip("Грид-текстура верха → _TopMap; форму выбирает шейдер по _cur (автотекстуринг). Пусто → без текстурного верха.")]
         public Texture2D TopMap;
         [Tooltip("Подложка верха → _DownTex.")]
@@ -46,13 +56,9 @@ namespace Client.Map
         [Tooltip("Калибровка поворотов верха (общий ассет на атлас). Пусто → без поправок.")]
         public TopGridCalibration TopCalibration;
 
-        [Header("Грани мешей (TileFaceSprites)")]
-        [Tooltip("Спрайт БОКОВЫХ граней мешей → _SideTex (шейдер кормится per-инстанс). Пусто → белый.")]
-        public Texture2D FaceSideTex;
-        [Tooltip("Спрайт ВЕРХНЕЙ грани мешей → _TopTex. Пусто → белый.")]
-        public Texture2D FaceTopTex;
+        [Tooltip("Грид-текстура боковины → _TopMap материала боковых мешей (BlockMaterials.WallRenderers); форму выбирает автотекстуринг. Пусто → без бокового грида.")]
+        public Texture2D SideMap;
 
-        [Header("Визуал (до дизайн-пасса рендера)")]
         [Tooltip("Префаб блока. Пусто → серые кубы по боксам. Резолв по id через Resources — ассет BlockDefinition должен лежать в папке Resources.")]
         public GameObject Prefab;
         [Tooltip("Где у префаба пивот: Низ (центр низа объекта) или Центр (модель без обвязки, как у Unity-примитивов).")]
@@ -79,9 +85,7 @@ namespace Client.Map
         [Tooltip("Спрайт превью в редакторе; для маркеров — единственный визуал (Editor-only).")]
         public Sprite EditorSprite;
 
-        /// <summary>Автотайл блока: с чем соединяться (4 план-соседа на той же высоте) и 6 мешей по форме.
-        /// Конвенция: базовый меш соединением на север (+Z), поворот 90°-шагами по часовой (BlockShapeResolver).
-        /// Пустой меш формы → фолбэк на Prefab/кубы.</summary>
+        /// <summary>Автотайл блока: с чем соединяться и 6 мешей по форме (база — соединение на север, поворот 90°-шагами).</summary>
         [System.Serializable]
         public sealed class BlockConnectionData
         {
@@ -89,8 +93,8 @@ namespace Client.Map
             public bool UseConnections = false;
             [Tooltip("Соединяться с блоками того же типа.")]
             public bool ConnectsToSameType = true;
-            [Tooltip("Соединяться с другими блоками, у которых тоже включён автотайл.")]
-            public bool ConnectsToOtherConnected = true;
+            [Tooltip("Явный список типов блоков из каталога, с которыми соединяться (помимо своего типа).")]
+            public ushort[] ConnectsToTypes = System.Array.Empty<ushort>();
 
             public GameObject MeshSingle, MeshEnd, MeshStraight, MeshCorner, MeshT, MeshCross;
 
@@ -106,7 +110,7 @@ namespace Client.Map
             };
         }
 
-        /// <summary>Редактируемый AABB (center+size, оси Unity: Y — высота). Бейкается в BlockBox (1/16).</summary>
+        /// <summary>Редактируемый AABB (center+size, Y — высота), бейкается в BlockBox (1/16).</summary>
         [System.Serializable]
         public struct CollisionBox
         {

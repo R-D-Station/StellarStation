@@ -1,13 +1,16 @@
 namespace Shared.World.Blocks
 {
-    /// <summary>
-    /// Раскладка state-байта блока (per-block рантайм-состояние экземпляра, второй канал секции):
-    /// Open(1) | Pipe(1) | Wire(1) | Facing(2) | Part(2) | резерв(1). Нулевой state не хранится.
-    /// </summary>
+    /// <summary>Раскладка state-байта блока: Open(1) | Pipe(1) | Wire(1) | Facing(2) | Part(2) | резерв(1).</summary>
     public static class BlockState
     {
         /// <summary>Открываемый объект (дверь/люк) сейчас открыт.</summary>
         public const byte Open = 1 << 0;
+
+        /// <summary>Открыт ли (бит Open).</summary>
+        public static bool GetOpen(byte state) => (state & Open) != 0;
+
+        public static byte WithOpen(byte state, bool open)
+            => (byte)(open ? state | Open : state & ~Open);
         /// <summary>В блоке проложена труба (подпольная инфраструктура).</summary>
         public const byte Pipe = 1 << 1;
         /// <summary>В блоке проложен провод.</summary>

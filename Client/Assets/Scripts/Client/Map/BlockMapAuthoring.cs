@@ -5,17 +5,13 @@ using Shared.World.Blocks;
 
 namespace Client.Map
 {
-    /// <summary>
-    /// In-scene редактор блок-карт (замена тайлового MapEditor): держит BlockGrid в памяти редактора и
-    /// живую куб-визуализацию (HideAndDontSave — в .unity не сохраняется). Кисть/слои — в
-    /// BlockMapAuthoringEditor (SceneView); файл — .smap v10 (BlockMapSerializer). Оси блок-мира = оси Unity.
-    /// </summary>
+    /// <summary>In-scene редактор блок-карт: держит BlockGrid + живую куб-визуализацию (не сохраняется в сцену).</summary>
     public sealed class BlockMapAuthoring : MonoBehaviour
     {
         [Tooltip("Файл карты v10 (путь от корня проекта).")]
         public string MapPath = "Assets/Map/block-station.smap";
 
-        [Tooltip("Отладка: визуалы видны в иерархии (в сцену не сохраняются); на верх-квадах — BlockTopQuadInfo со значениями шейдера. Пересборка при переключении.")]
+        [Tooltip("Отладка: визуалы видны в иерархии (в сцену не сохраняются); на ячейках — BlockView (данные блока + значения верх-грида + дамп шейдера). Пересборка при переключении.")]
         public bool ShowVisualsInHierarchy = false;
 
         private HideFlags VisFlags => ShowVisualsInHierarchy ? HideFlags.DontSave : HideFlags.HideAndDontSave;
@@ -69,8 +65,7 @@ namespace Client.Map
 
         public ushort GetBlock(int x, int y, int z) => Grid?.GetBlock(x, y, z) ?? (ushort)0;
 
-        /// <summary>Поставить объект (в т.ч. мульти-блок) якорем в (x,y,z) с поворотом facing.
-        /// Ставится только если ВСЕ позиции свободны. true — если поставлен.</summary>
+        /// <summary>Поставить объект якорем в (x,y,z); true — если поставлен (все позиции футпринта были свободны).</summary>
         public bool PaintObject(int x, int y, int z, BlockDefinition def, int facing)
         {
             if (Grid == null || def == null || def.Type == 0)
@@ -145,9 +140,7 @@ namespace Client.Map
 
         private Transform _bakeRoot;
 
-        /// <summary>Запечь разметку АДДИТИВНО (существующие/ручные биты не трогаем — только добавляем новое):
-        /// потолок = solid с открытой нижней гранью; пол-интерьер = открытая верхняя грань с крышей в скане.
-        /// Полный сброс — «Remove Bake» в меню компонента (⋮).</summary>
+        /// <summary>Запечь разметку потолков/полов-интерьеров аддитивно (ручные биты не трогает).</summary>
         public void BakeLayers()
         {
             if (Grid == null) return;
@@ -298,6 +291,11 @@ namespace Client.Map
 
             var cell = new GameObject($"b({x},{y},{z})") { hideFlags = VisFlags };
             cell.transform.SetParent(_visRoot, false);
+            if (ShowVisualsInHierarchy) // рендер-диагностика: выбери ячейку в иерархии → инспектор BlockView
+            {
+                var cellView = cell.AddComponent<BlockView>();
+                cellView.X = x; cellView.Y = y; cellView.Z = z;
+            }
 
             var def = BlockDefinitionResolver.Find(type);
             // Автотайл: меш по 4 план-соседям (как в BlockRenderer); нет меша формы → фолбэк на Prefab.
@@ -310,16 +308,14 @@ namespace Client.Map
                 // Мульти-блок: визуал рисует только якорная часть (0), центрируясь по футпринту с поворотом.
                 byte st = Grid.GetState(x, y, z);
                 bool multi = def.Size.x * def.Size.y * def.Size.z > 1;
-                if (multi && BlockState.GetPart(st) != 0)
+                if (multi && BlockState.GetPart(st) != 0) // не-якорная часть мульти-блока — визуал не рисуем
                 {
-                    AddTopQuad(cell, def, type, x, y, z); // верх части (напр. верх 2-высотной стены)
                     _cells[key] = cell;
                     return;
                 }
 
                 var view = Instantiate(prefab, cell.transform);
                 view.hideFlags = VisFlags;
-                BlockFaceTex.Feed(view, def);
                 float pivotY = def.PivotYOffset; // Низ = 0; Центр = половина высоты объекта
                 var shapeRot = Quaternion.Euler(0f, 90f * rotSteps, 0f);
                 if (multi)
@@ -334,7 +330,7 @@ namespace Client.Map
                 {
                     view.transform.SetPositionAndRotation(new Vector3(x + 0.5f, y + pivotY, z + 0.5f), shapeRot);
                 }
-                AddTopQuad(cell, def, type, x, y, z);
+                FeedTopMesh(view, def, type, x, y, z, rotSteps);
                 _cells[key] = cell;
                 return;
             }
@@ -353,31 +349,18 @@ namespace Client.Map
                         new Vector3(x + (b.MinXf + b.MaxXf) * 0.5f, y + (b.MinYf + b.MaxYf) * 0.5f, z + (b.MinZf + b.MaxZf) * 0.5f),
                         new Vector3(b.MaxXf - b.MinXf, b.MaxYf - b.MinYf, b.MaxZf - b.MinZf), new Color(t, t, t));
             }
-
-            AddTopQuad(cell, def, type, x, y, z);
             _cells[key] = cell;
         }
 
-        // Превью текстурного верха (автотекстуринг TileReader) — если задан TopMap и верх открыт.
-        private void AddTopQuad(GameObject cell, BlockDefinition def, ushort type, int x, int y, int z)
+        // Делегирует BlockAutoTex.FeedGrids (верх+бок через BlockMaterials); top-параметры — в BlockView при отладке.
+        private void FeedTopMesh(GameObject instance, BlockDefinition def, ushort type, int x, int y, int z, int rotSteps)
         {
-            if (def == null || def.TopMap == null || Grid.GetBlock(x, y + 1, z) != 0)
-                return;
-
-            var quad = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            quad.hideFlags = VisFlags;
-            DestroyCell(quad.GetComponent<Collider>());
-            quad.transform.SetParent(cell.transform, false);
-
-            BlockAutoTex.Resolve(Grid, def, type, x, y, z, out var shape, out int steps, out byte corners);
-            float topY = y + BlockAutoTex.TopHeight(BlockCatalogShapes.Instance, type, Grid.GetState(x, y, z));
-            var p = BlockAutoTex.ConfigureQuad(quad, def, x, z, topY, shape, steps, corners);
+            var p = BlockAutoTex.FeedGrids(instance, Grid, def, type, x, y, z, rotSteps, out byte corners);
             if (ShowVisualsInHierarchy)
             {
-                quad.name = $"top({x},{y},{z})";
-                var info = quad.AddComponent<BlockTopQuadInfo>();
-                info.Shape = p.Shape; info.Steps = p.Steps; info.CornerMask = corners;
-                info.Cur = p.Cur; info.CurCorner = p.CurCorner; info.Rotate = p.Rotate;
+                var bv = instance.GetComponentInParent<BlockView>(); // BlockView висит на ячейке-родителе
+                if (bv != null)
+                    bv.SetTopDebug(in p, corners);
             }
         }
 
@@ -443,6 +426,79 @@ namespace Client.Map
                     RebuildBakeVisual();
                 }
             };
+        }
+
+        // Быстрый дамп рендер-состояния первых визуалов в консоль (не требует тумблера иерархии).
+        [ContextMenu("Диагностика рендера (в консоль)")]
+        private void DumpRenderDiag()
+        {
+            if (_cells.Count == 0)
+            {
+                Debug.Log("[BlockMapAuthoring] нет визуалов — перезагрузи/перекрась карту.");
+                return;
+            }
+            int n = 0;
+            foreach (var kv in _cells)
+            {
+                if (kv.Value == null || kv.Value.GetComponentInChildren<MeshRenderer>(true) == null)
+                    continue;
+                Debug.Log(BlockView.Dump(kv.Value), kv.Value);
+                if (++n >= 5) break;
+            }
+            if (n == 0)
+                Debug.Log("[BlockMapAuthoring] визуалы без MeshRenderer (маркеры/кубы?).");
+        }
+
+        // Диагностика автотайла: находит аномалии — форма Single, хотя рядом (план или y±1) есть тот же тип.
+        [ContextMenu("Диагностика автотайла (в консоль)")]
+        private void DumpAutotileDiag()
+        {
+            if (Grid == null) { Debug.Log("[Autotile] нет карты."); return; }
+            int connectable = 0, shown = 0;
+            foreach (var kv in Grid.Sections)
+            {
+                BlockGrid.UnpackKey(kv.Key, out int cx, out int cy, out int cz);
+                var sec = kv.Value;
+                for (int ly = 0; ly < ChunkSection.Size; ly++)
+                    for (int lz = 0; lz < ChunkSection.Size; lz++)
+                        for (int lx = 0; lx < ChunkSection.Size; lx++)
+                        {
+                            ushort t = sec.GetBlock(ChunkSection.LocalIndex(lx, ly, lz));
+                            if (t == 0) continue;
+                            var def = BlockDefinitionResolver.Find(t);
+                            if (def?.Connection == null || !def.Connection.UseConnections) continue;
+                            connectable++;
+
+                            int wx = cx * 16 + lx, wy = cy * 16 + ly, wz = cz * 16 + lz;
+                            BlockAutoTex.Resolve(Grid, def, t, wx, wy, wz, out var shape, out _, out _);
+                            if (shape != Shared.World.WallShape.Single)
+                                continue; // не одиночный — соединился, не аномалия
+                            // аномалия только если тот же тип реально рядом (иначе Single корректен)
+                            if (!SameTypePlan(wx, wy, wz, t) && !SameTypePlan(wx, wy - 1, wz, t) && !SameTypePlan(wx, wy + 1, wz, t))
+                                continue;
+
+                            Debug.Log($"[Autotile] ⚠ ({wx},{wy},{wz}) '{def.DisplayName}' форма=Single, но свой тип рядом. " +
+                                $"N[{Col(wx, wy, wz + 1, t)} conn={BlockAutoTex.ConnectsTo(Grid, def, t, wx, wy, wz + 1)}] " +
+                                $"E[{Col(wx + 1, wy, wz, t)} conn={BlockAutoTex.ConnectsTo(Grid, def, t, wx + 1, wy, wz)}] " +
+                                $"S[{Col(wx, wy, wz - 1, t)} conn={BlockAutoTex.ConnectsTo(Grid, def, t, wx, wy, wz - 1)}] " +
+                                $"W[{Col(wx - 1, wy, wz, t)} conn={BlockAutoTex.ConnectsTo(Grid, def, t, wx - 1, wy, wz)}] " +
+                                $"| ConnectsToSameType={def.Connection.ConnectsToSameType}");
+                            if (++shown >= 12) { Debug.Log("[Autotile] …обрезано на 12."); return; }
+                        }
+            }
+            Debug.Log($"[Autotile] connectable-блоков: {connectable}, аномалий (Single рядом со своими): {shown}.");
+        }
+
+        // Есть ли в плане (4 соседа на уровне y) блок типа t.
+        private bool SameTypePlan(int x, int y, int z, ushort t)
+            => Grid.GetBlock(x, y, z + 1) == t || Grid.GetBlock(x + 1, y, z) == t
+               || Grid.GetBlock(x, y, z - 1) == t || Grid.GetBlock(x - 1, y, z) == t;
+
+        // Вертикальный срез соседней колонны (y-1/y/y+1); * помечает свой тип t.
+        private string Col(int nx, int wy, int nz, ushort t)
+        {
+            ushort a = Grid.GetBlock(nx, wy - 1, nz), b = Grid.GetBlock(nx, wy, nz), c = Grid.GetBlock(nx, wy + 1, nz);
+            return $"y-1={a}{(a == t ? "*" : "")} y={b}{(b == t ? "*" : "")} y+1={c}{(c == t ? "*" : "")}";
         }
 #endif
 

@@ -45,6 +45,9 @@ public class SVars
     /// <summary>Entity-PVS: окно этажей интереса |E.Z - C.Z| ≤ depth. 0 = только свой этаж.</summary>
     public int EntityInterestZDepth = 0;
 
+    /// <summary>Диагностика авто-дверей: лог реестра при загрузке + троттл-лог детекта раз в секунду.</summary>
+    public bool DebugAutoDoors = false;
+
     /// <summary>Загрузка настроек из JSON. Любая ошибка → дефолты, сервер не падает.</summary>
     public static void LoadFromJson(string path)
     {

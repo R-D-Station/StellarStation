@@ -3,8 +3,7 @@ using Shared.World;
 
 namespace Client.Map
 {
-    /// <summary>Визуальная калибровка верха-грида (TileReader): доп. повороты ×90° ПОВЕРХ базовых правил
-    /// WallCornerCode — основной слой по форме и слой углов по форме×типу угла. Один ассет на атлас.</summary>
+    /// <summary>Доп. повороты ×90° верха-грида поверх базовых правил WallCornerCode: основной слой и слой углов, один ассет на атлас.</summary>
     [CreateAssetMenu(menuName = "Station/Top Grid Calibration", fileName = "TopGridCalibration")]
     public sealed class TopGridCalibration : ScriptableObject
     {

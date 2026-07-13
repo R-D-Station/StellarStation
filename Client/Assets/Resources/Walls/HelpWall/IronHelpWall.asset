@@ -1,0 +1,47 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2a5ba86ce8fa84d4aa708dd205f2ef8f, type: 3}
+  m_Name: IronHelpWall
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockDefinition
+  Type: 7
+  DisplayName: IronHelpWall
+  Category: 2
+  SealsFaces: 63
+  OpaqueFaces: 63
+  CoversBlockBelow: 1
+  CollisionBoxes:
+  - Center: {x: 0.5, y: 0.5, z: 0.5}
+    Size: {x: 1, y: 1, z: 1}
+  CollisionBoxesOpen: []
+  Opening: 0
+  TriggerBoxes: []
+  DoorCloseDelay: 1
+  DeconstructStages: 0
+  Size: {x: 1, y: 1, z: 1}
+  Connection:
+    UseConnections: 1
+    ConnectsToSameType: 1
+    ConnectsToOtherConnected: 0
+    MeshSingle: {fileID: 3465880795150428724, guid: 5917eb5febd5dab408232fc6d373b5e9, type: 3}
+    MeshEnd: {fileID: 3899318142779029826, guid: ca523752d760bee46a999616737a2c2b, type: 3}
+    MeshStraight: {fileID: 9044213943688244232, guid: 27241dc6f9ab0fe4c88d70fc9a1fd8ef, type: 3}
+    MeshCorner: {fileID: 1159597351609551204, guid: 1c9bc8f05dccb3547a2f8514dc49b5bb, type: 3}
+    MeshT: {fileID: 2860752718409877910, guid: 7a5fe244879d063459cad38ba35485b6, type: 3}
+    MeshCross: {fileID: 2674634547497210640, guid: f831819020012a046b3c40c9bf72035f, type: 3}
+  TopMap: {fileID: 2800000, guid: 2e9d927726fb23d44b693ce1b4647424, type: 3}
+  BackingMap: {fileID: 0}
+  TopMapCountX: 5
+  TopMapCountY: 2
+  TopCalibration: {fileID: 11400000, guid: 91ff7738f8532034caff18df93d8ac9f, type: 2}
+  Prefab: {fileID: 3465880795150428724, guid: 5917eb5febd5dab408232fc6d373b5e9, type: 3}
+  Pivot: 0
+  EditorSprite: {fileID: 0}
