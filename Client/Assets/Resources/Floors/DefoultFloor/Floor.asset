@@ -30,18 +30,20 @@ MonoBehaviour:
   Connection:
     UseConnections: 1
     ConnectsToSameType: 1
-    ConnectsToOtherConnected: 0
+    ConnectsToTypes: 
     MeshSingle: {fileID: 5886712932950718308, guid: 4b605fb98c9d75a42b883ecdda07d8b6, type: 3}
     MeshEnd: {fileID: 4488766033248980518, guid: 6a7c028fb46cdfb4394f621e7f2a0f14, type: 3}
     MeshStraight: {fileID: 6226776728167343289, guid: 7e248c3bbe4c23a4fa9649528bdcc192, type: 3}
     MeshCorner: {fileID: 4376710111407018939, guid: aa277530c42d5d04bb661b3674505bd8, type: 3}
     MeshT: {fileID: 2476352247093195437, guid: b711e138dfcfd00419f207312c6bdb0a, type: 3}
     MeshCross: {fileID: 8947755035325840453, guid: 751f3cc5fadca154b850c9c66adc2e3b, type: 3}
+  UseGrid: 1
   TopMap: {fileID: 2800000, guid: 09460d0c08afa584cbb0c289176d866f, type: 3}
   BackingMap: {fileID: 2800000, guid: 952fbe0c5edf9534789ac3e0af0250ed, type: 3}
   TopMapCountX: 5
   TopMapCountY: 2
   TopCalibration: {fileID: 11400000, guid: d62ddf4f9f455cb47974dcdcfffe2f98, type: 2}
+  SideMap: {fileID: 2800000, guid: 72a07ed9012e8534580861bc391bbb82, type: 3}
   Prefab: {fileID: 5886712932950718308, guid: 4b605fb98c9d75a42b883ecdda07d8b6, type: 3}
   Pivot: 1
   EditorSprite: {fileID: 0}

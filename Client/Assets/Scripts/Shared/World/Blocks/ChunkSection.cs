@@ -17,12 +17,16 @@ namespace Shared.World.Blocks
         private ushort[] _raw; // null, пока палитры хватает
         private readonly Dictionary<int, byte> _states = new();
         private readonly Dictionary<int, byte> _bake = new(); // авторская разметка (потолок/пол-интерьер), v11
+        private readonly Dictionary<int, ushort> _zone = new();
+        private readonly Dictionary<int, FloorSeed> _seeds = new();
         private int _nonAirCount;
 
         /// <summary>Бейк-биты (запекание карты): нижняя грань — потолок.</summary>
         public const byte BakeCeiling = 1 << 0;
         /// <summary>Бейк-биты: верхняя грань — пол интерьера (комната станции/шатла).</summary>
         public const byte BakeInteriorFloor = 1 << 1;
+        public const byte BakeDivider = 1 << 2;
+        public const byte BakeMerge = 1 << 3;
 
         /// <summary>Секция целиком Air (state на Air не бывает) — хранить/слать её не нужно.</summary>
         public bool IsEmpty => _nonAirCount == 0;
@@ -70,9 +74,38 @@ namespace Shared.World.Blocks
                 _nonAirCount--;
                 _states.Remove(localIndex);
                 _bake.Remove(localIndex);
+                _seeds.Remove(localIndex);
             }
             return true;
         }
+
+        public ushort GetZone(int localIndex) => _zone.TryGetValue(localIndex, out ushort z) ? z : (ushort)0;
+
+        public bool SetZone(int localIndex, ushort zone)
+        {
+            ushort old = GetZone(localIndex);
+            if (old == zone)
+                return false;
+            if (zone == 0)
+                _zone.Remove(localIndex);
+            else
+                _zone[localIndex] = zone;
+            return true;
+        }
+
+        public bool TryGetSeed(int localIndex, out FloorSeed seed) => _seeds.TryGetValue(localIndex, out seed);
+
+        public bool SetSeed(int localIndex, in FloorSeed seed)
+        {
+            if (GetBlock(localIndex) == 0)
+                return false;
+            if (_seeds.TryGetValue(localIndex, out var old) && old.SameAs(in seed))
+                return false;
+            _seeds[localIndex] = seed;
+            return true;
+        }
+
+        public bool RemoveSeed(int localIndex) => _seeds.Remove(localIndex);
 
         public byte GetBake(int localIndex) => _bake.TryGetValue(localIndex, out byte b) ? b : (byte)0;
 
@@ -128,10 +161,13 @@ namespace Shared.World.Blocks
         internal ushort[] Raw => _raw;
         internal Dictionary<int, byte> States => _states;
         internal Dictionary<int, byte> Bake => _bake;
+        internal Dictionary<int, ushort> Zone => _zone;
+        internal Dictionary<int, FloorSeed> Seeds => _seeds;
 
         /// <summary>Собрать секцию из десериализованных данных (raw-режим: palette/indices = null).</summary>
         internal static ChunkSection FromData(BlockPalette palette, byte[] indices, ushort[] raw, Dictionary<int, byte> states,
-                                              Dictionary<int, byte> bake = null)
+                                              Dictionary<int, byte> bake = null,
+                                              Dictionary<int, ushort> zone = null, Dictionary<int, FloorSeed> seeds = null)
         {
             var s = new ChunkSection();
             if (raw != null)
@@ -158,6 +194,14 @@ namespace Shared.World.Blocks
                 foreach (var kv in bake)
                     if (s.GetBlock(kv.Key) != 0)
                         s._bake[kv.Key] = kv.Value;
+            if (zone != null)
+                foreach (var kv in zone)
+                    if (kv.Value != 0)
+                        s._zone[kv.Key] = kv.Value;
+            if (seeds != null)
+                foreach (var kv in seeds)
+                    if (s.GetBlock(kv.Key) != 0)
+                        s._seeds[kv.Key] = kv.Value;
             return s;
         }
     }

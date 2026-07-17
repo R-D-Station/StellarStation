@@ -15,7 +15,7 @@ namespace Shared.World.Blocks
     public static class BlockMapSerializer
     {
         public const int Magic = MapSerializer.Magic; // 'SMAP' — общее семейство форматов карт
-        public const ushort Version = 11;             // v11 = v10 + бейк-канал; v10 читается (бейк пуст)
+        public const ushort Version = 12;
         public const ushort MinVersion = 10;
 
         private const byte EncodingPalette = 0;
@@ -89,6 +89,24 @@ namespace Shared.World.Blocks
             {
                 w.Write((ushort)kv.Key);
                 w.Write(kv.Value);
+            }
+
+            var zone = s.Zone;
+            w.Write((ushort)zone.Count);
+            foreach (var kv in zone.OrderBy(p => p.Key))
+            {
+                w.Write((ushort)kv.Key);
+                w.Write(kv.Value);
+            }
+
+            var seeds = s.Seeds;
+            w.Write((ushort)seeds.Count);
+            foreach (var kv in seeds.OrderBy(p => p.Key))
+            {
+                w.Write((ushort)kv.Key);
+                w.Write(kv.Value.Name ?? string.Empty);
+                w.Write(kv.Value.Rank);
+                w.Write(kv.Value.Floor);
             }
         }
 
@@ -177,7 +195,31 @@ namespace Shared.World.Blocks
                 }
             }
 
-            return ChunkSection.FromData(palette, indices, raw, states, bake);
+            Dictionary<int, ushort> zone = null;
+            Dictionary<int, FloorSeed> seeds = null;
+            if (version >= 12)
+            {
+                zone = new Dictionary<int, ushort>();
+                ushort zoneCount = r.ReadUInt16();
+                for (int i = 0; i < zoneCount; i++)
+                {
+                    ushort li = r.ReadUInt16();
+                    zone[li] = r.ReadUInt16();
+                }
+
+                seeds = new Dictionary<int, FloorSeed>();
+                ushort seedCount = r.ReadUInt16();
+                for (int i = 0; i < seedCount; i++)
+                {
+                    ushort li = r.ReadUInt16();
+                    string name = r.ReadString();
+                    int rank = r.ReadInt32();
+                    int floor = r.ReadInt32();
+                    seeds[li] = new FloorSeed(name, rank, floor);
+                }
+            }
+
+            return ChunkSection.FromData(palette, indices, raw, states, bake, zone, seeds);
         }
 
         public static void SaveToFile(string path, BlockGrid grid)

@@ -28,7 +28,10 @@ namespace Shared.World.Blocks
         Hatch = 5,
         Ladder = 6,
         /// <summary>Невидимый триггер-блок (спавн и т.п.): виден только в редакторе, коллизия Empty.</summary>
-        Marker = 7
+        Marker = 7,
+        FloorAnchor = 8,
+        Divider = 9,
+        MergeMarker = 10
     }
 
     /// <summary>Как открывается дверь/люк (для Category Door/Hatch).</summary>
@@ -119,7 +122,9 @@ namespace Shared.World.Blocks
         public int PartCount => _boxes.Length;
 
         public bool Openable => Category == BlockCategory.Door || Category == BlockCategory.Hatch;
-        public bool IsMarker => Category == BlockCategory.Marker;
+        public bool IsMarker => Category == BlockCategory.Marker
+                                || Category == BlockCategory.Divider || Category == BlockCategory.MergeMarker;
+        public bool IsFloorAnchor => Category == BlockCategory.FloorAnchor;
 
         public bool HasCollision
         {

@@ -177,6 +177,54 @@ namespace Shared.World.Blocks
             return true;
         }
 
+        public ushort GetZone(int x, int y, int z)
+        {
+            if (!InBounds(y))
+                return 0;
+            var s = GetSection(FloorDiv(x, ChunkSection.Size), FloorDiv(y, ChunkSection.Size), FloorDiv(z, ChunkSection.Size));
+            return s?.GetZone(LocalIndex(x, y, z)) ?? (ushort)0;
+        }
+
+        public bool SetZone(int x, int y, int z, ushort zone)
+        {
+            CheckWriteBounds(y);
+            long key = Key(FloorDiv(x, ChunkSection.Size), FloorDiv(y, ChunkSection.Size), FloorDiv(z, ChunkSection.Size));
+            if (!_sections.TryGetValue(key, out var s) || !s.SetZone(LocalIndex(x, y, z), zone))
+                return false;
+            _dirty.Add(key);
+            return true;
+        }
+
+        public bool TryGetSeed(int x, int y, int z, out FloorSeed seed)
+        {
+            seed = default;
+            if (!InBounds(y))
+                return false;
+            var s = GetSection(FloorDiv(x, ChunkSection.Size), FloorDiv(y, ChunkSection.Size), FloorDiv(z, ChunkSection.Size));
+            return s != null && s.TryGetSeed(LocalIndex(x, y, z), out seed);
+        }
+
+        public bool SetSeed(int x, int y, int z, in FloorSeed seed)
+        {
+            CheckWriteBounds(y);
+            long key = Key(FloorDiv(x, ChunkSection.Size), FloorDiv(y, ChunkSection.Size), FloorDiv(z, ChunkSection.Size));
+            if (!_sections.TryGetValue(key, out var s) || !s.SetSeed(LocalIndex(x, y, z), in seed))
+                return false;
+            _dirty.Add(key);
+            return true;
+        }
+
+        public bool RemoveSeed(int x, int y, int z)
+        {
+            if (!InBounds(y))
+                return false;
+            long key = KeyOfBlock(x, y, z);
+            if (!_sections.TryGetValue(key, out var s) || !s.RemoveSeed(LocalIndex(x, y, z)))
+                return false;
+            _dirty.Add(key);
+            return true;
+        }
+
         /// <summary>Ключ секции, содержащей блок (для стрима/дельт).</summary>
         public static long KeyOfBlock(int x, int y, int z)
             => Key(FloorDiv(x, ChunkSection.Size), FloorDiv(y, ChunkSection.Size), FloorDiv(z, ChunkSection.Size));

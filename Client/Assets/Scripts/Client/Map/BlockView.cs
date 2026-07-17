@@ -11,7 +11,11 @@ namespace Client.Map
         public int X, Y, Z;
         [Tooltip("Основание solid-стека: уровень, «на котором стоит» (фильтр этажей cut-away).")]
         public int BaseY;
+        [Tooltip("Нижняя грань открыта (под блоком не-solid) — кандидат-потолок для cut-away.")]
+        public bool BottomOpen;
         public bool Hidden;
+        [Tooltip("Текущая cut-альфа [0..1]: 0 = enabled off, дробь = MPB _alpha.")]
+        public float Alpha = 1f;
         public bool DoorOpen;
 
         [Header("Верх-грид (дебаг)")]
@@ -26,30 +30,110 @@ namespace Client.Map
         private static readonly int DoorOpenTrigger = Animator.StringToHash("Open");
         private static readonly int DoorCloseTrigger = Animator.StringToHash("Close");
 
+        private const float HideEps = 0.001f;
+        private const float ShowEps = 0.999f;
+
+        private static readonly int AlphaId = Shader.PropertyToID("_alpha");
+        private static MaterialPropertyBlock _alphaMpb;
+
+        [System.NonSerialized] private float[] _bakedAlpha;
+        [System.NonSerialized] private bool _bakedCaptured;
+        [System.NonSerialized] private bool _alphaOverridden;
+
         /// <summary>Привязать данные блока + кэшировать рендереры (звать при спавне/аренде из пула).</summary>
         public void Bind(int x, int y, int z, int baseY, GameObject prefabKey)
         {
             X = x; Y = y; Z = z; BaseY = baseY;
+            BottomOpen = false;
             PrefabKey = prefabKey;
             Renderers = GetComponentsInChildren<Renderer>(true);
             Hidden = false;
+            Alpha = 1f;
+            _bakedCaptured = false;
+            _alphaOverridden = false;
             DoorAnim = null;
             DoorOpen = false;
         }
 
-        /// <summary>Гейт cut-away: тоггл всех рендереров блока. Возврат в пул восстанавливает enabled (ResetForPool).</summary>
-        public void SetHidden(bool hidden)
+        public void SetHidden(bool hidden) => SetAlpha(hidden ? 0f : 1f);
+
+        public void SetAlpha(float a)
         {
-            if (hidden == Hidden || Renderers == null)
+            a = Mathf.Clamp01(a);
+            if (Renderers == null || Mathf.Abs(a - Alpha) < 0.0005f)
             {
-                Hidden = hidden;
+                Alpha = a;
+                Hidden = a <= HideEps;
                 return;
             }
-            Hidden = hidden;
-            for (int i = 0; i < Renderers.Length; i++)
-                if (Renderers[i] != null)
-                    Renderers[i].enabled = !hidden;
+            bool wasHidden = Alpha <= HideEps;
+            Alpha = a;
+
+            if (a <= HideEps)
+            {
+                Hidden = true;
+                for (int i = 0; i < Renderers.Length; i++)
+                    if (Renderers[i] != null)
+                        Renderers[i].enabled = false;
+                return;
+            }
+
+            Hidden = false;
+            if (wasHidden)
+                for (int i = 0; i < Renderers.Length; i++)
+                    if (Renderers[i] != null)
+                        Renderers[i].enabled = true;
+
+            if (a >= ShowEps)
+                RestoreBakedAlpha();
+            else
+                ApplyFractionalAlpha(a);
         }
+
+        private void ApplyFractionalAlpha(float a)
+        {
+            _alphaMpb ??= new MaterialPropertyBlock();
+            if (_bakedAlpha == null || _bakedAlpha.Length < Renderers.Length)
+                _bakedAlpha = new float[Renderers.Length];
+            for (int i = 0; i < Renderers.Length; i++)
+            {
+                var r = Renderers[i];
+                var mat = r != null ? r.sharedMaterial : null;
+                if (mat == null || !mat.HasProperty(AlphaId))
+                    continue;
+                _alphaMpb.Clear();
+                r.GetPropertyBlock(_alphaMpb);
+                if (!_bakedCaptured)
+                    _bakedAlpha[i] = _alphaMpb.HasFloat(AlphaId) ? _alphaMpb.GetFloat(AlphaId) : mat.GetFloat(AlphaId);
+                _alphaMpb.SetFloat(AlphaId, _bakedAlpha[i] * a);
+                r.SetPropertyBlock(_alphaMpb);
+            }
+            _bakedCaptured = true;
+            _alphaOverridden = true;
+        }
+
+        private void RestoreBakedAlpha()
+        {
+            if (!_alphaOverridden || Renderers == null)
+                return;
+            _alphaMpb ??= new MaterialPropertyBlock();
+            for (int i = 0; i < Renderers.Length; i++)
+            {
+                var r = Renderers[i];
+                var mat = r != null ? r.sharedMaterial : null;
+                if (mat == null || !mat.HasProperty(AlphaId))
+                    continue;
+                _alphaMpb.Clear();
+                r.GetPropertyBlock(_alphaMpb);
+                _alphaMpb.SetFloat(AlphaId, _bakedAlpha != null && i < _bakedAlpha.Length ? _bakedAlpha[i] : 1f);
+                r.SetPropertyBlock(_alphaMpb);
+            }
+            _alphaOverridden = false;
+            _bakedCaptured = false;
+        }
+
+        [ContextMenu("Отладка: alpha 0.5")] private void DebugAlphaHalf() => SetAlpha(0.5f);
+        [ContextMenu("Отладка: alpha 1")] private void DebugAlphaFull() => SetAlpha(1f);
 
         /// <summary>Пометить как якорь двери: аниматор для тоггла Open/Close без пересборки секции.</summary>
         public void SetDoor(Animator anim, bool open)
@@ -77,14 +161,15 @@ namespace Client.Map
             TopCurCorner = p.CurCorner; TopRotate = p.Rotate; TopCornerMask = cornerMask;
         }
 
-        /// <summary>Перед возвратом в пул: восстановить enabled (иначе блок «навсегда невидим» — урок RendererPool).</summary>
         public void ResetForPool()
         {
             if (Hidden && Renderers != null)
                 for (int i = 0; i < Renderers.Length; i++)
                     if (Renderers[i] != null)
                         Renderers[i].enabled = true;
+            RestoreBakedAlpha();
             Hidden = false;
+            Alpha = 1f;
         }
 
         // ── Дебаг-дамп рендер-состояния (было BlockRenderProbe.Report): рантайм-безопасно, без ShaderUtil ──

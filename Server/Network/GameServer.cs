@@ -109,6 +109,8 @@ public class GameServer
     public float BlockSpawnY { get; private set; }
     public float BlockSpawnZ { get; private set; }
 
+    public Shared.World.Blocks.ZoneFloodResult? Zones { get; private set; }
+
     public GameServer(SVars config, GridMap? map = null)
     {
         _config = config;
@@ -131,6 +133,18 @@ public class GameServer
             Console.WriteLine($"[Map] BlocksWorld: {BlockWorld.Sections.Count} sections, " +
                               $"spawn ({BlockSpawnX}, y{BlockSpawnY}, {BlockSpawnZ})");
             BuildAutoDoorRegistry();
+
+            Zones = Shared.World.Blocks.ZoneFlood.Recompute(BlockWorld, Shared.World.Blocks.CatalogZoneClassifier.Instance);
+            Console.WriteLine($"[Zones] зон: {Zones.Zones.Count}, стыков: {Zones.Junctions.Count}, конфликтов: {Zones.Conflicts.Count}");
+            if (config.DebugZones)
+            {
+                foreach (var zone in Zones.Zones)
+                    Console.WriteLine($"[Zones] зона {zone.Id}: «{zone.Name}» этаж {zone.Floor}, ранг {zone.Rank}, сидов {zone.Seeds.Count}");
+                foreach (var junction in Zones.Junctions)
+                    Console.WriteLine($"[Zones] стык {junction.Cell}: зоны {string.Join(", ", junction.Zones)}");
+                foreach (var conflict in Zones.Conflicts)
+                    Console.WriteLine($"[Zones] КОНФЛИКТ: зона {conflict.ZoneId} — номера этажей {string.Join(", ", conflict.Floors)}");
+            }
         }
         Console.WriteLine($"[Map] Spawn at ({_spawnX}, {_spawnY}, z{_spawnZ})");
         _clients = new Dictionary<NetPeer, ClientConnection>();
@@ -1068,6 +1082,7 @@ public class GameServer
     }
 
     // Дельта тика: итоговое состояние позиции (читаем назад из мира) + учёт опустевших секций.
+    // TODO(D-zones 3b): mark zone-dirty → re-flood cascade
     private void OnBlockWorldChanged(int x, int y, int z)
     {
         _blockTickUpdates.Add(new BlockUpdateBatch.Entry

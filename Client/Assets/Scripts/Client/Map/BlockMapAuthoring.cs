@@ -46,8 +46,19 @@ namespace Client.Map
         {
             if (Grid == null || !Grid.SetBlock(x, y, z, type))
                 return;
+            if (!BlockCatalog.Get(type).IsFloorAnchor)
+                Grid.RemoveSeed(x, y, z);
             UpdateCell(x, y, z, type);
             RefreshNeighborsVisual(x, y, z);
+        }
+
+        public void PaintSeed(int x, int y, int z, ushort type, string name, int rank, int floor)
+        {
+            if (Grid == null)
+                return;
+            PaintBlock(x, y, z, type);
+            if (Grid.GetBlock(x, y, z) == type)
+                Grid.SetSeed(x, y, z, new FloorSeed(name, rank, floor));
         }
 
         // Соседи по плану (8) + верх/низ: их формы верха/автотайл зависят от изменившейся ячейки.

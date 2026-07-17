@@ -48,6 +48,8 @@ public class SVars
     /// <summary>Диагностика авто-дверей: лог реестра при загрузке + троттл-лог детекта раз в секунду.</summary>
     public bool DebugAutoDoors = false;
 
+    public bool DebugZones = false;
+
     /// <summary>Загрузка настроек из JSON. Любая ошибка → дефолты, сервер не падает.</summary>
     public static void LoadFromJson(string path)
     {

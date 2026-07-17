@@ -17,6 +17,17 @@ namespace Client.Editor.Inspectors
         private static readonly Vector3[] _cellRect = new Vector3[4]; // подсветка ячейки слоя (без аллокаций)
         private static readonly string[] ModeNames = { "Слой", "Присоед.", "Потолки", "Полы" };
 
+        private static string _seedName = "Станция";
+        private static int _seedRank = 0;
+        private static int _seedFloor = 1;
+        private static bool _showZones;
+
+        private const int ZoneQuadCap = 3000;
+        private Shared.World.Blocks.ZoneFloodResult _zonesPreview;
+        private readonly List<Vector3> _zoneQuadPos = new();
+        private readonly List<Color> _zoneQuadColor = new();
+        private readonly HashSet<ushort> _conflictZones = new();
+
         private BlockDefinition[] _palette;
         private string[] _paletteNames;
         private int _paletteIndex;
@@ -89,9 +100,9 @@ namespace Client.Editor.Inspectors
             EditorGUILayout.Space(6);
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Новая")) { t.NewMap(); t.RebuildBakeVisual(); }
+                if (GUILayout.Button("Новая")) { t.NewMap(); t.RebuildBakeVisual(); if (_showZones) RecomputeZonesPreview(t); }
                 using (new EditorGUI.DisabledScope(!System.IO.File.Exists(t.MapPath)))
-                    if (GUILayout.Button("Загрузить")) TryIO(() => { t.LoadMap(); t.RebuildBakeVisual(); });
+                    if (GUILayout.Button("Загрузить")) TryIO(() => { t.LoadMap(); t.RebuildBakeVisual(); if (_showZones) RecomputeZonesPreview(t); });
                 using (new EditorGUI.DisabledScope(!t.IsLoaded))
                     if (GUILayout.Button("Сохранить")) TryIO(() => { t.SaveMap(); AssetDatabase.Refresh(); });
             }
@@ -117,6 +128,30 @@ namespace Client.Editor.Inspectors
                 _blockIndex = Mathf.Clamp(_blockIndex, 0, inCat.Length - 1);
                 _blockIndex = EditorGUILayout.Popup(new GUIContent("Блок"), _blockIndex, _blockNamesByCategory[_categoryIndex]);
                 _paletteIndex = inCat[_blockIndex];
+
+                if (_categories[_categoryIndex] == Shared.World.Blocks.BlockCategory.FloorAnchor)
+                {
+                    _seedName = EditorGUILayout.TextField(new GUIContent("Имя", "Имя станции/этажа (лейбл блока этажа)."), _seedName);
+                    _seedRank = EditorGUILayout.IntField(new GUIContent("Ранг", "Меньший = истина. Игрок >0, админ/мапер <1."), _seedRank);
+                    _seedFloor = EditorGUILayout.IntField(new GUIContent("Этаж", "Номер этажа зоны."), _seedFloor);
+                }
+            }
+
+            using (new EditorGUI.DisabledScope(!t.IsLoaded))
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                bool show = GUILayout.Toggle(_showZones, new GUIContent("Показать зоны", "Превью флуда зон: пол зоны тонируется цветом, сиды/стыки/конфликты — кубы."), "Button");
+                if (show != _showZones)
+                {
+                    _showZones = show;
+                    if (show)
+                        RecomputeZonesPreview(t);
+                }
+                if (GUILayout.Button(new GUIContent("Пересчитать зоны", "Прогнать ZoneFlood по текущей карте заново.")))
+                {
+                    _showZones = true;
+                    RecomputeZonesPreview(t);
+                }
             }
 
             if (!t.IsLoaded)
@@ -131,9 +166,95 @@ namespace Client.Editor.Inspectors
             catch (System.Exception e) { Debug.LogError($"[BlockMapAuthoring] {e.Message}"); }
         }
 
+        private void RecomputeZonesPreview(BlockMapAuthoring t)
+        {
+            if (t.Grid == null)
+                return;
+            _zonesPreview = Shared.World.Blocks.ZoneFlood.Recompute(t.Grid, Shared.World.Blocks.CatalogZoneClassifier.Instance);
+            _conflictZones.Clear();
+            foreach (var c in _zonesPreview.Conflicts)
+                _conflictZones.Add(c.ZoneId);
+            BuildZoneDrawList(t);
+
+            Debug.Log($"[Zones] зон: {_zonesPreview.Zones.Count}, стыков: {_zonesPreview.Junctions.Count}, конфликтов: {_zonesPreview.Conflicts.Count}");
+            foreach (var z in _zonesPreview.Zones)
+                Debug.Log($"[Zones] зона {z.Id}: «{z.Name}» этаж {z.Floor}, ранг {z.Rank}, сидов {z.Seeds.Count}");
+            foreach (var c in _zonesPreview.Conflicts)
+                Debug.LogWarning($"[Zones] КОНФЛИКТ: зона {c.ZoneId} — номера этажей {string.Join(", ", c.Floors)}");
+        }
+
+        private void BuildZoneDrawList(BlockMapAuthoring t)
+        {
+            _zoneQuadPos.Clear();
+            _zoneQuadColor.Clear();
+            var g = t.Grid;
+            bool capped = false;
+            foreach (var kv in g.Sections)
+            {
+                Shared.World.Blocks.BlockGrid.UnpackKey(kv.Key, out int cx, out int cy, out int cz);
+                for (int ly = 0; ly < Shared.World.Blocks.ChunkSection.Size && !capped; ly++)
+                    for (int lz = 0; lz < Shared.World.Blocks.ChunkSection.Size; lz++)
+                        for (int lx = 0; lx < Shared.World.Blocks.ChunkSection.Size; lx++)
+                        {
+                            int x = cx * 16 + lx, y = cy * 16 + ly, z = cz * 16 + lz;
+                            ushort zid = g.GetZone(x, y, z);
+                            if (zid == 0 || g.GetBlock(x, y, z) != 0 || g.GetBlock(x, y - 1, z) == 0)
+                                continue;
+                            if (_zoneQuadPos.Count >= ZoneQuadCap)
+                            {
+                                capped = true;
+                                break;
+                            }
+                            _zoneQuadPos.Add(new Vector3(x, y + 0.03f, z));
+                            _zoneQuadColor.Add(ZoneColor(zid, 0.22f));
+                        }
+                if (capped)
+                    break;
+            }
+            if (capped)
+                Debug.LogWarning($"[Zones] превью обрезано: показаны первые {ZoneQuadCap} ячеек пола зон.");
+        }
+
+        private static Color ZoneColor(ushort id, float alpha)
+        {
+            var c = Color.HSVToRGB((id * 0.618034f) % 1f, 0.75f, 1f);
+            c.a = alpha;
+            return c;
+        }
+
+        private void DrawZonePreview()
+        {
+            for (int i = 0; i < _zoneQuadPos.Count; i++)
+            {
+                var p = _zoneQuadPos[i];
+                _cellRect[0] = p;
+                _cellRect[1] = new Vector3(p.x + 1f, p.y, p.z);
+                _cellRect[2] = new Vector3(p.x + 1f, p.y, p.z + 1f);
+                _cellRect[3] = new Vector3(p.x, p.y, p.z + 1f);
+                Handles.DrawSolidRectangleWithOutline(_cellRect, _zoneQuadColor[i], Color.clear);
+            }
+
+            foreach (var zone in _zonesPreview.Zones)
+            {
+                bool conflict = _conflictZones.Contains(zone.Id);
+                Handles.color = conflict ? Color.red : ZoneColor(zone.Id, 1f);
+                foreach (var seed in zone.Seeds)
+                    Handles.DrawWireCube(new Vector3(seed.Pos.X + 0.5f, seed.Pos.Y + 0.5f, seed.Pos.Z + 0.5f),
+                                         new Vector3(0.9f, 0.9f, 0.9f));
+            }
+
+            Handles.color = Color.yellow;
+            foreach (var j in _zonesPreview.Junctions)
+                foreach (var cell in j.DoorCells)
+                    Handles.DrawWireCube(new Vector3(cell.X + 0.5f, cell.Y + 0.5f, cell.Z + 0.5f),
+                                         new Vector3(1.04f, 1.04f, 1.04f));
+        }
+
         private void OnSceneGUI()
         {
             var t = (BlockMapAuthoring)target;
+            if (t.IsLoaded && _showZones && _zonesPreview != null)
+                DrawZonePreview();
             if (!t.IsLoaded || _palette.Length == 0)
                 return;
 
@@ -203,6 +324,8 @@ namespace Client.Editor.Inspectors
             var def = _palette[_paletteIndex];
             if (def.Size.x * def.Size.y * def.Size.z > 1)
                 t.PaintObject(x, y, z, def, _facing);
+            else if (def.Category == Shared.World.Blocks.BlockCategory.FloorAnchor)
+                t.PaintSeed(x, y, z, def.Type, _seedName, _seedRank, _seedFloor);
             else
                 t.PaintBlock(x, y, z, def.Type);
         }

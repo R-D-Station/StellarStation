@@ -186,6 +186,8 @@ namespace Client.Map
         /// <summary>Кормит боковой (WallRenderers) меш через MPB — SideMap в _TopMap поверх own-параметров материала стены (_count/подложка своя, физического поворота нет).</summary>
         public static void FeedSideMesh(MeshRenderer r, BlockDefinition def, WallShape shape, byte cornerMask)
         {
+            _mpb ??= new MaterialPropertyBlock();
+            _mpb.Clear();
             r.GetPropertyBlock(_mpb);
             if (def.SideMap != null)
                 _mpb.SetTexture(TopMapId, def.SideMap);

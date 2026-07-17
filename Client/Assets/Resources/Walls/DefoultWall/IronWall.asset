@@ -17,28 +17,35 @@ MonoBehaviour:
   Category: 2
   SealsFaces: 63
   OpaqueFaces: 63
+  CoversBlockBelow: 1
   CollisionBoxes:
   - Center: {x: 0.5, y: 0.5, z: 0.5}
     Size: {x: 1, y: 1, z: 1}
   - Center: {x: 0.5, y: 1.5, z: 0.5}
     Size: {x: 1, y: 1, z: 1}
+  CollisionBoxesOpen: []
+  Opening: 0
+  TriggerBoxes: []
+  DoorCloseDelay: 1
   DeconstructStages: 0
   Size: {x: 1, y: 2, z: 1}
   Connection:
     UseConnections: 1
     ConnectsToSameType: 1
-    ConnectsToOtherConnected: 0
+    ConnectsToTypes: 
     MeshSingle: {fileID: 3465880795150428724, guid: af01450a83e70b147ad23ec07bf570ed, type: 3}
     MeshEnd: {fileID: 3899318142779029826, guid: 388c37ef459ad684f843f26301907fa3, type: 3}
     MeshStraight: {fileID: 9044213943688244232, guid: dca84514eba5aef47bb4b908d48c38ea, type: 3}
     MeshCorner: {fileID: 1159597351609551204, guid: 141290b42e690e7438d69685de50be68, type: 3}
     MeshT: {fileID: 2860752718409877910, guid: e3c436e00b9546f4cba86d02c68ddee5, type: 3}
     MeshCross: {fileID: 2674634547497210640, guid: 4390ad50168e3de43a54084605c0535c, type: 3}
+  UseGrid: 1
   TopMap: {fileID: 2800000, guid: 2e9d927726fb23d44b693ce1b4647424, type: 3}
   BackingMap: {fileID: 0}
   TopMapCountX: 5
   TopMapCountY: 2
   TopCalibration: {fileID: 11400000, guid: 91ff7738f8532034caff18df93d8ac9f, type: 2}
+  SideMap: {fileID: 2800000, guid: bc0024cc0910a58469eae7a4d89d01c1, type: 3}
   Prefab: {fileID: 3465880795150428724, guid: af01450a83e70b147ad23ec07bf570ed, type: 3}
   Pivot: 0
   EditorSprite: {fileID: 0}

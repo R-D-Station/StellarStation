@@ -12,6 +12,22 @@ namespace Client.Map
         private const int CutRingRadius = 10;
         private const float CutMoveThreshold = 0.2f;
 
+        [SerializeField, Tooltip("Кольца проявления от проёмов; выкл = бинарный фолбэк 0/1.")]
+        private bool _revealRings = true;
+        [SerializeField, Tooltip("Уровень глаз для среза потолка (блоков от ног).")]
+        private float _eyeHeight = 1.2f;
+        [SerializeField, Tooltip("Cut-away по зонам сервера; выкл или нет зоны = эвристика.")]
+        private bool _zoneCut = true;
+
+        private BlockReveal _reveal;
+        private BlockReveal _zoneReveal;
+
+        private const int JunctionScanDown = 2;
+        private const int JunctionScanUp = 5;
+        private static readonly int[] JDirX = { 1, -1, 0, 0, 0, 0 };
+        private static readonly int[] JDirY = { 0, 0, 1, -1, 0, 0 };
+        private static readonly int[] JDirZ = { 0, 0, 0, 0, 1, -1 };
+
         private float _lastEyeX = float.MinValue, _lastEyeY, _lastEyeZ;
         private bool _cutDirty;
 
@@ -57,6 +73,8 @@ namespace Client.Map
         {
             _grid = grid;
             _shapes = shapes;
+            _reveal ??= new BlockReveal(CutWindow);
+            _zoneReveal ??= new BlockReveal(CutWindow);
 
             if (_root != null)
             {
@@ -206,6 +224,7 @@ namespace Client.Map
 
                 var view = EnsureView(go);
                 view.Bind(x, y, z, baseY, prefab); // данные + кэш рендереров
+                view.BottomOpen = !HasSolidTop(x, y - 1, z);
                 FeedTopMesh(go, def, type, x, y, z, rotSteps, view); // грид + top-debug
                 if (def != null && def.Openable) // дверь-якорь: аниматор для тоггла без пересборки (снап на спавне — внутри SetDoor)
                     view.SetDoor(go.GetComponentInChildren<Animator>(true),
@@ -228,6 +247,7 @@ namespace Client.Map
                 SetColor(cube, new Color(t, t, t));
                 var view = EnsureView(cube);
                 view.Bind(x, y, z, baseY, null);
+                view.BottomOpen = !HasSolidTop(x, y - 1, z);
                 visuals.Add(view);
             }
         }
@@ -235,7 +255,7 @@ namespace Client.Map
         /// <summary>Cut-away: скрыть блоки выше глаз чужого стека в кольце вокруг игрока (звать каждый кадр).</summary>
         public void UpdateCutaway(float px, float py, float pz)
         {
-            float eyeY = py + Shared.Simulation.Blocks.BlockMovementConfig.StandHeight; // срез над головой
+            float eyeY = py + _eyeHeight;
             if (!_cutDirty
                 && Mathf.Abs(px - _lastEyeX) < CutMoveThreshold
                 && Mathf.Abs(eyeY - _lastEyeY) < CutMoveThreshold
@@ -260,7 +280,7 @@ namespace Client.Map
                 for (int i = 0; i < visuals.Count; i++)
                 {
                     var v = visuals[i];
-                    if (!BaseRuleHide(v, eyeY, refY, px, pz))
+                    if (!CutCandidate(v, eyeY, refY, px, pz))
                         continue;
                     int lx = v.X - _cutOriginX;
                     int lz = v.Z - _cutOriginZ;
@@ -272,25 +292,111 @@ namespace Client.Map
                 }
             }
 
-            // Пасс 2: база + кап стен (сосед вскрыт не выше — гасим, чтобы стены не торчали колодцем).
+            bool rings = _revealRings && _reveal != null;
+            if (rings)
+                _reveal.Recompute(_grid, _cutStartY, _cutOriginX, _cutOriginZ);
+
+            ushort playerZone = 0;
+            if (_zoneCut && _zoneReveal != null)
+            {
+                int fx = Mathf.FloorToInt(px), fy = Mathf.FloorToInt(py + 0.001f), fz = Mathf.FloorToInt(pz);
+                playerZone = _grid.GetZone(fx, fy, fz);
+                if (playerZone == 0)
+                    playerZone = _grid.GetZone(fx, fy + 1, fz);
+            }
+            bool zonal = playerZone != 0;
+            if (zonal)
+                SeedZoneJunctions(playerZone, (int)refY);
+
+            // Пасс 2: кандидаты + кап стен (сосед вскрыт не выше — гасим, чтобы стены не торчали колодцем).
             foreach (var kv in _sections)
             {
                 var visuals = kv.Value;
                 for (int i = 0; i < visuals.Count; i++)
                 {
                     var v = visuals[i];
-                    bool hide = BaseRuleHide(v, eyeY, refY, px, pz)
-                                || (v.Y >= eyeY && NeighborCutAtOrBelow(v.X, v.Z, v.Y));
-                    v.SetHidden(hide); // no-op если не изменилось; инвариант enabled — внутри
+                    if (zonal)
+                    {
+                        v.SetAlpha(ZonalAlpha(v, playerZone, eyeY, refY, px, pz, rings));
+                        continue;
+                    }
+                    bool cut = CutCandidate(v, eyeY, refY, px, pz)
+                               || (v.Y >= eyeY && NeighborCutAtOrBelow(v.X, v.Z, v.Y));
+                    v.SetAlpha(!cut ? 1f : (rings ? _reveal.Alpha(v.X, v.Y, v.Z) : 0f));
                 }
             }
         }
 
-        // Базовое правило: гасим верхний этаж целиком (база стека выше нашего +1), кольцо ограничивает разлёт.
-        private bool BaseRuleHide(BlockView v, float eyeY, float refY, float px, float pz)
-            => v.Y >= eyeY
-               && v.BaseY >= refY + 2
-               && Mathf.Max(Mathf.Abs(v.X + 0.5f - px), Mathf.Abs(v.Z + 0.5f - pz)) <= CutRingRadius;
+        private float ZonalAlpha(BlockView v, ushort p, float eyeY, float refY, float px, float pz, bool rings)
+        {
+            if (v.Y < eyeY)
+                return 1f;
+            if (Mathf.Max(Mathf.Abs(v.X + 0.5f - px), Mathf.Abs(v.Z + 0.5f - pz)) > CutRingRadius)
+                return 1f;
+
+            ushort below = _grid.GetZone(v.X, v.Y - 1, v.Z);
+            if (v.BottomOpen && below == p)
+                return 0f;
+
+            ushort above = _grid.GetZone(v.X, v.Y + 1, v.Z);
+            ushort xp = _grid.GetZone(v.X + 1, v.Y, v.Z);
+            ushort xn = _grid.GetZone(v.X - 1, v.Y, v.Z);
+            ushort zp = _grid.GetZone(v.X, v.Y, v.Z + 1);
+            ushort zn = _grid.GetZone(v.X, v.Y, v.Z - 1);
+
+            if (below == p || above == p || xp == p || xn == p || zp == p || zn == p)
+                return 1f;
+
+            if (below != 0 || above != 0 || xp != 0 || xn != 0 || zp != 0 || zn != 0)
+                return _zoneReveal.Alpha(v.X, v.Y, v.Z);
+
+            bool cut = CutCandidate(v, eyeY, refY, px, pz) || NeighborCutAtOrBelow(v.X, v.Z, v.Y);
+            return !cut ? 1f : (rings ? _reveal.Alpha(v.X, v.Y, v.Z) : 0f);
+        }
+
+        private void SeedZoneJunctions(ushort p, int refY)
+        {
+            _zoneReveal.Begin(_cutOriginX, _cutOriginZ);
+            int y0 = refY - JunctionScanDown, y1 = refY + JunctionScanUp;
+            for (int lz = 0; lz < CutWindow; lz++)
+                for (int lx = 0; lx < CutWindow; lx++)
+                {
+                    int x = _cutOriginX + lx, z = _cutOriginZ + lz;
+                    for (int y = y0; y <= y1; y++)
+                    {
+                        if (_grid.GetZone(x, y, z) != p)
+                            continue;
+                        for (int d = 0; d < 6; d++)
+                        {
+                            int nx = x + JDirX[d], ny = y + JDirY[d], nz = z + JDirZ[d];
+                            ushort nzone = _grid.GetZone(nx, ny, nz);
+                            if (nzone != 0)
+                            {
+                                if (nzone != p)
+                                    _zoneReveal.Seed(nx, nz, ny);
+                                continue;
+                            }
+                            ushort gate = _grid.GetBlock(nx, ny, nz);
+                            if (gate == 0 || !BlockCatalog.Get(gate).Openable)
+                                continue;
+                            int bx = x + JDirX[d] * 2, by = y + JDirY[d] * 2, bz = z + JDirZ[d] * 2;
+                            ushort q = _grid.GetZone(bx, by, bz);
+                            if (q != 0 && q != p)
+                                _zoneReveal.Seed(bx, bz, by);
+                        }
+                    }
+                }
+            _zoneReveal.Spread();
+        }
+
+        private bool CutCandidate(BlockView v, float eyeY, float refY, float px, float pz)
+        {
+            if (v.Y < eyeY)
+                return false;
+            if (Mathf.Max(Mathf.Abs(v.X + 0.5f - px), Mathf.Abs(v.Z + 0.5f - pz)) > CutRingRadius)
+                return false;
+            return v.BaseY >= refY + 2 || v.BottomOpen;
+        }
 
         // Есть ли в 8 соседних колоннах вырез, начавшийся не выше y.
         private bool NeighborCutAtOrBelow(int x, int z, int y)
