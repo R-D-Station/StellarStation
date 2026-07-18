@@ -148,7 +148,18 @@ namespace Client.Editor
             return $"new BlockInfo({def.Type}, \"{name}\", BlockCategory.{def.Category}, " +
                    $"(BlockFaceFlags){(byte)def.SealsFaces}, (BlockFaceFlags){(byte)def.OpaqueFaces}, " +
                    $"{def.DeconstructStages}, {closed}, {sx}, {sy}, {sz}, " +
-                   $"{open}, DoorOpening.{def.Opening}, {triggers}, {F(def.DoorCloseDelay)})";
+                   $"{open}, DoorOpening.{def.Opening}, {triggers}, {F(def.DoorCloseDelay)}, " +
+                   $"{(def.RequiresSupport ? "true" : "false")}, {EmitAttach(def)})";
+        }
+
+        private static string EmitAttach(BlockDefinition def)
+        {
+            if (def.AttachTo == null || def.AttachTo.Length == 0)
+                return "null";
+            var list = new List<string>();
+            foreach (var a in def.AttachTo)
+                list.Add($"AttachSurface.{a}");
+            return $"new AttachSurface[] {{ {string.Join(", ", list)} }}";
         }
 
         // Нарезка object-space боксов [0..Size] на ПЕР-ЧАСТЬ [0..1] (пересечение с кубом части).

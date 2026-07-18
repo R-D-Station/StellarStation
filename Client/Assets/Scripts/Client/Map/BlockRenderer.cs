@@ -247,6 +247,12 @@ namespace Client.Map
                     if (!autotiled) // автотайл-меш повёрнут формой соседей, facing не применяем
                         rot = MultiBlockVisual.FacingRotation(facing);
                 }
+                else if (!autotiled) // одиночный: поворот по Facing (крепление к стене)
+                {
+                    int facing = Shared.World.Blocks.BlockState.GetFacing(_grid.GetState(x, y, z));
+                    if (facing != 0)
+                        rot = MultiBlockVisual.FacingRotation(facing);
+                }
 
                 var go = RentPrefab(prefab);
                 go.transform.SetPositionAndRotation(pos, rot);

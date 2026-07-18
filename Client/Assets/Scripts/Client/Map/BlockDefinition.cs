@@ -38,6 +38,11 @@ namespace Client.Map
         [Tooltip("Число стадий (0 = не деконструируется). Рецепты/инструменты — будущий контент.")]
         public byte DeconstructStages = 0;
 
+        [Tooltip("Требует опору: без подходящей поверхности блок нельзя оставить (сервер снесёт неопёртые при загрузке).")]
+        public bool RequiresSupport = false;
+        [Tooltip("Куда крепится (порядок = приоритет). Wall → блок поворачивается ОТ стены лицом в комнату.")]
+        public AttachSurface[] AttachTo = System.Array.Empty<AttachSurface>();
+
         [Tooltip("Габарит объекта в блоках (X — ширина, Y — высота, Z — глубина). Оси 1..2, частей ≤ 4 (ёмкость part-бит). Дверь = 2×2×1.")]
         public Vector3Int Size = Vector3Int.one;
 

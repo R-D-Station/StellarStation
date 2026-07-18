@@ -23,6 +23,8 @@ namespace Client.Editor.Inspectors
         private static readonly GUIContent LTriggers = new GUIContent("Триггеры", "Object-space AABB авто-двери; МОГУТ выходить за габарит. Пусто = нет авто-открытия.");
         private static readonly GUIContent LCloseDelay = new GUIContent("Задержка закрытия", "Сек после выхода игрока из триггера.");
         private static readonly GUIContent LDecon = new GUIContent("Стадии", "Число стадий деконструкции (0 = не разбирается).");
+        private static readonly GUIContent LReqSupport = new GUIContent("Крепится", "Не сам по себе: без опоры сервер снесёт при загрузке.");
+        private static readonly GUIContent LAttachTo = new GUIContent("Крепить к", "Куда (порядок = приоритет). Wall → поворот ОТ стены.");
         private static readonly GUIContent LSize = new GUIContent("Размер", "Габарит в блоках (X-ширина, Y-высота, Z-глубина). Оси 1..2, частей ≤ 4. Дверь 2×2×1.");
         private static readonly GUIContent LPrefab = new GUIContent("Префаб", "Пусто → серые кубы. Ассет держать в папке Resources.");
         private static readonly GUIContent LPivot = new GUIContent("Пивот", "Bottom Center — пивот в центре низа объекта. Center — пивот в центре модели (как у Unity-примитивов): система сама поднимет на половину высоты.");
@@ -63,6 +65,8 @@ namespace Client.Editor.Inspectors
         private SerializedProperty _triggerBoxes;
         private SerializedProperty _doorCloseDelay;
         private SerializedProperty _deconstructStages;
+        private SerializedProperty _requiresSupport;
+        private SerializedProperty _attachTo;
         private SerializedProperty _size;
         private SerializedProperty _prefab;
         private SerializedProperty _pivot;
@@ -99,6 +103,8 @@ namespace Client.Editor.Inspectors
             _triggerBoxes = serializedObject.FindProperty("TriggerBoxes");
             _doorCloseDelay = serializedObject.FindProperty("DoorCloseDelay");
             _deconstructStages = serializedObject.FindProperty("DeconstructStages");
+            _requiresSupport = serializedObject.FindProperty("RequiresSupport");
+            _attachTo = serializedObject.FindProperty("AttachTo");
             _size = serializedObject.FindProperty("Size");
             _prefab = serializedObject.FindProperty("Prefab");
             _pivot = serializedObject.FindProperty("Pivot");
@@ -196,6 +202,12 @@ namespace Client.Editor.Inspectors
                 EditorGUILayout.PropertyField(_sealsFaces, LSeals);
                 EditorGUILayout.PropertyField(_opaqueFaces, LOpaque);
                 EditorGUILayout.PropertyField(_deconstructStages, LDecon);
+                if (_requiresSupport != null)
+                {
+                    EditorGUILayout.PropertyField(_requiresSupport, LReqSupport);
+                    if (_requiresSupport.boolValue && _attachTo != null)
+                        EditorGUILayout.PropertyField(_attachTo, LAttachTo, true);
+                }
             }
             EndGroup(_gPlay);
 

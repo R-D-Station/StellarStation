@@ -49,6 +49,7 @@ namespace Client.Map
                 return;
             if (!BlockCatalog.Get(type).IsFloorAnchor)
                 Grid.RemoveSeed(x, y, z);
+            ApplyAttachFacing(x, y, z, type);
             UpdateCell(x, y, z, type);
             RefreshNeighborsVisual(x, y, z);
         }
@@ -60,6 +61,19 @@ namespace Client.Map
             PaintBlock(x, y, z, type);
             if (Grid.GetBlock(x, y, z) == type)
                 Grid.SetSeed(x, y, z, new FloorSeed(name, rank, floor));
+        }
+
+        private static readonly System.Func<ushort, bool> AttachSolid = BlockAttach.DefaultIsSolid;
+
+        private void ApplyAttachFacing(int x, int y, int z, ushort type)
+        {
+            var info = BlockCatalog.Get(type);
+            if (!info.RequiresSupport)
+                return;
+            if (BlockAttach.Resolve(Grid, AttachSolid, x, y, z, info.AttachTo, out _, out int facing))
+                Grid.SetState(x, y, z, BlockState.WithFacing(Grid.GetState(x, y, z), facing));
+            else
+                Debug.LogWarning($"[Attach] «{info.Name}» в ({x},{y},{z}) без опоры — сервер снесёт при загрузке.");
         }
 
         // Соседи по плану (8) + верх/низ: их формы верха/автотайл зависят от изменившейся ячейки.
@@ -342,7 +356,14 @@ namespace Client.Map
                 }
                 else
                 {
-                    view.transform.SetPositionAndRotation(new Vector3(x + 0.5f, y + pivotY, z + 0.5f), shapeRot);
+                    var rot = shapeRot;
+                    if (!autotiled)
+                    {
+                        int facing = BlockState.GetFacing(st);
+                        if (facing != 0)
+                            rot = MultiBlockVisual.FacingRotation(facing);
+                    }
+                    view.transform.SetPositionAndRotation(new Vector3(x + 0.5f, y + pivotY, z + 0.5f), rot);
                 }
                 FeedTopMesh(view, def, type, x, y, z, rotSteps);
                 var gizmo = view.GetComponentInChildren<BlockGizmo>(true);

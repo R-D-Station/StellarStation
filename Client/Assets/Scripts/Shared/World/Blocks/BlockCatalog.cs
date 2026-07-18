@@ -118,6 +118,11 @@ namespace Shared.World.Blocks
         /// <summary>Триггер-объёмы авто-двери (object-space, facing 0); пусто — нет триггера.</summary>
         public readonly TriggerBox[] Triggers;
 
+        /// <summary>Требует опору: без подходящей поверхности блок сносится сервером при загрузке.</summary>
+        public readonly bool RequiresSupport;
+        /// <summary>Куда крепится (порядок = приоритет); Wall/AnySolid-гориз даёт facing-от-стены.</summary>
+        public readonly AttachSurface[] AttachTo;
+
         /// <summary>Занимает больше одной позиции.</summary>
         public bool IsMulti => SizeX * SizeY * SizeZ > 1;
         public int PartCount => _boxes.Length;
@@ -163,7 +168,8 @@ namespace Shared.World.Blocks
             BlockFaceFlags sealsFaces, BlockFaceFlags opaqueFaces, byte deconstructStages, BlockBox[][] partBoxes,
             byte sizeX = 1, byte sizeY = 1, byte sizeZ = 1,
             BlockBox[][] partBoxesOpen = null, DoorOpening opening = DoorOpening.Auto,
-            TriggerBox[] triggers = null, float closeDelay = 0f)
+            TriggerBox[] triggers = null, float closeDelay = 0f,
+            bool requiresSupport = false, AttachSurface[] attachTo = null)
         {
             Id = id;
             Name = name;
@@ -177,6 +183,8 @@ namespace Shared.World.Blocks
             Opening = opening;
             CloseDelay = closeDelay;
             Triggers = triggers ?? System.Array.Empty<TriggerBox>();
+            RequiresSupport = requiresSupport;
+            AttachTo = attachTo ?? System.Array.Empty<AttachSurface>();
 
             if (partBoxes == null || partBoxes.Length == 0)
                 partBoxes = new[] { System.Array.Empty<BlockBox>() };

@@ -19,13 +19,15 @@ MonoBehaviour:
   OpaqueFaces: 0
   CoversBlockBelow: 0
   CollisionBoxes:
-  - Center: {x: 0.5, y: 0.5, z: 0.975}
+  - Center: {x: 0.5, y: 0.5, z: 0.025}
     Size: {x: 1, y: 1, z: 0.05}
   CollisionBoxesOpen: []
   Opening: 0
   TriggerBoxes: []
   DoorCloseDelay: 1
   DeconstructStages: 0
+  RequiresSupport: 1
+  AttachTo: 01000302
   Size: {x: 1, y: 1, z: 1}
   Connection:
     UseConnections: 0

@@ -123,6 +123,9 @@ public class GameServer
                                    : Shared.World.Blocks.DevBlockWorld.Shapes;
             BlockShapesMode = fromFile ? (byte)1 : (byte)0;
 
+            int attachRemoved = Shared.World.Blocks.BlockAttach.ValidateAll(BlockWorld, Shared.World.Blocks.BlockAttach.DefaultIsSolid);
+            Console.WriteLine($"[Attach] удалено неопёртых: {attachRemoved}");
+
             BlockWorld.BlockChanged += OnBlockWorldChanged; // подписка ПОСЛЕ построения мира — стартовые SetBlock не дельты
 
             (BlockSpawnX, BlockSpawnY, BlockSpawnZ) = Shared.World.Blocks.BlockWorldSpawn.Find(
