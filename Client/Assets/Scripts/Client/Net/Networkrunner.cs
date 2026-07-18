@@ -58,7 +58,7 @@ namespace Client.Net
         private PlayerControl _controls;
         private readonly Dictionary<int, NetEntityView> _views = new Dictionary<int, NetEntityView>();
         private readonly Dictionary<int, ItemView> _itemViews = new Dictionary<int, ItemView>(); // наземные предметы (свой реестр, отдельно от player-_views)
-        private string _address = "127.0.0.1";
+        [SerializeField] private string _address = "85.239.58.193";
         private int _port = 7777;
 
         private readonly PlayerPredictor _predictor = new PlayerPredictor();

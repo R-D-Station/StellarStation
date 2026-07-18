@@ -705,6 +705,7 @@ MonoBehaviour:
   _hoverHint: {fileID: 960182753}
   _inventoryHud: {fileID: 1904201170}
   _labels: {fileID: 1850106032}
+  _address: 127.0.0.1
 --- !u!4 &960182751
 Transform:
   m_ObjectHideFlags: 0
