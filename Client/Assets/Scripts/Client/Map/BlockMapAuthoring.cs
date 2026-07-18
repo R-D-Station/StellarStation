@@ -20,6 +20,7 @@ namespace Client.Map
 
         private Transform _visRoot;
         private readonly Dictionary<long, GameObject> _cells = new();
+        private readonly Dictionary<long, BlockGizmo> _gizmoCells = new();
 
         public bool IsLoaded => Grid != null;
 
@@ -268,6 +269,7 @@ namespace Client.Map
             if (_visRoot != null)
                 DestroyCell(_visRoot.gameObject);
             _cells.Clear();
+            _gizmoCells.Clear();
 
             _visRoot = new GameObject("BlockMapVisual") { hideFlags = VisFlags }.transform;
             _visRoot.SetParent(transform, false);
@@ -296,6 +298,7 @@ namespace Client.Map
             {
                 DestroyCell(old);
                 _cells.Remove(key);
+                _gizmoCells.Remove(key);
             }
             if (type == 0 || _visRoot == null)
                 return;
@@ -342,6 +345,9 @@ namespace Client.Map
                     view.transform.SetPositionAndRotation(new Vector3(x + 0.5f, y + pivotY, z + 0.5f), shapeRot);
                 }
                 FeedTopMesh(view, def, type, x, y, z, rotSteps);
+                var gizmo = view.GetComponentInChildren<BlockGizmo>(true);
+                if (gizmo != null)
+                    _gizmoCells[key] = gizmo;
                 _cells[key] = cell;
                 return;
             }
@@ -523,6 +529,14 @@ namespace Client.Map
             if (_bakeRoot != null)
                 DestroyCell(_bakeRoot.gameObject);
             _cells.Clear();
+            _gizmoCells.Clear();
+        }
+
+        private void OnDrawGizmos()
+        {
+            foreach (var kv in _gizmoCells)
+                if (kv.Value != null)
+                    kv.Value.Draw();
         }
     }
 }

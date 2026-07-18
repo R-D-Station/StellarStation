@@ -31,7 +31,8 @@ namespace Shared.World.Blocks
         Marker = 7,
         FloorAnchor = 8,
         Divider = 9,
-        MergeMarker = 10
+        MergeMarker = 10,
+        SpawnPoint = 11
     }
 
     /// <summary>Как открывается дверь/люк (для Category Door/Hatch).</summary>
@@ -122,8 +123,10 @@ namespace Shared.World.Blocks
         public int PartCount => _boxes.Length;
 
         public bool Openable => Category == BlockCategory.Door || Category == BlockCategory.Hatch;
+        public bool IsSpawn => Category == BlockCategory.SpawnPoint;
         public bool IsMarker => Category == BlockCategory.Marker
-                                || Category == BlockCategory.Divider || Category == BlockCategory.MergeMarker;
+                                || Category == BlockCategory.Divider || Category == BlockCategory.MergeMarker
+                                || Category == BlockCategory.SpawnPoint;
         public bool IsFloorAnchor => Category == BlockCategory.FloorAnchor;
 
         public bool HasCollision

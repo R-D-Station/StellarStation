@@ -126,7 +126,7 @@ public class GameServer
             BlockWorld.BlockChanged += OnBlockWorldChanged; // подписка ПОСЛЕ построения мира — стартовые SetBlock не дельты
 
             (BlockSpawnX, BlockSpawnY, BlockSpawnZ) = Shared.World.Blocks.BlockWorldSpawn.Find(
-                BlockWorld, t => Shared.World.Blocks.BlockCatalog.Get(t).IsMarker,
+                BlockWorld, t => Shared.World.Blocks.BlockCatalog.Get(t).IsSpawn,
                 Shared.World.Blocks.DevBlockWorld.SpawnX,
                 Shared.World.Blocks.DevBlockWorld.SpawnY,
                 Shared.World.Blocks.DevBlockWorld.SpawnZ);

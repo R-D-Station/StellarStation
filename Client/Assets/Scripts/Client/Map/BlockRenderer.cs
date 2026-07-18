@@ -262,7 +262,7 @@ namespace Client.Map
                 if (def != null && def.Openable) // дверь-якорь: аниматор для тоггла без пересборки (снап на спавне — внутри SetDoor)
                     view.SetDoor(go.GetComponentInChildren<Animator>(true),
                                  Shared.World.Blocks.BlockState.GetOpen(_grid.GetState(x, y, z)));
-                AttachFloorLabel(view, go.transform, x, y, z, type);
+                view.SpawnComponents(new BlockContext(x, y, z, type, _grid, _shapes, _labels));
                 visuals.Add(view);
                 return;
             }
@@ -282,38 +282,9 @@ namespace Client.Map
                 var view = EnsureView(cube);
                 view.Bind(x, y, z, baseY, null);
                 view.BottomOpen = !HasSolidTop(x, y - 1, z);
-                if (i == 0)
-                    AttachFloorLabel(view, cube.transform, x, y, z, type);
                 visuals.Add(view);
             }
         }
-
-        private void AttachFloorLabel(BlockView view, Transform anchor, int x, int y, int z, ushort type)
-        {
-            if (_labels == null || !BlockCatalog.Get(type).IsFloorAnchor || !_grid.TryGetSeed(x, y, z, out var seed))
-                return;
-            view.FloorLabel = _labels.ShowWorldMessage(LabelKind.FloorLabel, BuildFloorText(in seed),
-                                                       anchor, FloorLabelOffset(x, y, z));
-        }
-
-        private static string BuildFloorText(in FloorSeed seed)
-        {
-            string head = string.IsNullOrEmpty(seed.Name) ? string.Empty : $"<size=55%>{seed.Name}</size>\n";
-            return head + $"<b>{seed.Floor}</b>";
-        }
-
-        // Монтаж лейбла: смежная стена → поднять к стене; иначе пол снизу → над блоком; ни того ни другого → над блоком (невалидно, дроп — сервер, 4b.3).
-        private Vector3 FloorLabelOffset(int x, int y, int z)
-        {
-            if (HasCollisionAt(x + 1, y, z)) return new Vector3(0.45f, 1.6f, 0f);
-            if (HasCollisionAt(x - 1, y, z)) return new Vector3(-0.45f, 1.6f, 0f);
-            if (HasCollisionAt(x, y, z + 1)) return new Vector3(0f, 1.6f, 0.45f);
-            if (HasCollisionAt(x, y, z - 1)) return new Vector3(0f, 1.6f, -0.45f);
-            return new Vector3(0f, 0.7f, 0f);
-        }
-
-        private bool HasCollisionAt(int x, int y, int z)
-            => _shapes.GetBoxes(_grid.GetBlock(x, y, z), _grid.GetState(x, y, z)).Length > 0;
 
         /// <summary>Cut-away: скрыть блоки выше глаз чужого стека в кольце вокруг игрока (звать каждый кадр).</summary>
         public void UpdateCutaway(float px, float py, float pz)
@@ -392,8 +363,6 @@ namespace Client.Map
                     if (v.TopCovered && a > 0.001f)
                         tu = 1f - CutAlphaAt(v.X, v.TopCellY, v.Z, null, int.MinValue, zonal, playerZone, eyeY, refY, px, pz, rings);
                     v.SetAlpha(a, tu);
-                    if (v.FloorLabel != null)
-                        v.FloorLabel.SetHidden(a <= 0.5f);
                 }
             }
         }
@@ -563,11 +532,7 @@ namespace Client.Map
         {
             if (v == null || v.gameObject == null)
                 return;
-            if (v.FloorLabel != null)
-            {
-                v.FloorLabel.Dismiss();
-                v.FloorLabel = null;
-            }
+            v.DespawnComponents();
             // Инвариант пула: возврат с ВКЛЮЧЁННЫМИ рендерерами (cut-away гасит выборочно — иначе утечка
             // «навсегда невидимых» блоков, урок pool-renderer-enabled-leak) — внутри ResetForPool.
             v.ResetForPool();

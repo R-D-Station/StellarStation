@@ -62,15 +62,11 @@ namespace Client.UI.Labels
 
         /// <summary>Надпись, привязанная к объекту в мире (FollowWorld: следует за anchor через WorldToScreenPoint).</summary>
         public PooledLabel ShowWorldMessage(LabelKind kind, string text, Transform anchor)
-            => ShowWorldMessage(kind, text, anchor, Vector3.zero);
-
-        /// <summary>То же с мировым смещением от anchor (монтаж лейбла над блоком/на стене без отдельного якорь-GO).</summary>
-        public PooledLabel ShowWorldMessage(LabelKind kind, string text, Transform anchor, Vector3 worldOffset)
         {
             var s = _style != null ? _style.For(kind) : LabelStyleTable.Default(kind);
             var label = _pool.GetFreeElement();
             label.Configure(PooledLabel.Mode.FollowWorld, text, screenPos: default, s.Lifetime, s.FadeIn, s.FadeOut,
-                s.FontSize, s.TextColor, s.Background, s.Offset, worldTarget: anchor, camera: Cam, worldOffset: worldOffset);
+                s.FontSize, s.TextColor, s.Background, s.Offset, worldTarget: anchor, camera: Cam);
             return label;
         }
 

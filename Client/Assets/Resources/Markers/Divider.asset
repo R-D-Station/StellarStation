@@ -10,14 +10,14 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 2a5ba86ce8fa84d4aa708dd205f2ef8f, type: 3}
-  m_Name: FloorAnchor
+  m_Name: Divider
   m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockDefinition
-  Type: 11
-  DisplayName: FloorAnchor
-  Category: 8
-  SealsFaces: 63
+  Type: 12
+  DisplayName: Divider
+  Category: 9
+  SealsFaces: 0
   OpaqueFaces: 0
-  CoversBlockBelow: 1
+  CoversBlockBelow: 0
   CollisionBoxes: []
   CollisionBoxesOpen: []
   Opening: 0
@@ -35,13 +35,13 @@ MonoBehaviour:
     MeshCorner: {fileID: 0}
     MeshT: {fileID: 0}
     MeshCross: {fileID: 0}
-  UseGrid: 1
+  UseGrid: 0
   TopMap: {fileID: 0}
   BackingMap: {fileID: 0}
   TopMapCountX: 5
   TopMapCountY: 2
   TopCalibration: {fileID: 0}
   SideMap: {fileID: 0}
-  Prefab: {fileID: 0}
+  Prefab: {fileID: 5747331426965122612, guid: 86a489e7345530e409095eebf2f010f3, type: 3}
   Pivot: 0
   EditorSprite: {fileID: 0}

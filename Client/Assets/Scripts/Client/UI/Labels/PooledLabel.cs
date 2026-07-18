@@ -26,26 +26,22 @@ namespace Client.UI.Labels
         private Mode _mode;
         private Vector2 _screenPos;
         private Vector2 _offset;
-        private Vector3 _worldOffset;
         private Transform _worldTarget;
         private Camera _camera;
         private bool _returned;
-        private bool _hidden;
 
         private void Awake() => _rt = (RectTransform)transform;
 
         /// <summary>Настроить надпись при выдаче из пула — безусловно перезаписывает все поля.</summary>
         public void Configure(Mode mode, string text, Vector2 screenPos, float lifetime, float fadeIn, float fadeOut,
             float fontSize, Color textColor, Color background, Vector2 offset,
-            Transform worldTarget = null, Camera camera = null, Vector3 worldOffset = default)
+            Transform worldTarget = null, Camera camera = null)
         {
             _mode = mode;
             _screenPos = screenPos;
             _offset = offset;
-            _worldOffset = worldOffset;
             _worldTarget = worldTarget;
             _camera = camera;
-            _hidden = false;
             _lifetime = lifetime; // PositiveInfinity → без таймер-возврата (CursorHint)
             _fadeIn = fadeIn;
             _fadeOut = fadeOut;
@@ -72,8 +68,6 @@ namespace Client.UI.Labels
             _mode = Mode.ScreenFixed;
             _worldTarget = null;
             _camera = null;
-            _worldOffset = default;
-            _hidden = false;
             _lifetime = float.PositiveInfinity;
             if (_text != null) _text.text = string.Empty;
             if (_group != null) _group.alpha = 0f;
@@ -82,9 +76,6 @@ namespace Client.UI.Labels
         /// <summary>Прокинуть экранную позицию курсора (FollowScreen), БЕЗ Y-флипа (overlay bottom-left = Input).</summary>
         public void SetScreenPos(Vector2 p) => _screenPos = p;
 
-        /// <summary>Внешний гейт видимости (cut-away блока-якоря): скрытая надпись не рисуется, но остаётся в пуле у владельца.</summary>
-        public void SetHidden(bool hidden) => _hidden = hidden;
-
         /// <summary>Снять надпись немедленно (владелец потерял цель). Идёт через общий Return (double-return guard).</summary>
         public void Dismiss() => Return();
 
@@ -92,7 +83,7 @@ namespace Client.UI.Labels
         {
             float age = Time.unscaledTime - _bornUnscaled;
 
-            if (_group != null) _group.alpha = _hidden ? 0f : ComputeAlpha(age);
+            if (_group != null) _group.alpha = ComputeAlpha(age);
 
             UpdatePosition();
 
@@ -114,7 +105,7 @@ namespace Client.UI.Labels
             if (_mode == Mode.FollowWorld)
             {
                 if (_camera == null || _worldTarget == null) { Return(); return; } // Unity fake-null: цель/камера уничтожены
-                Vector3 sp = _camera.WorldToScreenPoint(_worldTarget.position + _worldOffset);
+                Vector3 sp = _camera.WorldToScreenPoint(_worldTarget.position);
                 if (sp.z <= 0f) { if (_group != null) _group.alpha = 0f; return; } // за спиной камеры — прячем
                 SetClampedPosition((Vector2)sp + _offset);
                 return;

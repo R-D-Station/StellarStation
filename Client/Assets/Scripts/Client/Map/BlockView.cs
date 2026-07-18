@@ -1,7 +1,6 @@
 using System.Text;
 using UnityEngine;
 using Shared.World;
-using Client.UI.Labels;
 
 namespace Client.Map
 {
@@ -32,7 +31,7 @@ namespace Client.Map
         [System.NonSerialized] public GameObject PrefabKey; // ключ пула (null = куб из общего пула)
         [System.NonSerialized] public Renderer[] Renderers; // кэш для cut-away гейта
         [System.NonSerialized] public Animator DoorAnim;    // якорь двери (иначе null)
-        [System.NonSerialized] public PooledLabel FloorLabel; // лейбл блока этажа (иначе null); владелец — BlockRenderer
+        [System.NonSerialized] private IBlockComponent[] _components; // render-компоненты префаба (кэш по GO, стабилен по пулу)
 
         private static readonly int DoorOpenTrigger = Animator.StringToHash("Open");
         private static readonly int DoorCloseTrigger = Animator.StringToHash("Close");
@@ -56,6 +55,7 @@ namespace Client.Map
             TopCellY = y + 1;
             PrefabKey = prefabKey;
             Renderers = GetComponentsInChildren<Renderer>(true);
+            _components ??= GetComponentsInChildren<IBlockComponent>(true);
             Hidden = false;
             Alpha = 1f;
             TopUncover = 0f;
@@ -63,7 +63,24 @@ namespace Client.Map
             _alphaOverridden = false;
             DoorAnim = null;
             DoorOpen = false;
-            FloorLabel = null;
+        }
+
+        /// <summary>Разбудить render-компоненты префаба (после Bind + BottomOpen/TopCovered).</summary>
+        public void SpawnComponents(in BlockContext ctx)
+        {
+            if (_components == null)
+                return;
+            for (int i = 0; i < _components.Length; i++)
+                _components[i].OnSpawn(in ctx);
+        }
+
+        /// <summary>Симметрично SpawnComponents: при возврате в пул (dismiss лейблов и т.п.).</summary>
+        public void DespawnComponents()
+        {
+            if (_components == null)
+                return;
+            for (int i = 0; i < _components.Length; i++)
+                _components[i].OnDespawn();
         }
 
         public void SetHidden(bool hidden) => SetAlpha(hidden ? 0f : 1f);
@@ -73,6 +90,14 @@ namespace Client.Map
         public void SetAlpha(float a, float topUncover)
         {
             a = Mathf.Clamp01(a);
+            ApplyAlpha(a, topUncover);
+            if (_components != null)
+                for (int i = 0; i < _components.Length; i++)
+                    _components[i].OnVisibility(a);
+        }
+
+        private void ApplyAlpha(float a, float topUncover)
+        {
             topUncover = Mathf.Clamp01(topUncover);
             if (Renderers == null || (Mathf.Abs(a - Alpha) < 0.0005f && Mathf.Abs(topUncover - TopUncover) < 0.0005f))
             {
