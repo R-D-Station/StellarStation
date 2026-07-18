@@ -2,6 +2,7 @@ using System.Collections.Generic;
 
 namespace Shared.World.Blocks
 {
+    /// <summary>Инъекция предикатов классификации блоков для <see cref="ZoneFlood"/> (юниттесты без каталога).</summary>
     public interface IZoneClassifier
     {
         bool IsSolid(ushort type);
@@ -11,6 +12,7 @@ namespace Shared.World.Blocks
         bool IsMergeMarker(ushort type);
     }
 
+    /// <summary>Боевой классификатор поверх <see cref="BlockCatalog"/>: солид = коллизия и не открывается.</summary>
     public sealed class CatalogZoneClassifier : IZoneClassifier
     {
         public static readonly CatalogZoneClassifier Instance = new CatalogZoneClassifier();
@@ -27,12 +29,14 @@ namespace Shared.World.Blocks
         public bool IsMergeMarker(ushort type) => BlockCatalog.Get(type).Category == BlockCategory.MergeMarker;
     }
 
+    /// <summary>Сид зоны с мировой позицией (для метаданных результата флуда).</summary>
     public sealed class ZoneSeedAt
     {
         public BlockCoord Pos;
         public FloorSeed Seed;
     }
 
+    /// <summary>Одна вычисленная зона: метаданные (имя/ранг/этаж — от сида минимального ранга) + все её сиды.</summary>
     public sealed class ZoneRecord
     {
         public ushort Id;
@@ -42,6 +46,7 @@ namespace Shared.World.Blocks
         public readonly List<ZoneSeedAt> Seeds = new();
     }
 
+    /// <summary>Дверь-ворота между разноэтажными зонами (не слита) — граница, видимая клиенту/логике перехода.</summary>
     public sealed class ZoneJunction
     {
         public BlockCoord Cell;
@@ -49,12 +54,14 @@ namespace Shared.World.Blocks
         public readonly List<ushort> Zones = new();
     }
 
+    /// <summary>Одна зона засеяна сидами с разными номерами этажей одновременно (диагностика, не блокирует флуд).</summary>
     public sealed class ZoneConflict
     {
         public ushort ZoneId;
         public readonly List<int> Floors = new();
     }
 
+    /// <summary>Итог <see cref="ZoneFlood.Recompute"/>: вычисленные зоны + стыки-двери + конфликты сидов.</summary>
     public sealed class ZoneFloodResult
     {
         public readonly List<ZoneRecord> Zones = new();
@@ -62,6 +69,7 @@ namespace Shared.World.Blocks
         public readonly List<ZoneConflict> Conflicts = new();
     }
 
+    /// <summary>Детерминированный полный пересчёт зон-этажей по проходимым регионам (двери-ворота через union-find).</summary>
     public static class ZoneFlood
     {
         private const byte KindWall = 0;
@@ -72,6 +80,8 @@ namespace Shared.World.Blocks
         private static readonly int[] DirY = { 0, 0, 1, -1, 0, 0 };
         private static readonly int[] DirZ = { 0, 0, 0, 0, 1, -1 };
 
+        /// <summary>Полный ресет и пересчёт зон грида: BFS проходимых регионов, слияние через двери-ворота
+        /// (одноэтажные — тихо, разноэтажные — <see cref="ZoneJunction"/>), запись ZoneId в грид.</summary>
         public static ZoneFloodResult Recompute(BlockGrid grid, IZoneClassifier classifier)
         {
             var result = new ZoneFloodResult();
@@ -209,7 +219,7 @@ namespace Shared.World.Blocks
                 return a;
             }
 
-            void Union(int a, int b)
+            void Union(int a, int b) // корень = меньший индекс — детерминизм итога не зависит от порядка union
             {
                 a = Find(a);
                 b = Find(b);
@@ -235,6 +245,7 @@ namespace Shared.World.Blocks
                 return floors;
             }
 
+            // Фикспойнт: слияние через одну дверь меняет floor-набор корня → следующий проход может слить ещё дверь.
             var isJunction = new bool[gateCells.Count];
             var roots = new List<int>();
             var gateFloors = new List<int>();
@@ -381,13 +392,14 @@ namespace Shared.World.Blocks
             return -1;
         }
 
+        // Приоритет: bake-биты (ручная разметка редактора) перебивают категорию блока — Divider/Merge проверяются раньше.
         private static byte Classify(BlockGrid grid, IZoneClassifier cls, int x, int y, int z)
         {
             if (!BlockGrid.InBounds(y))
                 return KindWall;
             ushort t = grid.GetBlock(x, y, z);
             if (t == 0)
-                return HasSection(grid, x, y, z) ? KindPassable : KindWall;
+                return HasSection(grid, x, y, z) ? KindPassable : KindWall; // за границей мира (нет секции) флуд не течёт
             byte bake = grid.GetBake(x, y, z);
             if ((bake & ChunkSection.BakeDivider) != 0)
                 return KindWall;

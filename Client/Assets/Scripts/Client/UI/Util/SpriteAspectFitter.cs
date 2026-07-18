@@ -39,7 +39,7 @@ namespace Client.UI.Util
         }
 
         private void OnRectTransformDimensionsChange() => Fit(); // страховка на layout-ресайз бокса/иконки
-
+        
         private void Fit()
         {
             if (_fitting) return;
@@ -67,5 +67,14 @@ namespace Client.UI.Util
             _lastSprite = spr;
             _lastBoxSize = rawBox;
         }
+
+#if UNITY_EDITOR
+        [ContextMenu("Обновить размер")]
+        private void EditorUpdate()
+        {
+            _fitting = false;
+            Fit();
+        }
+#endif
     }
 }

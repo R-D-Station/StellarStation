@@ -12,4 +12,14 @@ namespace Shared.World.Items
 
         public const byte SlotCount = 6;
     }
+
+    public enum SlotKind : byte
+    {
+        HandLeft = 0,
+        HandRight = 1,
+        PocketLeft = 2,
+        PocketRight = 3,
+        Belt = 4,
+        Back = 5
+    }
 }

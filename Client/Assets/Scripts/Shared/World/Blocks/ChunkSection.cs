@@ -2,11 +2,7 @@ using System.Collections.Generic;
 
 namespace Shared.World.Blocks
 {
-    /// <summary>
-    /// Секция 16×16×16 блоков: палитра + byte-индексы; при переполнении палитры (&gt;256 типов) —
-    /// fallback в прямой ushort-массив. State-байты (см. <see cref="BlockState"/>) хранятся разреженно
-    /// и существуют только у не-Air блоков. Локальный индекс: lx | ly&lt;&lt;4 | lz&lt;&lt;8 (Y — высота).
-    /// </summary>
+    /// <summary>Секция 16³ блоков: палитра/raw-индексы + разреженные каналы state/bake/zone/seed (Y — высота).</summary>
     public sealed class ChunkSection
     {
         public const int Size = 16;
@@ -25,7 +21,9 @@ namespace Shared.World.Blocks
         public const byte BakeCeiling = 1 << 0;
         /// <summary>Бейк-биты: верхняя грань — пол интерьера (комната станции/шатла).</summary>
         public const byte BakeInteriorFloor = 1 << 1;
+        /// <summary>Бейк-биты: ручная жёсткая граница зоны (сильнее любых дверей/проходимости, зона не течёт).</summary>
         public const byte BakeDivider = 1 << 2;
+        /// <summary>Бейк-биты: ручное принудительное слияние зон (сильнее закрытой двери-ворот).</summary>
         public const byte BakeMerge = 1 << 3;
 
         /// <summary>Секция целиком Air (state на Air не бывает) — хранить/слать её не нужно.</summary>
@@ -81,6 +79,7 @@ namespace Shared.World.Blocks
 
         public ushort GetZone(int localIndex) => _zone.TryGetValue(localIndex, out ushort z) ? z : (ushort)0;
 
+        /// <summary>Записать ZoneId позиции. true — если изменился; в отличие от seed/bake, разрешено на Air (зона течёт через воздух).</summary>
         public bool SetZone(int localIndex, ushort zone)
         {
             ushort old = GetZone(localIndex);
@@ -95,6 +94,7 @@ namespace Shared.World.Blocks
 
         public bool TryGetSeed(int localIndex, out FloorSeed seed) => _seeds.TryGetValue(localIndex, out seed);
 
+        /// <summary>Записать сид этажа. false — если не изменился либо позиция Air (сид только на блоке).</summary>
         public bool SetSeed(int localIndex, in FloorSeed seed)
         {
             if (GetBlock(localIndex) == 0)

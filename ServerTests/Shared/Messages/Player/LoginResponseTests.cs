@@ -46,7 +46,7 @@ namespace ServerTests.Shared.Messages.Player
         public void Deserialize_WrongSize_ThrowsArgumentException()
         {
             var r = new LoginResponse();
-            // Старый размер 4 байта ≠ 5 → mixed-build (старый пир) отлавливается строгой проверкой длины.
+            // Старый размер 4 байта ≠ 15 → mixed-build (старый пир) отлавливается строгой проверкой длины.
             Assert.Throws<ArgumentException>(() => r.Deserialize(new byte[4]));
         }
     }

@@ -123,7 +123,7 @@ namespace Client.Map
             { Shape = shape; Steps = steps; Cur = cur; CurCorner = curCorner; Rotate = rotate; }
         }
 
-        /// <summary>Кормит дочерний TileReader-меш верхом через MPB; visible=false гасит грид (_alpha=0).</summary>
+        /// <summary>Кормит дочерний TileReader-меш верхом через MPB; visible=false шлёт тот же полный грид с _alpha=0 (не голую альфу — иначе раскрытый позже верх безтекстурный).</summary>
         public static TopParams FeedTopMesh(MeshRenderer r, BlockDefinition def,
                                             WallShape shape, int steps, byte cornerMask, bool visible)
         {
@@ -180,8 +180,8 @@ namespace Client.Map
         /// <summary>Кормит боковой (WallRenderers) меш через MPB — SideMap в _TopMap поверх own-параметров материала стены (_count/подложка своя, физического поворота нет).</summary>
         public static void FeedSideMesh(MeshRenderer r, BlockDefinition def, WallShape shape, byte cornerMask)
         {
-            _mpb ??= new MaterialPropertyBlock();
-            _mpb.Clear();
+            _mpb ??= new MaterialPropertyBlock(); // гард на вызов без предшествующего FeedTopMesh
+            _mpb.Clear(); // Get не чистит чужие свойства шаренного MPB — Clear обязателен ДО Get, иначе заражение с верха
             r.GetPropertyBlock(_mpb);
             if (def.SideMap != null)
                 _mpb.SetTexture(TopMapId, def.SideMap);

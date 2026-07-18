@@ -3,6 +3,7 @@ using Shared.World.Blocks;
 
 namespace ServerTests.Shared.World.Blocks
 {
+    /// <summary>Резолв опоры (приоритет, facing-от-стены, детерминизм) и каскадный снос ValidateAll.</summary>
     public class BlockAttachTests
     {
         private const ushort SolidT = 1;

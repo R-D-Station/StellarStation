@@ -25,6 +25,7 @@ namespace Client.Map
         private float _zoneFadeDistance = BlockReveal.Budget;
         private float _zoneFadeVertical = BlockReveal.VerticalStep;
 
+        /// <summary>Настроить дальность/вертикальный шаг угасания зонной волны стыков (из конфига сервера).</summary>
         public void SetZoneFade(float distance, float vertical)
         {
             _zoneFadeDistance = Mathf.Max(1f, distance);
@@ -35,7 +36,7 @@ namespace Client.Map
 
         private const int JunctionScanDown = 2;
         private const int JunctionScanUp = 5;
-        private const float ZoneGraceSec = 1f;
+        private const float ZoneGraceSec = 1f; // гистерезис: шаг в дверной проём/безызонную клетку не роняет мгновенно в эвристику
         private ushort _lastPlayerZone;
         private float _lastPlayerZoneTime;
         private static readonly int[] JDirX = { 1, -1, 0, 0, 0, 0 };
@@ -336,6 +337,9 @@ namespace Client.Map
             if (rings)
                 _reveal.Recompute(_grid, _cutStartY, _cutOriginX, _cutOriginZ);
 
+            // Зона игрока P: ячейка ног, фолбэк на клетку выше (ноги ровно на границе пола/воздуха);
+            // 0 или тумблер выкл → эвристический путь ниже; недолгая потеря зоны (напр. в проёме двери) держит
+            // последнюю известную ZoneGraceSec, чтобы не мигать в эвристику на каждый шаг через стык.
             ushort playerZone = 0;
             if (_zoneCut && _zoneReveal != null)
             {
@@ -373,6 +377,7 @@ namespace Client.Map
             }
         }
 
+        // Единая ячеечная альфа cut-away — и для вьюх (пасс 2), и для CutAlphaAt(TopCellY) при раскрытии перекрытого верха.
         private float CutAlphaAt(int x, int y, int z, bool? bottomOpenKnown, int stackBase,
                                  bool zonal, ushort p, float eyeY, float refY, float px, float pz, bool rings)
         {
@@ -385,6 +390,8 @@ namespace Client.Map
                 ushort zp = _grid.GetZone(x, y, z + 1);
                 ushort zn = _grid.GetZone(x, y, z - 1);
 
+                // Ячейка смежна воздуху игрока P: полная видимость, кроме потолка своей же зоны над бейс-открытым низом
+                // (там — зонная волна стыков, не жёсткий 0, иначе шов режется по единице ячеек, а не по волне).
                 if (below == p || above == p || xp == p || xn == p || zp == p || zn == p)
                 {
                     if (y >= eyeY && below == p
@@ -393,6 +400,7 @@ namespace Client.Map
                     return 1f;
                 }
 
+                // Смежна ЧУЖОЙ зоне (не P) — альфа зонной волны от посеянных стыков (недостижима волной → 0).
                 if (below != 0 || above != 0 || xp != 0 || xn != 0 || zp != 0 || zn != 0)
                 {
                     float best = 0f;
@@ -405,6 +413,7 @@ namespace Client.Map
                     return best;
                 }
 
+                // Все 6 соседей беззонные — скелет нижнего этажа/эвристический фолбэк (6-связность не ловит диагонали).
                 if (y < eyeY)
                 {
                     bool foreignBelow = false;
@@ -422,7 +431,7 @@ namespace Client.Map
                         ushort c8 = _grid.GetZone(x - 1, yy, z - 1);
                         if (c0 == p || c1 == p || c2 == p || c3 == p || c4 == p
                             || c5 == p || c6 == p || c7 == p || c8 == p)
-                            return 1f;
+                            return 1f; // диагонально-нижний скан глубины 2 — ловит углы/кромки потолка нижней комнаты
                         foreignBelow = c0 != 0 || c1 != 0 || c2 != 0 || c3 != 0 || c4 != 0
                                        || c5 != 0 || c6 != 0 || c7 != 0 || c8 != 0;
                     }
@@ -446,6 +455,9 @@ namespace Client.Map
             return !cut ? 1f : (rings ? _reveal.Alpha(x, y, z) : 0f);
         }
 
+        // Клиент сам находит стыки зон (сервер шлёт только id зоны на ячейку, не граф стыков): скан 6-соседства
+        // воздуха зоны игрока — прямой стык с чужой зоной сеет волну сразу; дверной блок (Openable) с воздухом
+        // по ту сторону сеет волну через 2 клетки (по факту двери, не дожидаясь Open).
         private void SeedZoneJunctions(ushort p, int refY)
         {
             _zoneReveal.Begin(_cutOriginX, _cutOriginZ);

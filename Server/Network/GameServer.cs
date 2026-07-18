@@ -109,6 +109,7 @@ public class GameServer
     public float BlockSpawnY { get; private set; }
     public float BlockSpawnZ { get; private set; }
 
+    /// <summary>Таблица зон последнего флудфилла (in-memory, не сериализуется — ZoneId в блоках уезжает клиенту существующим v12).</summary>
     public Shared.World.Blocks.ZoneFloodResult? Zones { get; private set; }
 
     public GameServer(SVars config, GridMap? map = null)
@@ -137,6 +138,7 @@ public class GameServer
                               $"spawn ({BlockSpawnX}, y{BlockSpawnY}, {BlockSpawnZ})");
             BuildAutoDoorRegistry();
 
+            // Пересчёт ПОСЛЕ авто-дверей: флуд классифицирует Openable-блоки как ворота вне зависимости от их состояния.
             Zones = Shared.World.Blocks.ZoneFlood.Recompute(BlockWorld, Shared.World.Blocks.CatalogZoneClassifier.Instance);
             Console.WriteLine($"[Zones] зон: {Zones.Zones.Count}, стыков: {Zones.Junctions.Count}, конфликтов: {Zones.Conflicts.Count}");
             if (config.DebugZones)

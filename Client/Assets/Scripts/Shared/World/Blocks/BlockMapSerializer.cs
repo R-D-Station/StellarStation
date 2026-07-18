@@ -4,14 +4,7 @@ using System.Linq;
 
 namespace Shared.World.Blocks
 {
-    /// <summary>
-    /// Бинарная сериализация BlockGrid — формат .smap v10 (один формат для файла и сети).
-    /// Заголовок: [magic 'SMAP'][version=10][gridCount byte]; на грид: [gridId byte][sectionCount int32];
-    /// на секцию: [cx][cy][cz][encoding byte] + палитра/индексы либо raw-ushort + разреженный state.
-    /// Секции пишутся сортированно по (cy,cz,cx) — вертикаль Y первой, state — по локальному индексу →
-    /// round-trip побайтово стабилен.
-    /// Тайловые версии (1..3) НЕ читаются: мигратора нет, карты пересобираются в блочном редакторе.
-    /// </summary>
+    /// <summary>Бинарная сериализация BlockGrid — формат .smap v12 (диск=wire), append-only поверх v10/v11 (bake→zone→seeds), детерминированный порядок → побайтовая стабильность.</summary>
     public static class BlockMapSerializer
     {
         public const int Magic = MapSerializer.Magic; // 'SMAP' — общее семейство форматов карт

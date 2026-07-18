@@ -4,10 +4,13 @@ using Shared.World.Blocks;
 
 namespace Client.Map
 {
+    /// <summary>Render-компонент лейбла: 3D-TMP на префабе (не overlay — держит depth-окклюзию за стеной), по слотам резолвит текст из FloorSeed один раз при спавне.</summary>
     public sealed class BlockLabel : MonoBehaviour, IBlockComponent
     {
+        /// <summary>Источник текста слота.</summary>
         public enum SlotField { Fixed, SeedName, SeedRank, SeedFloor }
 
+        /// <summary>Один TMP-таргет на префабе + чем его заполнять.</summary>
         [System.Serializable]
         public struct LabelSlot
         {

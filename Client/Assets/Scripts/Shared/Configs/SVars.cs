@@ -48,10 +48,13 @@ public class SVars
     /// <summary>Диагностика авто-дверей: лог реестра при загрузке + троттл-лог детекта раз в секунду.</summary>
     public bool DebugAutoDoors = false;
 
+    /// <summary>Диагностика зон: детальный лог зон/стыков/конфликтов при флудфилле на загрузке.</summary>
     public bool DebugZones = false;
 
+    /// <summary>Горизонтальная дальность плана-градиента зоны (тайлы); едет клиенту в LoginResponse.</summary>
     public float ZoneFadeDistance = 10f;
 
+    /// <summary>Вертикальная дальность градиента зоны (этажи); едет клиенту в LoginResponse.</summary>
     public float ZoneFadeVertical = 1.5f;
 
     /// <summary>Загрузка настроек из JSON. Любая ошибка → дефолты, сервер не падает.</summary>

@@ -17,16 +17,17 @@ namespace Client.Editor.Inspectors
         private static readonly Vector3[] _cellRect = new Vector3[4]; // подсветка ячейки слоя (без аллокаций)
         private static readonly string[] ModeNames = { "Слой", "Присоед.", "Потолки", "Полы" };
 
+        // Поля сида кисти FloorAnchor (видны в GUI только при выбранной категории FloorAnchor).
         private static string _seedName = "Станция";
         private static int _seedRank = 0;
         private static int _seedFloor = 1;
         private static bool _showZones;
 
-        private const int ZoneQuadCap = 3000;
+        private const int ZoneQuadCap = 3000; // потолок квадов превью — без него ZoneFlood на большой карте вешает SceneView
         private Shared.World.Blocks.ZoneFloodResult _zonesPreview;
         private readonly List<Vector3> _zoneQuadPos = new();
         private readonly List<Color> _zoneQuadColor = new();
-        private readonly HashSet<ushort> _conflictZones = new();
+        private readonly HashSet<ushort> _conflictZones = new(); // Id зон с конфликтом этажей — красная подсветка сидов
 
         private BlockDefinition[] _palette;
         private string[] _paletteNames;
@@ -202,7 +203,7 @@ namespace Client.Editor.Inspectors
                                 continue;
                             bool air = g.GetBlock(x, y, z) == 0;
                             if (air && g.GetBlock(x, y - 1, z) == 0)
-                                continue;
+                                continue; // квад кладём на пол зоны — воздух без пола под ним пропускаем
                             if (_zoneQuadPos.Count >= ZoneQuadCap)
                             {
                                 capped = true;

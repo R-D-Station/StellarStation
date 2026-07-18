@@ -3,12 +3,15 @@ using System.Collections.Generic;
 
 namespace Shared.World.Blocks
 {
+    /// <summary>Детерминированный резолв опоры блока (engine-agnostic) и снос неопёртых при загрузке карты.</summary>
     public static class BlockAttach
     {
         private static readonly int[] WDX = { 1, -1, 0, 0 };
         private static readonly int[] WDZ = { 0, 0, 1, -1 };
+        // facing ОТ стены к блоку; индексы согласованы с BlockState.GetFacing (0=+Z/1=+X/2=−Z/3=−X) и MultiBlockVisual.FacingRotation
         private static readonly int[] WFacing = { 3, 1, 2, 0 };
 
+        /// <summary>Опора по умолчанию: есть коллизия и блок не открывается (дверь/люк опорой не считаются).</summary>
         public static bool DefaultIsSolid(ushort type)
         {
             if (type == 0)
@@ -17,6 +20,7 @@ namespace Shared.World.Blocks
             return info.HasCollision && !info.Openable;
         }
 
+        /// <summary>Ищет первую доступную поверхность по приоритету <paramref name="priority"/>; Wall/AnySolid-гориз выставляет facing от стены.</summary>
         public static bool Resolve(BlockGrid grid, Func<ushort, bool> isSolid, int x, int y, int z,
                                    AttachSurface[] priority, out AttachSurface surface, out int facing)
         {
@@ -63,9 +67,11 @@ namespace Shared.World.Blocks
         private static readonly Func<ushort, bool> CatalogRequiresSupport = t => BlockCatalog.Get(t).RequiresSupport;
         private static readonly Func<ushort, AttachSurface[]> CatalogAttachTo = t => BlockCatalog.Get(t).AttachTo;
 
+        /// <summary>ValidateAll с правилами опоры из BlockCatalog (боевой путь сервера).</summary>
         public static int ValidateAll(BlockGrid grid, Func<ushort, bool> isSolid)
             => ValidateAll(grid, isSolid, CatalogRequiresSupport, CatalogAttachTo);
 
+        /// <summary>Сносит все RequiresSupport-блоки без опоры, повторяя проход до фикспойнта (каскад: опора ушла → зависимый тоже падает); возвращает число снесённых.</summary>
         public static int ValidateAll(BlockGrid grid, Func<ushort, bool> isSolid,
                                       Func<ushort, bool> requiresSupport, Func<ushort, AttachSurface[]> attachTo)
         {
@@ -76,12 +82,12 @@ namespace Shared.World.Blocks
             var keys = new List<long>();
             var toRemove = new List<(int x, int y, int z)>();
             bool changed = true;
-            while (changed)
+            while (changed) // повтор, пока снос текущего прохода порождает новые неопёртые блоки
             {
                 changed = false;
                 keys.Clear();
                 keys.AddRange(grid.Sections.Keys);
-                keys.Sort(CompareKeys);
+                keys.Sort(CompareKeys); // фиксированный порядок секций (Y,Z,X) — снос детерминирован между запусками
                 toRemove.Clear();
 
                 foreach (long key in keys)

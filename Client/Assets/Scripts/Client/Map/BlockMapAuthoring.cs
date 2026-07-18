@@ -20,6 +20,7 @@ namespace Client.Map
 
         private Transform _visRoot;
         private readonly Dictionary<long, GameObject> _cells = new();
+        // Реестр BlockGizmo для OnDrawGizmos: HideAndDontSave-объекты Unity не зовёт для них OnDrawGizmos сама.
         private readonly Dictionary<long, BlockGizmo> _gizmoCells = new();
 
         public bool IsLoaded => Grid != null;
@@ -42,7 +43,7 @@ namespace Client.Map
                 BlockMapSerializer.SaveToFile(MapPath, Grid);
         }
 
-        /// <summary>Кисть: записать блок (y — высота) и обновить его куб + соседей (автотайл/автотекстуринг).</summary>
+        /// <summary>Кисть: записать блок (y — высота), снять сид если перекрасили НЕ-анкером, авто-ориентировать по опоре, обновить куб + соседей.</summary>
         public void PaintBlock(int x, int y, int z, ushort type)
         {
             if (Grid == null || !Grid.SetBlock(x, y, z, type))
@@ -54,16 +55,17 @@ namespace Client.Map
             RefreshNeighborsVisual(x, y, z);
         }
 
+        /// <summary>Кисть FloorAnchor: красит блок и пишет сайдкар-<see cref="FloorSeed"/> (имя/ранг/этаж зоны).</summary>
         public void PaintSeed(int x, int y, int z, ushort type, string name, int rank, int floor)
         {
             if (Grid == null)
                 return;
             PaintBlock(x, y, z, type);
-            if (Grid.GetBlock(x, y, z) == type)
+            if (Grid.GetBlock(x, y, z) == type) // покраска могла не состояться (занято/бракован тип)
                 Grid.SetSeed(x, y, z, new FloorSeed(name, rank, floor));
         }
 
-        private static readonly System.Func<ushort, bool> AttachSolid = BlockAttach.DefaultIsSolid;
+        private static readonly System.Func<ushort, bool> AttachSolid = BlockAttach.DefaultIsSolid; // делегат-кэш: не аллоцировать на каждый PaintBlock
 
         private void ApplyAttachFacing(int x, int y, int z, ushort type)
         {

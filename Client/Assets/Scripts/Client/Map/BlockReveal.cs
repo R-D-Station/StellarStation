@@ -2,6 +2,7 @@ using Shared.World.Blocks;
 
 namespace Client.Map
 {
+    /// <summary>Кольцевая multi-source волна проявления в скользящем окне вокруг игрока (0 аллокаций/кадр); один экземпляр — один канал (эвристика ИЛИ зона).</summary>
     public sealed class BlockReveal
     {
         public const float Budget = 10f;
@@ -17,6 +18,7 @@ namespace Client.Map
         private float _budgetMax = Budget;
         private float _vertStep = VerticalStep;
 
+        /// <summary>Задать дальность (бюджет волны) и вертикальный шаг угасания (клампы: дальность ≥1, шаг ≥0).</summary>
         public void Configure(float distance, float vertical)
         {
             _budgetMax = distance < 1f ? 1f : distance;
@@ -32,6 +34,7 @@ namespace Client.Map
             _queue = new int[window * window];
         }
 
+        /// <summary>Сбросить окно на новый центр (обнуляет бюджет/очередь) — звать перед Seed/Recompute.</summary>
         public void Begin(int originX, int originZ)
         {
             _originX = originX;
@@ -46,8 +49,10 @@ namespace Client.Map
             }
         }
 
+        /// <summary>Посеять источник волны без канала зоны (эвристический путь) — обёртка над Seed(zone: 0).</summary>
         public void Seed(int x, int z, int srcY) => Seed(x, z, srcY, 0);
 
+        /// <summary>Посеять источник волны в очередь на максимальный бюджет; zone метит канал (0 = эвристика).</summary>
         public void Seed(int x, int z, int srcY, ushort zone)
         {
             int lx = x - _originX, lz = z - _originZ;
@@ -67,6 +72,7 @@ namespace Client.Map
                 _queue[_tail++] = idx;
         }
 
+        /// <summary>Разогнать волну по 8-соседству от посеянных ячеек, затухая на 1 за шаг (BFS по кольцевой очереди, без аллокаций).</summary>
         public void Spread()
         {
             int w = _window;
@@ -97,6 +103,7 @@ namespace Client.Map
             }
         }
 
+        /// <summary>Эвристический путь целиком: детект вертикальных проёмов у среза (Begin+сид+Spread) — открытая колонна рядом со скрытой, воздух на уровне среза.</summary>
         public void Recompute(BlockGrid grid, int[] cutStartY, int originX, int originZ)
         {
             Begin(originX, originZ);
@@ -133,6 +140,7 @@ namespace Client.Map
             Spread();
         }
 
+        /// <summary>Альфа эвристического канала (zone-агностик) в ячейке: budget/vertStep-затухание от источника, clamp[0..1].</summary>
         public float Alpha(int x, int y, int z)
         {
             int lx = x - _originX, lz = z - _originZ;
@@ -147,6 +155,7 @@ namespace Client.Map
             return a < 0f ? 0f : (a > 1f ? 1f : a);
         }
 
+        /// <summary>Альфа зонного канала: 0, если ячейка засеяна не под этой zone (иначе то же budget/vertStep-затухание).</summary>
         public float AlphaFor(int x, int y, int z, ushort zone)
         {
             if (zone == 0)

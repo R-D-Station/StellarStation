@@ -83,10 +83,13 @@ namespace Client.Map
                 _components[i].OnDespawn();
         }
 
+        /// <summary>Совместимость: бинарный гейт через альфа-конвейер (0 или 1).</summary>
         public void SetHidden(bool hidden) => SetAlpha(hidden ? 0f : 1f);
 
+        /// <summary>Альфа cut-away без раскрытия перекрытого верха.</summary>
         public void SetAlpha(float a) => SetAlpha(a, 0f);
 
+        /// <summary>Cut-альфа блока: 0 = enabled off, 1 = откат к запечённой базе, дробь = MPB _alpha = база×a (topUncover — доп. раскрытие перекрытого верха).</summary>
         public void SetAlpha(float a, float topUncover)
         {
             a = Mathf.Clamp01(a);
@@ -142,12 +145,12 @@ namespace Client.Map
                 var mat = r != null ? r.sharedMaterial : null;
                 if (mat == null || !mat.HasProperty(AlphaId))
                     continue;
-                _alphaMpb.Clear();
+                _alphaMpb.Clear(); // без Clear MPB тянет чужие свойства (_TopMap/_cur от FeedTopMesh) — «белая стена»
                 r.GetPropertyBlock(_alphaMpb);
                 if (!_bakedCaptured)
                     _bakedAlpha[i] = _alphaMpb.HasFloat(AlphaId) ? _alphaMpb.GetFloat(AlphaId) : mat.GetFloat(AlphaId);
                 float baseA = _bakedAlpha[i];
-                if (topUncover > baseA)
+                if (topUncover > baseA) // раскрытие перекрытого верха проявляет ДАЖЕ базу 0 (полностью скрытая грань)
                     baseA = topUncover;
                 _alphaMpb.SetFloat(AlphaId, baseA * a);
                 r.SetPropertyBlock(_alphaMpb);
@@ -205,6 +208,7 @@ namespace Client.Map
             TopCurCorner = p.CurCorner; TopRotate = p.Rotate; TopCornerMask = cornerMask;
         }
 
+        /// <summary>Сброс к «полностью видим» перед возвратом в пул — анти-leak enabled/MPB-оверрайда (звать до SetActive(false)).</summary>
         public void ResetForPool()
         {
             if (Hidden && Renderers != null)
