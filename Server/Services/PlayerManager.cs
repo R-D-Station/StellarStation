@@ -52,7 +52,9 @@ namespace Server.Services
                 // не усечётся в мусор (напр. 256→0 → клиент тикал бы на 1 TPS). >255 TPS не поддерживается.
                 TickRate = (byte)Math.Clamp(SVars.Instance.TickRate, 1, byte.MaxValue),
                 BlocksWorld = SVars.Instance.BlocksWorld,
-                ShapesMode = _server.BlockShapesMode
+                ShapesMode = _server.BlockShapesMode,
+                ZoneFadeDistance = SVars.Instance.ZoneFadeDistance,
+                ZoneFadeVertical = SVars.Instance.ZoneFadeVertical
             });
 
             if (!SVars.Instance.BlocksWorld)

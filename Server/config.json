@@ -7,4 +7,6 @@
   "mapPath": "Map/block-station.smap",
   "BlocksWorld": true,
   "EntityInterestZDepth": 6,
+  "ZoneFadeDistance": 8,
+  "ZoneFadeVertical": 1.5,
 }

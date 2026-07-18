@@ -19,6 +19,10 @@ namespace Shared.World.Blocks
             new BlockInfo(8, "FutureFloor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
             new BlockInfo(9, "GlassWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) }, new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 2, 1, new BlockBox[][] { System.Array.Empty<BlockBox>(), System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
             new BlockInfo(10, "MetalWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) }, new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 2, 1, new BlockBox[][] { System.Array.Empty<BlockBox>(), System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
+            new BlockInfo(11, "FloorAnchor", BlockCategory.FloorAnchor, (BlockFaceFlags)63, (BlockFaceFlags)0, 0, new BlockBox[][] { System.Array.Empty<BlockBox>() }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
+            new BlockInfo(12, "Divider", BlockCategory.Divider, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
+            new BlockInfo(13, "MergeMarker", BlockCategory.MergeMarker, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
+            new BlockInfo(14, "MetalGlassWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) }, new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 2, 1, new BlockBox[][] { System.Array.Empty<BlockBox>(), System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f),
         };
     }
 }

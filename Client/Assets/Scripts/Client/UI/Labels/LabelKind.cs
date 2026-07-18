@@ -6,6 +6,7 @@ namespace Client.UI.Labels
         CursorHint,
         PlayerMessage,
         ObjectMessage,
-        SoundMessage
+        SoundMessage,
+        FloorLabel
     }
 }

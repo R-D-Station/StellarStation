@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using Shared.Simulation.Blocks;
 using Shared.World.Blocks;
+using Client.UI.Labels;
 
 namespace Client.Map
 {
@@ -21,9 +22,22 @@ namespace Client.Map
 
         private BlockReveal _reveal;
         private BlockReveal _zoneReveal;
+        private float _zoneFadeDistance = BlockReveal.Budget;
+        private float _zoneFadeVertical = BlockReveal.VerticalStep;
+
+        public void SetZoneFade(float distance, float vertical)
+        {
+            _zoneFadeDistance = Mathf.Max(1f, distance);
+            _zoneFadeVertical = Mathf.Max(0f, vertical);
+            _reveal?.Configure(_zoneFadeDistance, _zoneFadeVertical);
+            _zoneReveal?.Configure(_zoneFadeDistance, _zoneFadeVertical);
+        }
 
         private const int JunctionScanDown = 2;
         private const int JunctionScanUp = 5;
+        private const float ZoneGraceSec = 1f;
+        private ushort _lastPlayerZone;
+        private float _lastPlayerZoneTime;
         private static readonly int[] JDirX = { 1, -1, 0, 0, 0, 0 };
         private static readonly int[] JDirY = { 0, 0, 1, -1, 0, 0 };
         private static readonly int[] JDirZ = { 0, 0, 0, 0, 1, -1 };
@@ -50,6 +64,16 @@ namespace Client.Map
             return b;
         }
 
+        private const int RoofScanUp = 12;
+
+        private bool HasRoofAbove(int x, int y, int z)
+        {
+            for (int dy = 2; dy <= RoofScanUp; dy++)
+                if (_grid.GetBlock(x, y + dy, z) != 0)
+                    return true;
+            return false;
+        }
+
         private bool HasSolidTop(int x, int y, int z)
         {
             var boxes = _shapes.GetBoxes(_grid.GetBlock(x, y, z), _grid.GetState(x, y, z));
@@ -62,6 +86,7 @@ namespace Client.Map
         private BlockGrid _grid;
         private IBlockShapes _shapes;
         private Transform _root;
+        private LabelManager _labels;
         private readonly Dictionary<long, List<BlockView>> _sections = new();
         private readonly Stack<GameObject> _cubePool = new();
         private readonly Dictionary<GameObject, Stack<GameObject>> _prefabPools = new();
@@ -75,6 +100,10 @@ namespace Client.Map
             _shapes = shapes;
             _reveal ??= new BlockReveal(CutWindow);
             _zoneReveal ??= new BlockReveal(CutWindow);
+            _reveal.Configure(_zoneFadeDistance, _zoneFadeVertical);
+            _zoneReveal.Configure(_zoneFadeDistance, _zoneFadeVertical);
+            if (_labels == null)
+                _labels = FindFirstObjectByType<LabelManager>();
 
             if (_root != null)
             {
@@ -225,10 +254,15 @@ namespace Client.Map
                 var view = EnsureView(go);
                 view.Bind(x, y, z, baseY, prefab); // данные + кэш рендереров
                 view.BottomOpen = !HasSolidTop(x, y - 1, z);
+                int sizeY = def != null ? def.Size.y : 1;
+                view.TopCellY = y + sizeY;
+                view.TopCovered = def != null && def.TopMap != null
+                                  && BlockAutoTex.CoveredAbove(_grid, x, y + sizeY, z);
                 FeedTopMesh(go, def, type, x, y, z, rotSteps, view); // грид + top-debug
                 if (def != null && def.Openable) // дверь-якорь: аниматор для тоггла без пересборки (снап на спавне — внутри SetDoor)
                     view.SetDoor(go.GetComponentInChildren<Animator>(true),
                                  Shared.World.Blocks.BlockState.GetOpen(_grid.GetState(x, y, z)));
+                AttachFloorLabel(view, go.transform, x, y, z, type);
                 visuals.Add(view);
                 return;
             }
@@ -248,9 +282,38 @@ namespace Client.Map
                 var view = EnsureView(cube);
                 view.Bind(x, y, z, baseY, null);
                 view.BottomOpen = !HasSolidTop(x, y - 1, z);
+                if (i == 0)
+                    AttachFloorLabel(view, cube.transform, x, y, z, type);
                 visuals.Add(view);
             }
         }
+
+        private void AttachFloorLabel(BlockView view, Transform anchor, int x, int y, int z, ushort type)
+        {
+            if (_labels == null || !BlockCatalog.Get(type).IsFloorAnchor || !_grid.TryGetSeed(x, y, z, out var seed))
+                return;
+            view.FloorLabel = _labels.ShowWorldMessage(LabelKind.FloorLabel, BuildFloorText(in seed),
+                                                       anchor, FloorLabelOffset(x, y, z));
+        }
+
+        private static string BuildFloorText(in FloorSeed seed)
+        {
+            string head = string.IsNullOrEmpty(seed.Name) ? string.Empty : $"<size=55%>{seed.Name}</size>\n";
+            return head + $"<b>{seed.Floor}</b>";
+        }
+
+        // Монтаж лейбла: смежная стена → поднять к стене; иначе пол снизу → над блоком; ни того ни другого → над блоком (невалидно, дроп — сервер, 4b.3).
+        private Vector3 FloorLabelOffset(int x, int y, int z)
+        {
+            if (HasCollisionAt(x + 1, y, z)) return new Vector3(0.45f, 1.6f, 0f);
+            if (HasCollisionAt(x - 1, y, z)) return new Vector3(-0.45f, 1.6f, 0f);
+            if (HasCollisionAt(x, y, z + 1)) return new Vector3(0f, 1.6f, 0.45f);
+            if (HasCollisionAt(x, y, z - 1)) return new Vector3(0f, 1.6f, -0.45f);
+            return new Vector3(0f, 0.7f, 0f);
+        }
+
+        private bool HasCollisionAt(int x, int y, int z)
+            => _shapes.GetBoxes(_grid.GetBlock(x, y, z), _grid.GetState(x, y, z)).Length > 0;
 
         /// <summary>Cut-away: скрыть блоки выше глаз чужого стека в кольце вокруг игрока (звать каждый кадр).</summary>
         public void UpdateCutaway(float px, float py, float pz)
@@ -303,6 +366,15 @@ namespace Client.Map
                 playerZone = _grid.GetZone(fx, fy, fz);
                 if (playerZone == 0)
                     playerZone = _grid.GetZone(fx, fy + 1, fz);
+                if (playerZone != 0)
+                {
+                    _lastPlayerZone = playerZone;
+                    _lastPlayerZoneTime = Time.time;
+                }
+                else if (_lastPlayerZone != 0 && Time.time - _lastPlayerZoneTime < ZoneGraceSec)
+                {
+                    playerZone = _lastPlayerZone;
+                }
             }
             bool zonal = playerZone != 0;
             if (zonal)
@@ -315,43 +387,88 @@ namespace Client.Map
                 for (int i = 0; i < visuals.Count; i++)
                 {
                     var v = visuals[i];
-                    if (zonal)
-                    {
-                        v.SetAlpha(ZonalAlpha(v, playerZone, eyeY, refY, px, pz, rings));
-                        continue;
-                    }
-                    bool cut = CutCandidate(v, eyeY, refY, px, pz)
-                               || (v.Y >= eyeY && NeighborCutAtOrBelow(v.X, v.Z, v.Y));
-                    v.SetAlpha(!cut ? 1f : (rings ? _reveal.Alpha(v.X, v.Y, v.Z) : 0f));
+                    float a = CutAlphaAt(v.X, v.Y, v.Z, v.BottomOpen, v.BaseY, zonal, playerZone, eyeY, refY, px, pz, rings);
+                    float tu = 0f;
+                    if (v.TopCovered && a > 0.001f)
+                        tu = 1f - CutAlphaAt(v.X, v.TopCellY, v.Z, null, int.MinValue, zonal, playerZone, eyeY, refY, px, pz, rings);
+                    v.SetAlpha(a, tu);
+                    if (v.FloorLabel != null)
+                        v.FloorLabel.SetHidden(a <= 0.5f);
                 }
             }
         }
 
-        private float ZonalAlpha(BlockView v, ushort p, float eyeY, float refY, float px, float pz, bool rings)
+        private float CutAlphaAt(int x, int y, int z, bool? bottomOpenKnown, int stackBase,
+                                 bool zonal, ushort p, float eyeY, float refY, float px, float pz, bool rings)
         {
-            if (v.Y < eyeY)
+            if (zonal)
+            {
+                ushort below = _grid.GetZone(x, y - 1, z);
+                ushort above = _grid.GetZone(x, y + 1, z);
+                ushort xp = _grid.GetZone(x + 1, y, z);
+                ushort xn = _grid.GetZone(x - 1, y, z);
+                ushort zp = _grid.GetZone(x, y, z + 1);
+                ushort zn = _grid.GetZone(x, y, z - 1);
+
+                if (below == p || above == p || xp == p || xn == p || zp == p || zn == p)
+                {
+                    if (y >= eyeY && below == p
+                        && (bottomOpenKnown ?? !HasSolidTop(x, y - 1, z)))
+                        return _zoneReveal.AlphaFor(x, y, z, above);
+                    return 1f;
+                }
+
+                if (below != 0 || above != 0 || xp != 0 || xn != 0 || zp != 0 || zn != 0)
+                {
+                    float best = 0f;
+                    if (below != 0) best = Mathf.Max(best, _zoneReveal.AlphaFor(x, y, z, below));
+                    if (above != 0 && above != below) best = Mathf.Max(best, _zoneReveal.AlphaFor(x, y, z, above));
+                    if (xp != 0) best = Mathf.Max(best, _zoneReveal.AlphaFor(x, y, z, xp));
+                    if (xn != 0 && xn != xp) best = Mathf.Max(best, _zoneReveal.AlphaFor(x, y, z, xn));
+                    if (zp != 0) best = Mathf.Max(best, _zoneReveal.AlphaFor(x, y, z, zp));
+                    if (zn != 0 && zn != zp) best = Mathf.Max(best, _zoneReveal.AlphaFor(x, y, z, zn));
+                    return best;
+                }
+
+                if (y < eyeY)
+                {
+                    bool foreignBelow = false;
+                    for (int dy = 1; dy <= 2 && !foreignBelow; dy++)
+                    {
+                        int yy = y - dy;
+                        ushort c0 = _grid.GetZone(x, yy, z);
+                        ushort c1 = _grid.GetZone(x + 1, yy, z);
+                        ushort c2 = _grid.GetZone(x - 1, yy, z);
+                        ushort c3 = _grid.GetZone(x, yy, z + 1);
+                        ushort c4 = _grid.GetZone(x, yy, z - 1);
+                        ushort c5 = _grid.GetZone(x + 1, yy, z + 1);
+                        ushort c6 = _grid.GetZone(x + 1, yy, z - 1);
+                        ushort c7 = _grid.GetZone(x - 1, yy, z + 1);
+                        ushort c8 = _grid.GetZone(x - 1, yy, z - 1);
+                        if (c0 == p || c1 == p || c2 == p || c3 == p || c4 == p
+                            || c5 == p || c6 == p || c7 == p || c8 == p)
+                            return 1f;
+                        foreignBelow = c0 != 0 || c1 != 0 || c2 != 0 || c3 != 0 || c4 != 0
+                                       || c5 != 0 || c6 != 0 || c7 != 0 || c8 != 0;
+                    }
+                    if (foreignBelow)
+                        return 0f;
+                    return (y < refY - 1f && HasRoofAbove(x, y, z)) ? 0f : 1f;
+                }
+                bool boZ = bottomOpenKnown ?? !HasSolidTop(x, y - 1, z);
+                int sbZ = stackBase != int.MinValue ? stackBase : FindStackBase(x, y, z);
+                bool cutZ = sbZ >= refY + 2 || boZ || NeighborCutAtOrBelow(x, z, y);
+                return cutZ ? 0f : 1f;
+            }
+
+            if (y < eyeY)
                 return 1f;
-            if (Mathf.Max(Mathf.Abs(v.X + 0.5f - px), Mathf.Abs(v.Z + 0.5f - pz)) > CutRingRadius)
+            if (Mathf.Max(Mathf.Abs(x + 0.5f - px), Mathf.Abs(z + 0.5f - pz)) > CutRingRadius)
                 return 1f;
-
-            ushort below = _grid.GetZone(v.X, v.Y - 1, v.Z);
-            if (v.BottomOpen && below == p)
-                return 0f;
-
-            ushort above = _grid.GetZone(v.X, v.Y + 1, v.Z);
-            ushort xp = _grid.GetZone(v.X + 1, v.Y, v.Z);
-            ushort xn = _grid.GetZone(v.X - 1, v.Y, v.Z);
-            ushort zp = _grid.GetZone(v.X, v.Y, v.Z + 1);
-            ushort zn = _grid.GetZone(v.X, v.Y, v.Z - 1);
-
-            if (below == p || above == p || xp == p || xn == p || zp == p || zn == p)
-                return 1f;
-
-            if (below != 0 || above != 0 || xp != 0 || xn != 0 || zp != 0 || zn != 0)
-                return _zoneReveal.Alpha(v.X, v.Y, v.Z);
-
-            bool cut = CutCandidate(v, eyeY, refY, px, pz) || NeighborCutAtOrBelow(v.X, v.Z, v.Y);
-            return !cut ? 1f : (rings ? _reveal.Alpha(v.X, v.Y, v.Z) : 0f);
+            bool bottomOpen = bottomOpenKnown ?? !HasSolidTop(x, y - 1, z);
+            int sb = stackBase != int.MinValue ? stackBase : FindStackBase(x, y, z);
+            bool cut = sb >= refY + 2 || bottomOpen || NeighborCutAtOrBelow(x, z, y);
+            return !cut ? 1f : (rings ? _reveal.Alpha(x, y, z) : 0f);
         }
 
         private void SeedZoneJunctions(ushort p, int refY)
@@ -373,7 +490,7 @@ namespace Client.Map
                             if (nzone != 0)
                             {
                                 if (nzone != p)
-                                    _zoneReveal.Seed(nx, nz, ny);
+                                    _zoneReveal.Seed(nx, nz, ny, nzone);
                                 continue;
                             }
                             ushort gate = _grid.GetBlock(nx, ny, nz);
@@ -382,7 +499,7 @@ namespace Client.Map
                             int bx = x + JDirX[d] * 2, by = y + JDirY[d] * 2, bz = z + JDirZ[d] * 2;
                             ushort q = _grid.GetZone(bx, by, bz);
                             if (q != 0 && q != p)
-                                _zoneReveal.Seed(bx, bz, by);
+                                _zoneReveal.Seed(bx, bz, by, q);
                         }
                     }
                 }
@@ -446,6 +563,11 @@ namespace Client.Map
         {
             if (v == null || v.gameObject == null)
                 return;
+            if (v.FloorLabel != null)
+            {
+                v.FloorLabel.Dismiss();
+                v.FloorLabel = null;
+            }
             // Инвариант пула: возврат с ВКЛЮЧЁННЫМИ рендерерами (cut-away гасит выборочно — иначе утечка
             // «навсегда невидимых» блоков, урок pool-renderer-enabled-leak) — внутри ResetForPool.
             v.ResetForPool();

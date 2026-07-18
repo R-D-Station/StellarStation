@@ -50,6 +50,10 @@ public class SVars
 
     public bool DebugZones = false;
 
+    public float ZoneFadeDistance = 10f;
+
+    public float ZoneFadeVertical = 1.5f;
+
     /// <summary>Загрузка настроек из JSON. Любая ошибка → дефолты, сервер не падает.</summary>
     public static void LoadFromJson(string path)
     {

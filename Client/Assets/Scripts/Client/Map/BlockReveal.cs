@@ -10,15 +10,25 @@ namespace Client.Map
         private readonly int _window;
         private readonly float[] _budget;
         private readonly int[] _srcY;
+        private readonly ushort[] _seedZone;
         private readonly int[] _queue;
         private int _originX, _originZ;
         private int _head, _tail;
+        private float _budgetMax = Budget;
+        private float _vertStep = VerticalStep;
+
+        public void Configure(float distance, float vertical)
+        {
+            _budgetMax = distance < 1f ? 1f : distance;
+            _vertStep = vertical < 0f ? 0f : vertical;
+        }
 
         public BlockReveal(int window)
         {
             _window = window;
             _budget = new float[window * window];
             _srcY = new int[window * window];
+            _seedZone = new ushort[window * window];
             _queue = new int[window * window];
         }
 
@@ -32,23 +42,27 @@ namespace Client.Map
             {
                 _budget[i] = 0f;
                 _srcY[i] = int.MaxValue;
+                _seedZone[i] = 0;
             }
         }
 
-        public void Seed(int x, int z, int srcY)
+        public void Seed(int x, int z, int srcY) => Seed(x, z, srcY, 0);
+
+        public void Seed(int x, int z, int srcY, ushort zone)
         {
             int lx = x - _originX, lz = z - _originZ;
             if (lx < 0 || lz < 0 || lx >= _window || lz >= _window)
                 return;
             int idx = lz * _window + lx;
-            if (_budget[idx] >= Budget)
+            if (_budget[idx] >= _budgetMax)
             {
-                if (_srcY[idx] == int.MaxValue || srcY > _srcY[idx])
+                if (_seedZone[idx] == zone && (_srcY[idx] == int.MaxValue || srcY > _srcY[idx]))
                     _srcY[idx] = srcY;
                 return;
             }
-            _budget[idx] = Budget;
+            _budget[idx] = _budgetMax;
             _srcY[idx] = srcY;
+            _seedZone[idx] = zone;
             if (_tail < _queue.Length)
                 _queue[_tail++] = idx;
         }
@@ -76,6 +90,7 @@ namespace Client.Map
                             continue;
                         _budget[n] = next;
                         _srcY[n] = _srcY[idx];
+                        _seedZone[n] = _seedZone[idx];
                         if (_tail < _queue.Length)
                             _queue[_tail++] = n;
                     }
@@ -128,7 +143,25 @@ namespace Client.Map
             if (b <= 0f)
                 return 0f;
             int sy = _srcY[idx];
-            float a = (b - (y > sy ? (y - sy) * VerticalStep : 0f)) / Budget;
+            float a = (b - (y > sy ? (y - sy) * _vertStep : 0f)) / _budgetMax;
+            return a < 0f ? 0f : (a > 1f ? 1f : a);
+        }
+
+        public float AlphaFor(int x, int y, int z, ushort zone)
+        {
+            if (zone == 0)
+                return 0f;
+            int lx = x - _originX, lz = z - _originZ;
+            if (lx < 0 || lz < 0 || lx >= _window || lz >= _window)
+                return 0f;
+            int idx = lz * _window + lx;
+            if (_seedZone[idx] != zone)
+                return 0f;
+            float b = _budget[idx];
+            if (b <= 0f)
+                return 0f;
+            int sy = _srcY[idx];
+            float a = (b - (y > sy ? (y - sy) * _vertStep : 0f)) / _budgetMax;
             return a < 0f ? 0f : (a > 1f ? 1f : a);
         }
     }

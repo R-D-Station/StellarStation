@@ -482,6 +482,7 @@ namespace Client.Net
                 _predictor.SetBlockWorld(_streamWorld, new Client.Map.ShapesWithUnknown(baseShapes));
                 _blockRenderer = gameObject.AddComponent<Client.Map.BlockRenderer>();
                 _blockRenderer.Init(_blockGrid, baseShapes);
+                _blockRenderer.SetZoneFade(login.ZoneFadeDistance, login.ZoneFadeVertical);
             }
 
             Debug.Log($"[NetworkRunner] My NetId = {LocalNetId}, tickRate = {_tickRate}, blocks = {BlocksWorld}");

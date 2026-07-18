@@ -198,7 +198,10 @@ namespace Client.Editor.Inspectors
                         {
                             int x = cx * 16 + lx, y = cy * 16 + ly, z = cz * 16 + lz;
                             ushort zid = g.GetZone(x, y, z);
-                            if (zid == 0 || g.GetBlock(x, y, z) != 0 || g.GetBlock(x, y - 1, z) == 0)
+                            if (zid == 0)
+                                continue;
+                            bool air = g.GetBlock(x, y, z) == 0;
+                            if (air && g.GetBlock(x, y - 1, z) == 0)
                                 continue;
                             if (_zoneQuadPos.Count >= ZoneQuadCap)
                             {

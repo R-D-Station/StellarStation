@@ -129,12 +129,6 @@ namespace Client.Map
         {
             _mpb ??= new MaterialPropertyBlock();
             _mpb.Clear();
-            if (!visible)
-            {
-                _mpb.SetFloat(AlphaId, 0f);
-                r.SetPropertyBlock(_mpb);
-                return default;
-            }
 
             var (curCorner, cornerRotate) = WallCornerCode.EncodeCorners(cornerMask);
             bool isFloor = def.Category == BlockCategory.Floor;
@@ -156,7 +150,7 @@ namespace Client.Map
             _mpb.SetInteger(RotateId, rotate);
             _mpb.SetInteger(CountXId, Mathf.Max(1, def.TopMapCountX));
             _mpb.SetInteger(CountYId, Mathf.Max(1, def.TopMapCountY));
-            _mpb.SetFloat(AlphaId, 1f);
+            _mpb.SetFloat(AlphaId, visible ? 1f : 0f);
             r.SetPropertyBlock(_mpb);
 
             ApplyMainRotation(r, mainQ);
@@ -211,18 +205,14 @@ namespace Client.Map
             Resolve(grid, def, type, x, y, z, out var shape, out _, out corners);
 
             if (holder == null)
-                return topVisible
-                    ? FeedTopMesh(fallbackTop, def, shape, rotSteps, corners, true)
-                    : FeedTopMesh(fallbackTop, def, WallShape.Single, 0, 0, false);
+                return FeedTopMesh(fallbackTop, def, shape, rotSteps, corners, topVisible);
 
             TopParams result = default;
             var tops = holder.TopRenderers;
             if (tops != null)
                 for (int i = 0; i < tops.Length; i++)
                     if (tops[i] != null)
-                        result = topVisible
-                            ? FeedTopMesh(tops[i], def, shape, rotSteps, corners, true)
-                            : FeedTopMesh(tops[i], def, WallShape.Single, 0, 0, false);
+                        result = FeedTopMesh(tops[i], def, shape, rotSteps, corners, topVisible);
             var walls = holder.WallRenderers;
             if (walls != null)
                 for (int i = 0; i < walls.Length; i++)

@@ -1,6 +1,7 @@
 using System.Text;
 using UnityEngine;
 using Shared.World;
+using Client.UI.Labels;
 
 namespace Client.Map
 {
@@ -16,6 +17,11 @@ namespace Client.Map
         public bool Hidden;
         [Tooltip("Текущая cut-альфа [0..1]: 0 = enabled off, дробь = MPB _alpha.")]
         public float Alpha = 1f;
+        [Tooltip("Раскрытие перекрытого верха [0..1]: 1 − альфа покрывающего блока.")]
+        public float TopUncover;
+        [Tooltip("Верх перекрыт блоком сверху (бейк спавна) — кандидат на раскрытие.")]
+        public bool TopCovered;
+        public int TopCellY;
         public bool DoorOpen;
 
         [Header("Верх-грид (дебаг)")]
@@ -26,6 +32,7 @@ namespace Client.Map
         [System.NonSerialized] public GameObject PrefabKey; // ключ пула (null = куб из общего пула)
         [System.NonSerialized] public Renderer[] Renderers; // кэш для cut-away гейта
         [System.NonSerialized] public Animator DoorAnim;    // якорь двери (иначе null)
+        [System.NonSerialized] public PooledLabel FloorLabel; // лейбл блока этажа (иначе null); владелец — BlockRenderer
 
         private static readonly int DoorOpenTrigger = Animator.StringToHash("Open");
         private static readonly int DoorCloseTrigger = Animator.StringToHash("Close");
@@ -45,29 +52,38 @@ namespace Client.Map
         {
             X = x; Y = y; Z = z; BaseY = baseY;
             BottomOpen = false;
+            TopCovered = false;
+            TopCellY = y + 1;
             PrefabKey = prefabKey;
             Renderers = GetComponentsInChildren<Renderer>(true);
             Hidden = false;
             Alpha = 1f;
+            TopUncover = 0f;
             _bakedCaptured = false;
             _alphaOverridden = false;
             DoorAnim = null;
             DoorOpen = false;
+            FloorLabel = null;
         }
 
         public void SetHidden(bool hidden) => SetAlpha(hidden ? 0f : 1f);
 
-        public void SetAlpha(float a)
+        public void SetAlpha(float a) => SetAlpha(a, 0f);
+
+        public void SetAlpha(float a, float topUncover)
         {
             a = Mathf.Clamp01(a);
-            if (Renderers == null || Mathf.Abs(a - Alpha) < 0.0005f)
+            topUncover = Mathf.Clamp01(topUncover);
+            if (Renderers == null || (Mathf.Abs(a - Alpha) < 0.0005f && Mathf.Abs(topUncover - TopUncover) < 0.0005f))
             {
                 Alpha = a;
+                TopUncover = topUncover;
                 Hidden = a <= HideEps;
                 return;
             }
             bool wasHidden = Alpha <= HideEps;
             Alpha = a;
+            TopUncover = topUncover;
 
             if (a <= HideEps)
             {
@@ -84,13 +100,13 @@ namespace Client.Map
                     if (Renderers[i] != null)
                         Renderers[i].enabled = true;
 
-            if (a >= ShowEps)
+            if (a >= ShowEps && topUncover <= HideEps)
                 RestoreBakedAlpha();
             else
-                ApplyFractionalAlpha(a);
+                ApplyFractionalAlpha(a, topUncover);
         }
 
-        private void ApplyFractionalAlpha(float a)
+        private void ApplyFractionalAlpha(float a, float topUncover)
         {
             _alphaMpb ??= new MaterialPropertyBlock();
             if (_bakedAlpha == null || _bakedAlpha.Length < Renderers.Length)
@@ -105,7 +121,10 @@ namespace Client.Map
                 r.GetPropertyBlock(_alphaMpb);
                 if (!_bakedCaptured)
                     _bakedAlpha[i] = _alphaMpb.HasFloat(AlphaId) ? _alphaMpb.GetFloat(AlphaId) : mat.GetFloat(AlphaId);
-                _alphaMpb.SetFloat(AlphaId, _bakedAlpha[i] * a);
+                float baseA = _bakedAlpha[i];
+                if (topUncover > baseA)
+                    baseA = topUncover;
+                _alphaMpb.SetFloat(AlphaId, baseA * a);
                 r.SetPropertyBlock(_alphaMpb);
             }
             _bakedCaptured = true;
@@ -170,6 +189,7 @@ namespace Client.Map
             RestoreBakedAlpha();
             Hidden = false;
             Alpha = 1f;
+            TopUncover = 0f;
         }
 
         // ── Дебаг-дамп рендер-состояния (было BlockRenderProbe.Report): рантайм-безопасно, без ShaderUtil ──

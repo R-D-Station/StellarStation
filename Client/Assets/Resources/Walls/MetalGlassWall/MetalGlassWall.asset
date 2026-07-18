@@ -1,0 +1,51 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2a5ba86ce8fa84d4aa708dd205f2ef8f, type: 3}
+  m_Name: MetalGlassWall
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockDefinition
+  Type: 14
+  DisplayName: MetalGlassWall
+  Category: 2
+  SealsFaces: 63
+  OpaqueFaces: 63
+  CoversBlockBelow: 1
+  CollisionBoxes:
+  - Center: {x: 0.5, y: 0.5, z: 0.5}
+    Size: {x: 1, y: 1, z: 1}
+  - Center: {x: 0.5, y: 1.5, z: 0.5}
+    Size: {x: 1, y: 1, z: 1}
+  CollisionBoxesOpen: []
+  Opening: 0
+  TriggerBoxes: []
+  DoorCloseDelay: 1
+  DeconstructStages: 0
+  Size: {x: 1, y: 2, z: 1}
+  Connection:
+    UseConnections: 1
+    ConnectsToSameType: 1
+    ConnectsToTypes: 
+    MeshSingle: {fileID: 3465880795150428724, guid: 525f580c62ad6ab409652e155c6c8190, type: 3}
+    MeshEnd: {fileID: 3899318142779029826, guid: 02ce94f73d2bd544e8d2636350bc79bc, type: 3}
+    MeshStraight: {fileID: 9044213943688244232, guid: 12b22d56b8916dd4f8ba1b560168d01b, type: 3}
+    MeshCorner: {fileID: 1159597351609551204, guid: 2624a85546573044493ee252702a6485, type: 3}
+    MeshT: {fileID: 2860752718409877910, guid: a4864fee09d6f6547871ddb09217e0cd, type: 3}
+    MeshCross: {fileID: 2674634547497210640, guid: 0b72f683fc8fad04c922790667432746, type: 3}
+  UseGrid: 1
+  TopMap: {fileID: 2800000, guid: 1df138b46df8033428927c029a2830d8, type: 3}
+  BackingMap: {fileID: 2800000, guid: 57ef835d9c1840445874afbe3ef23f44, type: 3}
+  TopMapCountX: 5
+  TopMapCountY: 2
+  TopCalibration: {fileID: 11400000, guid: 91ff7738f8532034caff18df93d8ac9f, type: 2}
+  SideMap: {fileID: 2800000, guid: d5954cc5e33f8b446b5c384d8bb150ba, type: 3}
+  Prefab: {fileID: 3465880795150428724, guid: 525f580c62ad6ab409652e155c6c8190, type: 3}
+  Pivot: 0
+  EditorSprite: {fileID: 0}
