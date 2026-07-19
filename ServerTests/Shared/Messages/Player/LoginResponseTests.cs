@@ -18,10 +18,21 @@ namespace ServerTests.Shared.Messages.Player
         }
 
         [Fact]
-        public void LoginResponse_SerializedSize_IsFiveBytes()
+        public void LoginResponse_SerializedSize_IsFifteenBytes()
         {
-            var data = new LoginResponse { NetId = 1, TickRate = 30 }.Serialize();
-            Assert.Equal(5, data.Length); // NetId(4) + TickRate(1)
+            var data = new LoginResponse
+            {
+                NetId = 1, TickRate = 30, BlocksWorld = true, ShapesMode = 1,
+                ZoneFadeDistance = 6.5f, ZoneFadeVertical = 2f
+            }.Serialize();
+            Assert.Equal(15, data.Length);
+
+            var deserialized = new LoginResponse();
+            deserialized.Deserialize(data);
+            Assert.True(deserialized.BlocksWorld);
+            Assert.Equal(1, deserialized.ShapesMode);
+            Assert.Equal(6.5f, deserialized.ZoneFadeDistance);
+            Assert.Equal(2f, deserialized.ZoneFadeVertical);
         }
 
         [Fact]
@@ -35,7 +46,7 @@ namespace ServerTests.Shared.Messages.Player
         public void Deserialize_WrongSize_ThrowsArgumentException()
         {
             var r = new LoginResponse();
-            // Старый размер 4 байта ≠ 5 → mixed-build (старый пир) отлавливается строгой проверкой длины.
+            // Старый размер 4 байта ≠ 15 → mixed-build (старый пир) отлавливается строгой проверкой длины.
             Assert.Throws<ArgumentException>(() => r.Deserialize(new byte[4]));
         }
     }

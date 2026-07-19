@@ -4,12 +4,13 @@ using Shared.Messages;
 
 namespace Shared.Messages.Core
 {
-    /// <summary>Намерение движения от клиента: направление, бег, бит «лечь/встать» и порядковый номер ввода.</summary>
+    /// <summary>Намерение движения от клиента: направление, бег, биты «лечь/встать» и «прыжок», порядковый номер ввода.</summary>
     public struct MoveIntent : INetMessage
     {
         public IntentDirection Direction;
         public bool Sprint;
         public bool LayToggle; // input-triggered бит «лечь/встать» (предсказывается как Sprint)
+        public bool Jump;      // блок-мир (B2): зажат = серия прыжков с опоры; предсказывается
         public uint Sequence;
 
         private const uint MaxSequence = 10_000_000; // верхняя граница (защита от мусора)
@@ -24,6 +25,7 @@ namespace Shared.Messages.Core
             writer.Write((byte)Direction);
             writer.Write(Sprint);
             writer.Write(LayToggle);
+            writer.Write(Jump);
             writer.Write(Sequence);
 
             return ms.ToArray();
@@ -34,8 +36,8 @@ namespace Shared.Messages.Core
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "MoveIntent data cannot be null");
 
-            // Direction(1) + Sprint(1) + LayToggle(1) + Sequence(4) = 7 байт
-            const int expectedSize = 7;
+            // Direction(1) + Sprint(1) + LayToggle(1) + Jump(1) + Sequence(4) = 8 байт
+            const int expectedSize = 8;
 
             if (data.Length != expectedSize)
                 throw new ArgumentException($"Invalid data size: expected {expectedSize} bytes, got {data.Length} bytes", nameof(data));
@@ -52,6 +54,7 @@ namespace Shared.Messages.Core
 
                 Sprint = reader.ReadBoolean();
                 LayToggle = reader.ReadBoolean();
+                Jump = reader.ReadBoolean();
 
                 uint sequence = reader.ReadUInt32();
                 if (sequence > MaxSequence)

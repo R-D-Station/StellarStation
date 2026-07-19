@@ -12,4 +12,20 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1ea8c688fed21a44ba31e53d21e855a9, type: 3}
   m_Name: LabelStyleTable
   m_EditorClassIdentifier: Assembly-CSharp::Client.UI.Labels.LabelStyleTable
-  _entries: []
+  _entries:
+  - Kind: 0
+    Lifetime: Infinity
+    FadeIn: 0
+    FadeOut: 0
+    FontSize: 18
+    TextColor: {r: 1, g: 1, b: 1, a: 1}
+    Background: {r: 1, g: 1, b: 1, a: 1}
+    Offset: {x: 16, y: 16}
+  - Kind: 2
+    Lifetime: 3
+    FadeIn: 0.2
+    FadeOut: 0.4
+    FontSize: 18
+    TextColor: {r: 1, g: 1, b: 1, a: 1}
+    Background: {r: 1, g: 1, b: 1, a: 1}
+    Offset: {x: 16, y: 16}

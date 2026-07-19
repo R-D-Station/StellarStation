@@ -1,4 +1,5 @@
 #if UNITY_EDITOR
+using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 using Shared.World;
@@ -34,20 +35,28 @@ namespace Client.Editor.MapTools
         // Превью autotiling-соединений стен и пола (W4b/F-editor): оверлей поверх клетки, данные не трогает.
         private bool _showConnections;
 
-        // ---- Каталог тайлов ----
+        // ---- Каталог тайлов / конфиг редактора ----
         private TileCatalog _catalog;
+        private MapEditorConfig _config;   // иконки инструментов и пр. (назначается в «Настройки»)
         private const string CatalogPrefKey = "Station.MapEditor.CatalogGuid";
+        private const string ConfigPrefKey = "Station.MapEditor.ConfigGuid";
 
-        // ---- Кисть ----
+        // ---- Инструмент / кисть ----
+        private enum Tool { None, Pencil, Eraser }
+        private Tool _tool = Tool.None;
+        private const int MaxBrush = 32;
+        private int _brushSize = 1;   // сторона квадратной кисти (тайлы), центр под курсором
+
         // Настенный объект (стена/дверь/люк/окно) — один слот StructureType.
         private byte _selFloor = 1;
         private byte _selStructure = 0;
-        private TileSpecial _selSpecial = TileSpecial.None;
+        private TileSpecial _selSpecial = TileSpecial.Spawn;   // «Нет» убран из пикера → валидный дефолт
         private Brush _brush = Brush.Floor;   // только когда каталога нет
 
-        // Категория-таргет мазка (режим каталога): какие слои клетки пишем; невыбранные — сохраняем (read-modify-write).
+        // Слой-таргет мазка/стирания: какие слои клетки трогаем; невыбранные — сохраняем (read-modify-write).
         private bool _paintFloor = true;
         private bool _paintStructure;
+        private bool _paintSpecial;
 
         // Потолок: при включённом флаге краска кладёт пол на z+1 над клеткой (закрытая комната).
         private bool _withCeiling;
@@ -80,9 +89,11 @@ namespace Client.Editor.MapTools
         private static readonly GUIContent ManualFlagsToggle = new GUIContent("Ручные флаги",
             "Игнорировать палитру пола/структуры, выставлять флаги тайла напрямую.");
         private static readonly GUIContent PaintFloorToggle = new GUIContent("Пол",
-            "Красить слой пола. Выкл — существующий пол клетки сохраняется. «Нет» в ряду пола очищает только пол.");
+            "Слой пола. Карандаш красит его, ластик стирает. Выкл — существующий пол клетки сохраняется.");
         private static readonly GUIContent PaintStructureToggle = new GUIContent("Объект",
-            "Красить слой объекта (стена/дверь/люк/окно). Выкл — существующий объект сохраняется. «Нет» очищает только объект.");
+            "Слой объекта (стена/дверь/люк/окно). Карандаш красит, ластик стирает. Выкл — существующий объект сохраняется.");
+        private static readonly GUIContent PaintSpecialToggle = new GUIContent("Спец",
+            "Слой спец-маркера (спавн/лестница). Карандаш ставит, ластик убирает. Выкл — существующий спец сохраняется.");
 
         [MenuItem("Tools/Station/Map Editor")]
         public static void Open()
@@ -96,6 +107,7 @@ namespace Client.Editor.MapTools
             if (_map == null) _map = new GridMap();
             wantsMouseMove = true;            // чтобы инфо клетки под курсором обновлялось живо
             LoadCatalogFromPrefs();
+            LoadConfigFromPrefs();
         }
 
         private void OnGUI()
@@ -103,9 +115,16 @@ namespace Client.Editor.MapTools
             HandlePanKeys();   // WASD-сдвиг вида (до отрисовки, чтобы полей не касалось)
 
             DrawFileToolbar();
-            DrawLayerAndView();
-            DrawBrushSection();
-            DrawGrid();
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                using (new EditorGUILayout.VerticalScope())
+                {
+                    DrawLayerAndView();
+                    DrawBrushSection();
+                    DrawGrid();
+                }
+                DrawToolPanel();   // растянута на всю высоту справа
+            }
 
             if (Event.current.type == EventType.MouseMove) Repaint();
         }
@@ -120,6 +139,7 @@ namespace Client.Editor.MapTools
                 if (GUILayout.Button("Load", EditorStyles.toolbarButton, GUILayout.Width(46))) Load();
                 if (GUILayout.Button("Save", EditorStyles.toolbarButton, GUILayout.Width(46))) Save(saveAs: false);
                 if (GUILayout.Button("Save As", EditorStyles.toolbarButton, GUILayout.Width(60))) Save(saveAs: true);
+                if (GUILayout.Button("Настройки", EditorStyles.toolbarButton, GUILayout.Width(72))) MapEditorSettingsWindow.Open(this);
 
                 GUILayout.Space(8);
                 string name = string.IsNullOrEmpty(_currentPath)
@@ -229,92 +249,200 @@ namespace Client.Editor.MapTools
         {
             using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox))
             {
-                EditorGUILayout.LabelField("Кисть", EditorStyles.boldLabel);
+                DrawLayerRow();   // «Слой» — всегда виден; всё ниже — только при выбранном инструменте
+                if (_tool == Tool.None) return;
 
-                // Каталог — источник палитры. Лежит здесь, т.к. определяет, чем красим.
+                // Размер кисти — перед скрытыми объектами (общий для карандаша и ластика).
                 using (new EditorGUILayout.HorizontalScope())
                 {
-                    EditorGUILayout.LabelField("Каталог", GUILayout.Width(56));
-                    EditorGUI.BeginChangeCheck();
-                    _catalog = (TileCatalog)EditorGUILayout.ObjectField(_catalog, typeof(TileCatalog), false);
-                    if (EditorGUI.EndChangeCheck())
-                    {
-                        SaveCatalogToPrefs();
-                        _catalog?.InvalidateCache();
-                    }
-                }
-                if (_catalog == null)
-                    EditorGUILayout.LabelField("нет каталога — пресеты + цвета", EditorStyles.miniLabel);
-
-                EditorGUILayout.Space(2);
-
-                if (_catalog != null)
-                {
-                    DrawPaintTargetRow();
-                    if (_paintFloor) DrawFloorRow();
-                    if (_paintStructure) DrawStructureRow();
-                }
-                else
-                {
-                    DrawPresetRow();
+                    EditorGUILayout.LabelField("Размер", GUILayout.Width(56));
+                    _brushSize = Mathf.Clamp(EditorGUILayout.IntField(_brushSize, GUILayout.Width(46)), 1, MaxBrush);
+                    GUILayout.FlexibleSpace();
                 }
 
-                DrawSpecialRow();
-                DrawCeilingRow();
-
-                EditorGUILayout.Space(2);
-                DrawBrushPreview();
-
-                EditorGUILayout.Space(2);
-                DrawExpert();
+                if (_tool == Tool.Pencil) DrawPencilOptions();
             }
         }
 
-        // Категория-таргет: какие слои несёт мазок. Невыбранный слой read-modify-write сохраняет из клетки.
-        private void DrawPaintTargetRow()
+        // Слой-таргет: какие слои трогает инструмент. Невыбранный слой read-modify-write сохраняется.
+        private void DrawLayerRow()
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Красить", GUILayout.Width(56));
+                EditorGUILayout.LabelField("Слой", GUILayout.Width(56));
                 _paintFloor = GUILayout.Toggle(_paintFloor, PaintFloorToggle, EditorStyles.miniButton, GUILayout.Height(20));
                 _paintStructure = GUILayout.Toggle(_paintStructure, PaintStructureToggle, EditorStyles.miniButton, GUILayout.Height(20));
+                _paintSpecial = GUILayout.Toggle(_paintSpecial, PaintSpecialToggle, EditorStyles.miniButton, GUILayout.Height(20));
                 GUILayout.FlexibleSpace();
             }
-            if (!_paintFloor && !_paintStructure)
-                EditorGUILayout.LabelField("нет цели: мазок сохранит пол и объект (можно ставить только спец)",
-                    EditorStyles.miniLabel);
         }
 
-        // Пол: «Нет» + виды из каталога.
-        private void DrawFloorRow()
+        // Опции карандаша: 3 выпадающих (Пол/Объект/Спец) + потолок + превью + эксперт (без каталога — пресеты).
+        private void DrawPencilOptions()
         {
-            using (new EditorGUILayout.HorizontalScope())
+            if (_catalog != null) DrawPickerDropdowns();
+            else DrawPresetRow();
+
+            DrawCeilingRow();
+            EditorGUILayout.Space(2);
+            DrawBrushPreview();
+            EditorGUILayout.Space(2);
+            DrawExpert();
+        }
+
+        // Правая панель инструментов (иконки; растянута на всю высоту окна). Повторный клик по активному — снять.
+        private void DrawToolPanel()
+        {
+            using (new EditorGUILayout.VerticalScope(EditorStyles.helpBox, GUILayout.Width(46), GUILayout.ExpandHeight(true)))
             {
-                EditorGUILayout.LabelField("Пол", GUILayout.Width(56));
-                DrawSelectButton("Нет", _selFloor == 0, () => _selFloor = 0, null);
-                foreach (var f in _catalog.Floors)
-                {
-                    if (f == null || f.Type == 0) continue;
-                    byte id = f.Type;
-                    DrawSelectButton(KindLabel(f.DisplayName, id), _selFloor == id, () => _selFloor = id, null);
-                }
+                DrawToolButton(Tool.Pencil, _config != null ? _config.PencilIcon : null, "Карандаш");
+                DrawToolButton(Tool.Eraser, _config != null ? _config.EraserIcon : null, "Ластик");
+                GUILayout.FlexibleSpace();
             }
         }
 
-        // Настенный объект: стена/дверь/люк/окно — один слот. Открываемые подкрашены иначе.
-        private void DrawStructureRow()
+        // Кнопка инструмента: спрайт-иконка (из конфига) + tooltip-название; без иконки — первая буква. Клик — выбрать/снять.
+        private void DrawToolButton(Tool tool, Sprite icon, string tooltip)
+        {
+            var prev = GUI.backgroundColor;
+            if (_tool == tool) GUI.backgroundColor = Color.cyan;
+            Rect r = GUILayoutUtility.GetRect(36, 36, GUILayout.Width(36), GUILayout.Height(36));
+            bool clicked = GUI.Button(r, new GUIContent(string.Empty, tooltip));
+            GUI.backgroundColor = prev;
+
+            var inner = new Rect(r.x + 4, r.y + 4, r.width - 8, r.height - 8);
+            if (!(icon != null && DrawSprite(inner, icon)))
+                GUI.Label(r, new GUIContent(tooltip.Substring(0, 1), tooltip), IconFallbackLabel);
+            if (clicked) _tool = _tool == tool ? Tool.None : tool;
+        }
+
+        // ---- Выпадающие пикеры (иконка + название) ----
+
+        private static GUIStyle _leftMiddle;
+        private static GUIStyle LeftMiddleLabel => _leftMiddle ??= new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleLeft };
+        private static GUIStyle _iconFallback;
+        private static GUIStyle IconFallbackLabel => _iconFallback ??= new GUIStyle(EditorStyles.boldLabel) { alignment = TextAnchor.MiddleCenter };
+
+        // 3 выпадающих (Пол / Объект / Спец) в одной горизонтали; текущий выбор и элементы — иконка + название.
+        private void DrawPickerDropdowns()
         {
             using (new EditorGUILayout.HorizontalScope())
             {
-                EditorGUILayout.LabelField("Объект", GUILayout.Width(56));
-                DrawSelectButton("Нет", _selStructure == 0, () => _selStructure = 0, null);
-                foreach (var s in _catalog.Structures)
+                var f = _catalog.GetFloor(_selFloor);
+                DrawIconDropdown(_paintFloor, f?.Sprite, f != null ? KindLabel(f.DisplayName, _selFloor) : "Пол —", OpenFloorPopup);
+
+                var s = _catalog.GetStructure(_selStructure);
+                DrawIconDropdown(_paintStructure, s?.Sprite, s != null ? KindLabel(s.DisplayName, _selStructure) : "Объект —", OpenStructurePopup);
+
+                DrawIconDropdown(_paintSpecial, null, SpecialLabel(_selSpecial), OpenSpecialPopup);
+            }
+        }
+
+        // Кнопка-дропдаун: фон popup + текущий (иконка+название); клик открывает список у своего прямоугольника.
+        // enabled=false (слой «Слой» не активен) → серый и некликабельный.
+        private void DrawIconDropdown(bool enabled, Sprite icon, string text, System.Action<Rect> onOpen)
+        {
+            using (new EditorGUI.DisabledScope(!enabled))
+            {
+                Rect r = GUILayoutUtility.GetRect(70, 24, EditorStyles.popup, GUILayout.MinWidth(70), GUILayout.MaxWidth(220), GUILayout.Height(24));
+                if (GUI.Button(r, GUIContent.none, EditorStyles.popup)) onOpen(r);
+                var prev = GUI.color;
+                if (!enabled) GUI.color = new Color(1f, 1f, 1f, 0.5f);   // приглушить иконку+текст (DrawTexture/Label чтут GUI.color)
+                DrawIconLabel(new Rect(r.x + 2, r.y, r.width - 18, r.height), icon, text);   // −18: место под стрелку popup
+                GUI.color = prev;
+            }
+        }
+
+        private void OpenFloorPopup(Rect anchor)
+        {
+            var items = new List<IconListPopup.Item>();
+            foreach (var f in _catalog.Floors)
+            {
+                if (f == null || f.Type == 0) continue;
+                items.Add(new IconListPopup.Item { Id = f.Type, Name = KindLabel(f.DisplayName, f.Type), Icon = f.Sprite });
+            }
+            PopupWindow.Show(anchor, new IconListPopup(items, anchor.width, id => { _selFloor = (byte)id; Repaint(); }));
+        }
+
+        private void OpenStructurePopup(Rect anchor)
+        {
+            var items = new List<IconListPopup.Item>();
+            foreach (var s in _catalog.Structures)
+            {
+                if (s == null || s.Type == 0) continue;
+                items.Add(new IconListPopup.Item { Id = s.Type, Name = KindLabel(s.DisplayName, s.Type), Icon = s.Sprite });
+            }
+            PopupWindow.Show(anchor, new IconListPopup(items, anchor.width, id => { _selStructure = (byte)id; Repaint(); }));
+        }
+
+        private void OpenSpecialPopup(Rect anchor)
+        {
+            var items = new List<IconListPopup.Item>
+            {
+                new IconListPopup.Item { Id = (int)TileSpecial.Spawn,     Name = "Спавн",      Icon = null },
+                new IconListPopup.Item { Id = (int)TileSpecial.StairUp,   Name = "Лестница ▲", Icon = null },
+                new IconListPopup.Item { Id = (int)TileSpecial.StairDown, Name = "Лестница ▼", Icon = null },
+            };
+            PopupWindow.Show(anchor, new IconListPopup(items, anchor.width, id => { _selSpecial = (TileSpecial)id; Repaint(); }));
+        }
+
+        private static string SpecialLabel(TileSpecial s) => s switch
+        {
+            TileSpecial.Spawn => "Спавн",
+            TileSpecial.StairUp => "Лестница ▲",
+            TileSpecial.StairDown => "Лестница ▼",
+            _ => s.ToString()
+        };
+
+        // Иконка (слева, квадрат) + название; выравнивание по левому краю, по центру вертикали.
+        private static void DrawIconLabel(Rect r, Sprite icon, string text)
+        {
+            const float pad = 2f;
+            float iconSize = r.height - pad * 2f;
+            float textX = r.x + pad;
+            if (icon != null && DrawSprite(new Rect(r.x + pad, r.y + pad, iconSize, iconSize), icon))
+                textX += iconSize + 4f;
+            GUI.Label(new Rect(textX, r.y, Mathf.Max(0f, r.xMax - textX - 2f), r.height), text, LeftMiddleLabel);
+        }
+
+        // Всплывающий список пикера: строки «иконка + название», клик выбирает и закрывает.
+        private sealed class IconListPopup : PopupWindowContent
+        {
+            public struct Item { public int Id; public string Name; public Sprite Icon; }
+            private const float RowH = 24f;
+            private readonly List<Item> _items;
+            private readonly float _width;
+            private readonly System.Action<int> _onSelect;
+            private Vector2 _scroll;
+
+            public IconListPopup(List<Item> items, float width, System.Action<int> onSelect)
+            {
+                _items = items;
+                _width = Mathf.Max(width, 140f);
+                _onSelect = onSelect;
+            }
+
+            public override Vector2 GetWindowSize()
+                => new Vector2(_width, Mathf.Min(Mathf.Max(_items.Count, 1), 14) * RowH + 6f);
+
+            public override void OnGUI(Rect rect)
+            {
+                if (Event.current.type == EventType.MouseMove) editorWindow.Repaint();
+                var view = new Rect(0, 0, rect.width - 16f, _items.Count * RowH);
+                _scroll = GUI.BeginScrollView(rect, _scroll, view);
+                for (int i = 0; i < _items.Count; i++)
                 {
-                    if (s == null || s.Type == 0) continue;
-                    byte id = s.Type;
-                    DrawSelectButton(KindLabel(s.DisplayName, id), _selStructure == id,
-                        () => _selStructure = id, s.Openable ? DoorSel : WallSel);
+                    var row = new Rect(0, i * RowH, view.width, RowH);
+                    if (row.Contains(Event.current.mousePosition))
+                        EditorGUI.DrawRect(row, new Color(0.35f, 0.55f, 0.85f, 0.25f));
+                    if (GUI.Button(row, GUIContent.none, GUIStyle.none))
+                    {
+                        _onSelect(_items[i].Id);
+                        editorWindow.Close();
+                    }
+                    DrawIconLabel(row, _items[i].Icon, _items[i].Name);
                 }
+                GUI.EndScrollView();
             }
         }
 
@@ -329,23 +457,6 @@ namespace Client.Editor.MapTools
                 DrawBrushButton(Brush.Grate, "Решётка");
                 DrawBrushButton(Brush.Space, "Космос");
             }
-        }
-
-        // Спец-маркер тайла (поверх пола/структуры).
-        private void DrawSpecialRow()
-        {
-            using (new EditorGUILayout.HorizontalScope())
-            {
-                EditorGUILayout.LabelField("Спец", GUILayout.Width(56));
-                DrawSelectButton("Нет", _selSpecial == TileSpecial.None, () => _selSpecial = TileSpecial.None, null);
-                DrawSelectButton("Спавн", _selSpecial == TileSpecial.Spawn, () => _selSpecial = TileSpecial.Spawn, null);
-                DrawSelectButton("Лестница ▲", _selSpecial == TileSpecial.StairUp, () => _selSpecial = TileSpecial.StairUp, null);
-                DrawSelectButton("Лестница ▼", _selSpecial == TileSpecial.StairDown, () => _selSpecial = TileSpecial.StairDown, null);
-            }
-            if (_selSpecial == TileSpecial.StairUp || _selSpecial == TileSpecial.StairDown)
-                EditorGUILayout.HelpBox(
-                    "Лестница: парная авто-ставится на соседнем этаже (та же клетка). Выбери ещё и Пол.",
-                    MessageType.None);
         }
 
         // Потолок: краска дополнительно кладёт пол на z+1. «как кисть» — берёт пол текущей кисти,
@@ -375,7 +486,6 @@ namespace Client.Editor.MapTools
                 {
                     EditorGUILayout.LabelField("Потолок = пол кисти (нет каталога).", EditorStyles.miniLabel);
                 }
-                EditorGUILayout.LabelField("ПКМ-стирание также убирает потолок над клеткой.", EditorStyles.miniLabel);
             }
         }
 
@@ -403,9 +513,9 @@ namespace Client.Editor.MapTools
         // Сводка per-category мазка: какой слой пишем/очищаем и какой сохраняем (режим каталога).
         private string PaintTargetSummary()
         {
-            string floor = _paintFloor ? (_selFloor == 0 ? "пол → очистить" : $"пол → {_selFloor}") : "пол: сохранить";
-            string obj = _paintStructure ? (_selStructure == 0 ? "объект → очистить" : $"объект → {_selStructure}") : "объект: сохранить";
-            string spec = _selSpecial != TileSpecial.None ? $"спец → {_selSpecial}" : "спец: сохранить";
+            string floor = _paintFloor ? $"пол → {_selFloor}" : "пол: сохранить";
+            string obj = _paintStructure ? $"объект → {_selStructure}" : "объект: сохранить";
+            string spec = _paintSpecial ? $"спец → {_selSpecial}" : "спец: сохранить";
             return $"{floor}  ·  {obj}  ·  {spec}";
         }
 
@@ -540,32 +650,59 @@ namespace Client.Editor.MapTools
         private void HandleCellInput(Event e, Rect cell, int worldX, int worldY)
         {
             if (!cell.Contains(e.mousePosition)) return;
+            if (_tool == Tool.None || e.button != 0) return;   // только ЛКМ и при выбранном инструменте (ПКМ-стирания больше нет)
 
             bool down = e.type == EventType.MouseDown;
             bool drag = e.type == EventType.MouseDrag;
-
             if (down) _painting = true;
             if (!_painting || (!down && !drag)) return;
 
-            // ЛКМ (0) — рисуем выбранным; ПКМ (1) — стираем в космос.
-            if (e.button == 0)
+            ApplyBrush(worldX, worldY);
+            MarkDirty();
+            e.Use();
+        }
+
+        // Проходит квадратную кисть _brushSize вокруг (cx,cy) и применяет инструмент к каждой клетке.
+        private void ApplyBrush(int cx, int cy)
+        {
+            int off = _brushSize / 2;   // центрируем (для чётной стороны — смещение к меньшим координатам)
+            for (int dy = 0; dy < _brushSize; dy++)
+            for (int dx = 0; dx < _brushSize; dx++)
             {
-                Tile existing = _map.GetTile(worldX, worldY, _activeZ);
-                Tile painted = MakeTile(in existing);
-                _map.SetTile(worldX, worldY, _activeZ, painted);
-                // Авто-пара — по интенту кисти (_selSpecial), не по сохранённому спецу клетки.
-                AutoPairStair(worldX, worldY, _activeZ, _selSpecial);
-                if (_withCeiling) PaintCeiling(worldX, worldY, _activeZ, in painted);
-                MarkDirty();
-                e.Use();
+                int x = cx - off + dx;
+                int y = cy - off + dy;
+                if (_tool == Tool.Pencil) PaintAt(x, y);
+                else if (_tool == Tool.Eraser) EraseAt(x, y);
             }
-            else if (e.button == 1)
-            {
-                _map.SetTile(worldX, worldY, _activeZ, Tile.Space);
-                if (_withCeiling) _map.SetTile(worldX, worldY, _activeZ + 1, Tile.Space);
-                MarkDirty();
-                e.Use();
-            }
+        }
+
+        // Карандаш: собрать тайл и записать (+ авто-пара лестниц и потолок по флагам кисти).
+        private void PaintAt(int x, int y)
+        {
+            Tile existing = _map.GetTile(x, y, _activeZ);
+            Tile painted = MakeTile(in existing);
+            _map.SetTile(x, y, _activeZ, painted);
+            AutoPairStair(x, y, _activeZ, _paintSpecial ? _selSpecial : TileSpecial.None);
+            if (_withCeiling) PaintCeiling(x, y, _activeZ, in painted);
+        }
+
+        // Ластик: очистить активные слои клетки (Слой), остальное сохранить.
+        private void EraseAt(int x, int y)
+        {
+            Tile existing = _map.GetTile(x, y, _activeZ);
+            _map.SetTile(x, y, _activeZ, MakeEraseTile(in existing));
+        }
+
+        // Стирание активных слоёв: обнуляет пол/объект/спец по включённым тумблерам «Слой», прочее сохраняет.
+        // Без каталога чистим клетку целиком (пресет-режим — послойных флагов нет).
+        private Tile MakeEraseTile(in Tile existing)
+        {
+            if (_catalog == null) return Tile.Space;
+            byte floorId = _paintFloor ? (byte)0 : existing.FloorType;
+            byte structureId = _paintStructure ? (byte)0 : existing.StructureType;
+            Tile t = _catalog.Compose(floorId, structureId);
+            t.Special = _paintSpecial ? TileSpecial.None : existing.Special;
+            return t;
         }
 
         // Собирает тайл для записи в клетку. Режим каталога — per-category read-modify-write: пишет только
@@ -586,7 +723,7 @@ namespace Client.Editor.MapTools
                     SealsHorizontal = _advSealH,
                     SealsVertical = _advSealV
                 };
-                adv.Special = _selSpecial;   // whole-tile: явный выбор, «Нет» очищает
+                adv.Special = _paintSpecial ? _selSpecial : TileSpecial.None;   // спец — по слою «Спец»
                 return adv;
             }
 
@@ -597,8 +734,8 @@ namespace Client.Editor.MapTools
                 byte floorId = _paintFloor ? _selFloor : existing.FloorType;
                 byte structureId = _paintStructure ? _selStructure : existing.StructureType;
                 var t = _catalog.Compose(floorId, structureId);
-                // per-category: спец пишем только при явном выборе; «Нет» сохраняет существующий (не обнуляем).
-                t.Special = _selSpecial != TileSpecial.None ? _selSpecial : existing.Special;
+                // per-category: спец пишем только при включённом слое «Спец»; иначе сохраняем существующий.
+                t.Special = _paintSpecial ? _selSpecial : existing.Special;
                 return t;
             }
 
@@ -618,7 +755,7 @@ namespace Client.Editor.MapTools
                     p = Tile.Space;
                     break;
             }
-            p.Special = _selSpecial;   // whole-tile: явный выбор, «Нет» очищает
+            p.Special = _paintSpecial ? _selSpecial : TileSpecial.None;   // спец — по слою «Спец»
             return p;
         }
 
@@ -975,7 +1112,46 @@ namespace Client.Editor.MapTools
                 EditorGUI.DrawRect(new Rect(area.x, area.y + y * CellSize, _viewTilesX * CellSize, 1), line);
         }
 
-        // ---- Каталог: персист по GUID --------------------------------------
+        // ---- Каталог: доступ для окна настроек + персист по GUID -----------
+
+        /// <summary>Текущий каталог тайлов (читает окно настроек).</summary>
+        internal TileCatalog Catalog => _catalog;
+
+        /// <summary>Задать каталог из окна настроек: сохранить в prefs, сбросить кэш, перерисовать грид.</summary>
+        internal void SetCatalog(TileCatalog catalog)
+        {
+            _catalog = catalog;
+            SaveCatalogToPrefs();
+            _catalog?.InvalidateCache();
+            Repaint();
+        }
+
+        /// <summary>Текущий конфиг редактора (читает окно настроек).</summary>
+        internal MapEditorConfig Config => _config;
+
+        /// <summary>Задать конфиг из окна настроек: сохранить в prefs, перерисовать.</summary>
+        internal void SetConfig(MapEditorConfig config)
+        {
+            _config = config;
+            SaveConfigToPrefs();
+            Repaint();
+        }
+
+        private void LoadConfigFromPrefs()
+        {
+            string guid = EditorPrefs.GetString(ConfigPrefKey, "");
+            if (string.IsNullOrEmpty(guid)) return;
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            if (string.IsNullOrEmpty(path)) return;
+            _config = AssetDatabase.LoadAssetAtPath<MapEditorConfig>(path);
+        }
+
+        private void SaveConfigToPrefs()
+        {
+            if (_config == null) { EditorPrefs.DeleteKey(ConfigPrefKey); return; }
+            string path = AssetDatabase.GetAssetPath(_config);
+            EditorPrefs.SetString(ConfigPrefKey, AssetDatabase.AssetPathToGUID(path));
+        }
 
         private void LoadCatalogFromPrefs()
         {
@@ -1064,6 +1240,58 @@ namespace Client.Editor.MapTools
             _dirty = true;
             Repaint();
         }
+    }
+
+    /// <summary>Отдельное окно настроек редактора карт (кнопка «Настройки» в тулбаре). Пока — выбор каталога тайлов.</summary>
+    public sealed class MapEditorSettingsWindow : EditorWindow
+    {
+        private MapEditorWindow _owner;
+
+        public static void Open(MapEditorWindow owner)
+        {
+            var w = GetWindow<MapEditorSettingsWindow>(true, "Настройки редактора", true);
+            w._owner = owner;
+            w.minSize = new Vector2(320, 90);
+            w.Show();
+        }
+
+        private void OnGUI()
+        {
+            if (_owner == null)
+            {
+                EditorGUILayout.HelpBox("Окно открыто без редактора. Закрой и открой снова через «Настройки».", MessageType.Warning);
+                return;
+            }
+
+            EditorGUILayout.LabelField("Каталог тайлов", EditorStyles.boldLabel);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Каталог", GUILayout.Width(56));
+                EditorGUI.BeginChangeCheck();
+                var cat = (TileCatalog)EditorGUILayout.ObjectField(_owner.Catalog, typeof(TileCatalog), false);
+                if (EditorGUI.EndChangeCheck()) _owner.SetCatalog(cat);
+            }
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.LabelField("Конфиг редактора", EditorStyles.boldLabel);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField("Конфиг", GUILayout.Width(56));
+                EditorGUI.BeginChangeCheck();
+                var cfg = (MapEditorConfig)EditorGUILayout.ObjectField(_owner.Config, typeof(MapEditorConfig), false);
+                if (EditorGUI.EndChangeCheck()) _owner.SetConfig(cfg);
+            }
+        }
+    }
+
+    /// <summary>Конфиг редактора карт (создаётся как ассет, назначается в «Настройки»). Пока — иконки инструментов.</summary>
+    [CreateAssetMenu(menuName = "Station/Map Editor Config", fileName = "MapEditorConfig")]
+    public sealed class MapEditorConfig : ScriptableObject
+    {
+        [Tooltip("Иконка инструмента «Карандаш».")]
+        public Sprite PencilIcon;
+        [Tooltip("Иконка инструмента «Ластик».")]
+        public Sprite EraserIcon;
     }
 }
 #endif

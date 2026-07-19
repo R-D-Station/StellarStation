@@ -24,6 +24,10 @@ public class SVars
     /// <summary>Путь к файлу карты (.smap), грузится на старте. Нет файла — сервер поднимется без коллизии.</summary>
     public string MapPath = "station.smap";
 
+    /// <summary>Блок-мир (B2): движение по BlockMovementLogic на DevBlockWorld; тайл-стрим/falls/двери отключены.
+    /// Клиент узнаёт режим из LoginResponse и строит тот же дев-мир локально.</summary>
+    public bool BlocksWorld = false;
+
     /// <summary>Стриминг: радиус видимых чанков вокруг игрока по осям X/Y (в чанках, окно (2R+1)²).</summary>
     public int StreamRadiusChunks = 2;
 
@@ -40,6 +44,18 @@ public class SVars
 
     /// <summary>Entity-PVS: окно этажей интереса |E.Z - C.Z| ≤ depth. 0 = только свой этаж.</summary>
     public int EntityInterestZDepth = 0;
+
+    /// <summary>Диагностика авто-дверей: лог реестра при загрузке + троттл-лог детекта раз в секунду.</summary>
+    public bool DebugAutoDoors = false;
+
+    /// <summary>Диагностика зон: детальный лог зон/стыков/конфликтов при флудфилле на загрузке.</summary>
+    public bool DebugZones = false;
+
+    /// <summary>Горизонтальная дальность плана-градиента зоны (тайлы); едет клиенту в LoginResponse.</summary>
+    public float ZoneFadeDistance = 10f;
+
+    /// <summary>Вертикальная дальность градиента зоны (этажи); едет клиенту в LoginResponse.</summary>
+    public float ZoneFadeVertical = 1.5f;
 
     /// <summary>Загрузка настроек из JSON. Любая ошибка → дефолты, сервер не падает.</summary>
     public static void LoadFromJson(string path)

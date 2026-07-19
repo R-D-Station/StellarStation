@@ -88,3 +88,6 @@ ServerTests/coveragereport/
 
 Builds/
 /docs
+
+# mangled scratchpad artifacts (agent path collapse; real name has U+F03A after 'C')
+/*scratchpad*

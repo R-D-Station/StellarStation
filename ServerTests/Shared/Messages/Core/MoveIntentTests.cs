@@ -191,7 +191,7 @@ namespace ServerTests.Shared.Messages.Core
             Assert.Equal(10_000_000u, deserializedMax.Sequence);
         }
 
-        private static byte[] CreateTestData(byte direction, bool sprint, uint sequence, bool layToggle = false)
+        private static byte[] CreateTestData(byte direction, bool sprint, uint sequence, bool layToggle = false, bool jump = false)
         {
             using var ms = new MemoryStream();
             using var writer = new BinaryWriter(ms);
@@ -199,6 +199,7 @@ namespace ServerTests.Shared.Messages.Core
             writer.Write(direction);
             writer.Write(sprint);
             writer.Write(layToggle);
+            writer.Write(jump);
             writer.Write(sequence);
 
             return ms.ToArray();

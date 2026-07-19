@@ -4,22 +4,24 @@ using Shared.Messages;
 
 namespace Shared.Messages.Core
 {
-    /// <summary>Снапшот одной сущности: NetId, позиция (X/Y/Z), взгляд, FSM-состояние, причина лежания и скорость.</summary>
+    /// <summary>Снапшот одной сущности: NetId, позиция (X/Y/Z), взгляд, FSM-состояние, причина лежания, скорость и VY.
+    /// Раскладка осей по режиму: тайлы — Y=глубина плана, Z=этаж; блок-мир — оси Unity (Y=высота, Z=план).</summary>
     public struct EntitySnapshot : INetMessage
     {
         public int NetId;
         public float X;
-        public float Y;
-        public float Z;
+        public float Y; // тайлы: глубина плана; блок-мир: непрерывная ВЫСОТА ног (Unity Y)
+        public float Z; // тайлы: этаж (floor.0); блок-мир: глубина плана (Unity Z)
         public byte Facing;
         public byte State; // FSM-состояние, реплицируется как byte (Shared.Simulation.PlayerState)
         public byte Reason; // причина лежания (Shared.Simulation.LayingReason): Voluntary/KnockedDown
         public float Speed; // эффективная скорость/тик (= ClientConnection.Speed.CurrentValue); предиктор берёт baseStep отсюда
+        public float VY;   // вертикальная скорость (блоков/тик) — сид реконсиляции падения/прыжка (B2)
 
         public MessageType Type => MessageType.EntitySnapshot;
 
         /// <summary>Фиксированный размер сериализованной сущности в байтах (length-prefix в WorldSnapshot).</summary>
-        public const int SerializedSize = 23;
+        public const int SerializedSize = 27;
 
         public byte[] Serialize()
         {
@@ -40,6 +42,7 @@ namespace Shared.Messages.Core
             writer.Write(State);
             writer.Write(Reason);
             writer.Write(Speed);
+            writer.Write(VY);
         }
 
         /// <summary>Прочитать SerializedSize байт сущности НАПРЯМУЮ из reader (zero-alloc: без byte[]/вложенного
@@ -77,6 +80,11 @@ namespace Shared.Messages.Core
                 throw new InvalidOperationException("Speed is invalid (NaN or Infinity)");
             e.Speed = speed;
 
+            float vy = r.ReadSingle();
+            if (float.IsNaN(vy) || float.IsInfinity(vy))
+                throw new InvalidOperationException("VY is invalid (NaN or Infinity)");
+            e.VY = vy;
+
             return e;
         }
 
@@ -85,8 +93,8 @@ namespace Shared.Messages.Core
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "EntitySnapshot data cannot be null");
 
-            // NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) + State(1) + Reason(1) + Speed(4) = 23 байт
-            const int expectedSize = 23;
+            // NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) + State(1) + Reason(1) + Speed(4) + VY(4) = 27 байт
+            const int expectedSize = 27;
 
             if (data.Length != expectedSize)
                 throw new ArgumentException($"Invalid data size: expected {expectedSize} bytes, got {data.Length} bytes", nameof(data));

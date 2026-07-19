@@ -1,0 +1,51 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2a5ba86ce8fa84d4aa708dd205f2ef8f, type: 3}
+  m_Name: GlassWall
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockDefinition
+  Type: 9
+  DisplayName: GlassWall
+  Category: 2
+  SealsFaces: 63
+  OpaqueFaces: 63
+  CoversBlockBelow: 1
+  CollisionBoxes:
+  - Center: {x: 0.5, y: 0.5, z: 0.5}
+    Size: {x: 1, y: 1, z: 1}
+  - Center: {x: 0.5, y: 1.5, z: 0.5}
+    Size: {x: 1, y: 1, z: 1}
+  CollisionBoxesOpen: []
+  Opening: 0
+  TriggerBoxes: []
+  DoorCloseDelay: 1
+  DeconstructStages: 0
+  Size: {x: 1, y: 2, z: 1}
+  Connection:
+    UseConnections: 1
+    ConnectsToSameType: 1
+    ConnectsToTypes: 
+    MeshSingle: {fileID: 3465880795150428724, guid: d9b4e5339bb1396458b0ec064beaa74b, type: 3}
+    MeshEnd: {fileID: 3899318142779029826, guid: 24ef9bd016aec7c41adc2f503f813074, type: 3}
+    MeshStraight: {fileID: 9044213943688244232, guid: 623725732b0eb8c458321587935d3913, type: 3}
+    MeshCorner: {fileID: 1159597351609551204, guid: 7d0864fdb4d71f240a22cc781149a607, type: 3}
+    MeshT: {fileID: 2860752718409877910, guid: e298e6b234f5dc34bbdc9e0b04658ca0, type: 3}
+    MeshCross: {fileID: 2674634547497210640, guid: c93e89b4834f4964ebb7f65e1de3ea1f, type: 3}
+  UseGrid: 1
+  TopMap: {fileID: 2800000, guid: 54799eadbd940cb46a1a045b08319f3c, type: 3}
+  BackingMap: {fileID: 2800000, guid: c9e230380b59cdd43b706d85de506fb5, type: 3}
+  TopMapCountX: 5
+  TopMapCountY: 2
+  TopCalibration: {fileID: 11400000, guid: 91ff7738f8532034caff18df93d8ac9f, type: 2}
+  SideMap: {fileID: 2800000, guid: 2185e2532d8b4e54cbc75d34960bbcb7, type: 3}
+  Prefab: {fileID: 3465880795150428724, guid: d9b4e5339bb1396458b0ec064beaa74b, type: 3}
+  Pivot: 0
+  EditorSprite: {fileID: 0}

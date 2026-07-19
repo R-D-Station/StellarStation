@@ -4,9 +4,7 @@ using TMPro;
 
 namespace Client.UI.Labels
 {
-    /// <summary>Одна пул-надпись (TMP) на Screen-Space-Overlay Canvas. Configure перезаписывает ВСЕ поля безусловно;
-    /// OnAcquire сбрасывает до pristine; Update ведёт alpha-рампу + позицию + кламп; Return — с double-return guard.
-    /// Позиция курсора БЕЗ Y-флипа (overlay = bottom-left, как Input). FollowWorld-код есть, в этом срезе не вызывается.</summary>
+    /// <summary>Одна пул-надпись (TMP) на Screen-Space-Overlay Canvas: alpha-рампа, позиция с клампом, double-return guard.</summary>
     public sealed class PooledLabel : MonoBehaviour, IPooledLabel
     {
         public enum Mode { ScreenFixed, FollowScreen, FollowWorld }
@@ -15,6 +13,8 @@ namespace Client.UI.Labels
         [SerializeField] private CanvasGroup _group;
         [Tooltip("Опц.: фон-Image (для LabelStyleTable.Background). Пусто → фон не красим.")]
         [SerializeField] private Image _background;
+        [Tooltip("Зазор рамки вокруг текста, экранные пиксели: размер RectTransform = preferred size текста + это.")]
+        [SerializeField] private Vector2 _padding = new Vector2(16f, 10f);
 
         private RectTransform _rt;
 
@@ -32,8 +32,7 @@ namespace Client.UI.Labels
 
         private void Awake() => _rt = (RectTransform)transform;
 
-        /// <summary>Настроить надпись при выдаче из пула — БЕЗУСЛОВНО перезаписывает все поля (никаких «если изменилось»).
-        /// Текст ставится ОДИН раз (не в Update). lifetime = float.PositiveInfinity → без таймер-возврата (CursorHint).</summary>
+        /// <summary>Настроить надпись при выдаче из пула — безусловно перезаписывает все поля.</summary>
         public void Configure(Mode mode, string text, Vector2 screenPos, float lifetime, float fadeIn, float fadeOut,
             float fontSize, Color textColor, Color background, Vector2 offset,
             Transform worldTarget = null, Camera camera = null)
@@ -43,7 +42,7 @@ namespace Client.UI.Labels
             _offset = offset;
             _worldTarget = worldTarget;
             _camera = camera;
-            _lifetime = lifetime;
+            _lifetime = lifetime; // PositiveInfinity → без таймер-возврата (CursorHint)
             _fadeIn = fadeIn;
             _fadeOut = fadeOut;
             _bornUnscaled = Time.unscaledTime;
@@ -54,6 +53,7 @@ namespace Client.UI.Labels
                 _text.text = text;
                 _text.fontSize = fontSize;
                 _text.color = textColor;
+                _rt.sizeDelta = _text.GetPreferredValues(text) + _padding;
             }
             if (_background != null) _background.color = background;
             if (_group != null) _group.alpha = fadeIn > 0f ? 0f : 1f;

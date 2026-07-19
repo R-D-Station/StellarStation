@@ -4,11 +4,21 @@ using Shared.Messages.Core;
 using Shared.Messages.Interaction;
 using Shared.Simulation;
 using Shared.Util;
+using Shared.World.Items;
 
 namespace Server.Network
 {
+    /// <summary>Held-предмет в слоте инвентаря: identity-only value-тип, БЕЗ ссылок на сущности/координат
+    /// (местоположение held = сам слот). NetId==0 — пустой слот (sentinel безопасен: NetIdAllocator стартует с 1).</summary>
+    public struct HeldItem
+    {
+        public int NetId;
+        public ushort ItemDefId;
+        public byte StackCount;
+    }
+
     /// <summary>Состояние подключённого клиента: пир, координаты игрока и очередь intent'ов.</summary>
-    public class ClientConnection
+    public class ClientConnection : IWorldEntity
     {
         public NetPeer Peer { get; set; }
         public int ConnectionId { get; set; }
@@ -17,6 +27,7 @@ namespace Server.Network
 
         // Состояние игрока
         public int PlayerNetId { get; set; }
+        public int NetId => PlayerNetId; // IWorldEntity: ключ общего реестра сущностей (= PlayerNetId)
         public float X { get; set; }
         public float Y { get; set; }
         public int Z { get; set; }
@@ -30,6 +41,10 @@ namespace Server.Network
         // Авторитетная скорость игрока (тайлы/тик); эффективная Speed.CurrentValue едет в EntitySnapshot.Speed →
         // предиктор берёт её как baseStep (клиент НЕ реконструирует и НЕ мутирует скорость локально).
         public AdvancedValue Speed = new AdvancedValue(MovementLogic.StepPerTick);
+
+        // Блок-мир (B2): кинематика игрока в осях Unity (Y — высота, VY, Grounded); legacy-поля X/Y/Z выше
+        // зеркалятся из неё каждый тик (X=X, Y=Mover.Z план, Z=floor(Mover.Y)).
+        public Shared.Simulation.Blocks.BlockMoverState Mover;
 
         // Рантайм-модификаторы скорости (scaffolding; баффы/предметы — триггеров нет, зовётся прямо/в тестах).
         // Через СКЕЙЛЫ (∏ScaleSequentially) — минуют намеренно-оставленный double-add UpdateValue(float).
@@ -78,11 +93,26 @@ namespace Server.Network
         // Очередь адресных интеракций (клик по тайлу/сущности); дренируется в ProcessInteractions (request-only).
         public readonly ConcurrentQueue<InteractIntent> InteractQueue = new();
 
+        // Инвентарь (4.5a): identity-only слоты, БЕЗ ссылок на _entities/GroundItemEntity. Held-предметы физически
+        // удалены из общего реестра сущностей на pickup — живут ТОЛЬКО здесь, никогда не идут в PVS.
+        public readonly HeldItem[] Slots = new HeldItem[InventorySlot.SlotCount];
+        public byte ActiveHand; // 0/1 (дефолт HandLeft); СЕРВЕРНО-авторитетно, клиент его не диктует
+        public uint InventoryVersion; // монотонно ++ на каждую мутацию инвентаря
+
+        public readonly ConcurrentQueue<PickupItem> PickupQueue = new();
+        public readonly ConcurrentQueue<DropItem> DropQueue = new();
+        public readonly ConcurrentQueue<SwapHandRequest> SwapQueue = new();
+        public readonly ConcurrentQueue<MoveSlotRequest> MoveSlotQueue = new();
+
         // Стриминг карты (2.3a). SentChunks — ключи уже отправленных клиенту чанков (упаковка = GridMap-ключ).
         // ChunkLastInRangeTick — последний серверный тик, когда чанк был в радиусе (таймер выгрузки: долго вне
         // радиуса → ChunkUnload + прун из обоих наборов). Одно-поточно (мутируются только на GameLoop-потоке).
         public readonly HashSet<long> SentChunks = new();
         public readonly Dictionary<long, int> ChunkLastInRangeTick = new();
+
+        // Блочный стрим (фаза C): отправленные клиенту секции (адресация дельт — в.44B) + таймер выгрузки.
+        public readonly HashSet<long> SentBlockSections = new();
+        public readonly Dictionary<long, int> BlockSectionLastInRange = new();
 
         public ClientConnection(NetPeer peer, int connectionId)
         {
@@ -90,7 +120,7 @@ namespace Server.Network
             ConnectionId = connectionId;
             ConnectedAt = DateTime.UtcNow;
             LastActivity = DateTime.UtcNow;
-            PlayerNetId = connectionId;
+            // PlayerNetId НЕ ставим =connectionId: NetId отвязан от ConnectionId, его выдаёт GameServer из NetIdAllocator.
         }
     }
 }

@@ -32,6 +32,7 @@ namespace Server
 
                 _map = LoadMap(config.MapPath);
                 _server = new GameServer(config, _map);
+                _server.DevSpawnTestItems = true; // TEMP (4.4b): тест-предмет у спавна для проверки ItemSnapshot в Play
                 _playerManager = new PlayerManager(_server);
 
                 _server.Start();

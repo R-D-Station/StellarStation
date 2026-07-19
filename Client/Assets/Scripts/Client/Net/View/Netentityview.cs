@@ -77,11 +77,29 @@ namespace Client.Net.View
             _buffer.Push(now, snap);
         }
 
+        // Cut-away (D2): сущность на срезанном этаже гасится вместе с крышей. Кэш всех рендереров вьюхи
+        // (спрайт + дев-капсула); восстановление enabled — здесь же (инвариант pool-renderer-enabled-leak).
+        private Renderer[] _allRenderers;
+        private bool _culled;
+
+        public void SetCulled(bool culled)
+        {
+            if (culled == _culled) return;
+            _culled = culled;
+            _allRenderers ??= GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < _allRenderers.Length; i++)
+                if (_allRenderers[i] != null)
+                    _allRenderers[i].enabled = !culled;
+        }
+
+        /// <summary>Блок-мир (B2): снапшот уже в осях Unity (Y — высота) — позиция берётся 1:1. Ставит NetworkRunner.</summary>
+        public static bool BlocksMode;
+
         /// <summary>Задать предсказанную позицию локального игрока; State/Reason — авторитетные из снапшота.</summary>
-        public void SetPredicted(float x, float y, int z, byte facing, byte state, byte reason)
+        public void SetPredicted(float x, float y, float z, byte facing, byte state, byte reason)
         {
             _isLocal = true;
-            _targetPos = new Vector3(x, z * RenderConfig.FloorHeight, y);
+            _targetPos = BlocksMode ? new Vector3(x, y, z) : new Vector3(x, z * RenderConfig.FloorHeight, y);
 
             // Первый кадр — жёстко, без интерполяции из (0,0,0).
             if (!_hasTarget)
@@ -108,8 +126,8 @@ namespace Client.Net.View
             if (!_buffer.HaveSample(Time.time, out float x, out float y, out float z, out byte facing, out byte state, out byte reason))
                 return;
 
-            // Сервер (X, Y=глубина, Z=этаж) -> Unity (X, высота, Z=глубина).
-            transform.position = new Vector3(x, z * RenderConfig.FloorHeight, y);
+            // Тайлы: (X, Y=глубина, Z=этаж) → Unity (X, высота, Z=глубина); блок-мир: оси уже Unity — 1:1.
+            transform.position = BlocksMode ? new Vector3(x, y, z) : new Vector3(x, z * RenderConfig.FloorHeight, y);
 
             ApplySprite(state, facing, reason);
         }
@@ -117,6 +135,7 @@ namespace Client.Net.View
         /// <summary>Перевыбрать спрайт при смене State, Facing ИЛИ Reason (все дискретны).</summary>
         private void ApplySprite(byte state, byte facing, byte reason)
         {
+            if (_spriteRenderer == null) return; // рантайм-вьюха дев-режима: тело рисует капсула, спрайтов нет
             if (facing == _lastFacing && state == _lastState && reason == _lastReason) return;
             _spriteRenderer.sprite = GetSprite(state, reason, (Direction)facing);
             _lastFacing = facing;

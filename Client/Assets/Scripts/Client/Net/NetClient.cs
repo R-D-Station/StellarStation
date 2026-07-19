@@ -19,6 +19,11 @@ namespace Client.Net
         public event Action<PlayerLeft> OnPlayerLeft;
         public event Action<ChunkData> OnChunkData;
         public event Action<ChunkUnload> OnChunkUnload;
+        public event Action<ItemSnapshot> OnItemSnapshot;
+        public event Action<InventorySync> OnInventorySync;
+        public event Action<BlockChunkData> OnBlockChunkData;
+        public event Action<BlockSectionGone> OnBlockSectionGone;
+        public event Action<BlockUpdateBatch> OnBlockUpdateBatch;
         public event Action OnConnected;
         public event Action OnDisconnected;
 
@@ -37,20 +42,26 @@ namespace Client.Net
             _transport.OnPlayerLeft += m => OnPlayerLeft?.Invoke(m);
             _transport.OnChunkData += m => OnChunkData?.Invoke(m);
             _transport.OnChunkUnload += m => OnChunkUnload?.Invoke(m);
+            _transport.OnItemSnapshot += s => OnItemSnapshot?.Invoke(s);
+            _transport.OnInventorySync += s => OnInventorySync?.Invoke(s);
+            _transport.OnBlockChunkData += m => OnBlockChunkData?.Invoke(m);
+            _transport.OnBlockSectionGone += m => OnBlockSectionGone?.Invoke(m);
+            _transport.OnBlockUpdateBatch += m => OnBlockUpdateBatch?.Invoke(m);
         }
 
         public void Connect(string address, int port) => _transport.Connect(address, port);
         public void Disconnect() => _transport.Disconnect();
         public void Poll() => _transport.Poll();
 
-        /// <summary>Отправить намерение движения (+бит «лечь/встать»); возвращает Sequence (для reconciliation).</summary>
-        public uint SendMove(IntentDirection direction, bool sprint, bool layToggle)
+        /// <summary>Отправить намерение движения (+биты «лечь/встать» и «прыжок»); возвращает Sequence (для reconciliation).</summary>
+        public uint SendMove(IntentDirection direction, bool sprint, bool layToggle, bool jump = false)
         {
             var intent = new MoveIntent
             {
                 Direction = direction,
                 Sprint = sprint,
                 LayToggle = layToggle,
+                Jump = jump,
                 Sequence = ++_inputSequence
             };
             _transport.Send(intent);
@@ -74,5 +85,17 @@ namespace Client.Net
                 TargetNetId = targetNetId
             });
         }
+
+        /// <summary>Подобрать наземный предмет целиком (4.5): целевой хенд решает сервер (ActiveHand), не клиент.</summary>
+        public void SendPickup(int targetNetId) => _transport.Send(new PickupItem { TargetNetId = targetNetId });
+
+        /// <summary>Выбросить предмет из слота (4.5): сервер роняет под ноги (свои координаты), клиентские не принимаются.</summary>
+        public void SendDrop(byte slotIndex) => _transport.Send(new DropItem { SlotIndex = slotIndex });
+
+        /// <summary>Сменить активную руку (4.5): ActiveHand серверно-авторитетен, подсветка идёт по эхо InventorySync.</summary>
+        public void SendSwapHand(byte hand) => _transport.Send(new SwapHandRequest { Hand = hand });
+
+        /// <summary>Переместить предмет между слотами инвентаря (4.5).</summary>
+        public void SendMoveSlot(byte fromSlot, byte toSlot) => _transport.Send(new MoveSlotRequest { FromSlot = fromSlot, ToSlot = toSlot });
     }
 }
