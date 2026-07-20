@@ -1,25 +1,29 @@
 namespace Shared.World.Items
 {
-    /// <summary>Фиксированные индексы слотов инвентаря игрока; руки — строго индексы 0/1 (ActiveHand их же адресует).</summary>
     public static class InventorySlot
     {
-        public const byte HandLeft = 0;
-        public const byte HandRight = 1;
-        public const byte PocketLeft = 2;
-        public const byte PocketRight = 3;
-        public const byte Belt = 4;
-        public const byte Back = 5;
+        public const int CategoryCount = 14;
+        public const byte HandCount = 2;
 
-        public const byte SlotCount = 6;
-    }
+        public static byte DefaultCount(SlotCategory cat) => cat switch
+        {
+            SlotCategory.Hand => 2,
+            SlotCategory.Backpack => 1,
+            SlotCategory.Belt => 1,
+            SlotCategory.Ear => 2,
+            SlotCategory.Eye => 2,
+            SlotCategory.Glove => 2,
+            SlotCategory.Head => 2,
+            SlotCategory.IdCard => 1,
+            SlotCategory.Mask => 1,
+            SlotCategory.Neck => 1,
+            SlotCategory.Pocket => 2,
+            SlotCategory.Boot => 2,
+            SlotCategory.Jumpsuit => 1,
+            SlotCategory.Suit => 1,
+            _ => 0
+        };
 
-    public enum SlotKind : byte
-    {
-        HandLeft = 0,
-        HandRight = 1,
-        PocketLeft = 2,
-        PocketRight = 3,
-        Belt = 4,
-        Back = 5
+        public static bool IsValid(SlotCategory cat, byte index) => (byte)cat < CategoryCount && index < DefaultCount(cat);
     }
 }

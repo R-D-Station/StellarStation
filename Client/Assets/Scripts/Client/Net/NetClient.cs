@@ -1,6 +1,7 @@
 using Shared.Messages.Core;
 using Shared.Messages.Player;
 using Shared.Messages.Interaction;
+using Shared.World.Items;
 using System;
 
 namespace Client.Net
@@ -90,12 +91,12 @@ namespace Client.Net
         public void SendPickup(int targetNetId) => _transport.Send(new PickupItem { TargetNetId = targetNetId });
 
         /// <summary>Выбросить предмет из слота (4.5): сервер роняет под ноги (свои координаты), клиентские не принимаются.</summary>
-        public void SendDrop(byte slotIndex) => _transport.Send(new DropItem { SlotIndex = slotIndex });
+        public void SendDrop(SlotCategory category, byte index) => _transport.Send(new DropItem { Category = category, Index = index });
 
         /// <summary>Сменить активную руку (4.5): ActiveHand серверно-авторитетен, подсветка идёт по эхо InventorySync.</summary>
         public void SendSwapHand(byte hand) => _transport.Send(new SwapHandRequest { Hand = hand });
 
         /// <summary>Переместить предмет между слотами инвентаря (4.5).</summary>
-        public void SendMoveSlot(byte fromSlot, byte toSlot) => _transport.Send(new MoveSlotRequest { FromSlot = fromSlot, ToSlot = toSlot });
+        public void SendMoveSlot(SlotCategory fromCategory, byte fromIndex, SlotCategory toCategory, byte toIndex) => _transport.Send(new MoveSlotRequest { FromCategory = fromCategory, FromIndex = fromIndex, ToCategory = toCategory, ToIndex = toIndex });
     }
 }

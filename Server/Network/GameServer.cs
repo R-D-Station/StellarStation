@@ -74,11 +74,6 @@ public class GameServer
     public float SpawnY => _spawnY;
     public int SpawnZ => _spawnZ;
 
-    /// <summary>TEMP (4.4b): на Start заспавнить тест-предмет у точки спавна — проверить ItemSnapshot в Play. Default OFF
-    /// (тесты EntityCount не задевает); включает Program.cs. Убрать при появлении лута/размещения (4.5).</summary>
-    public bool DevSpawnTestItems { get; set; }
-    private bool _devItemsSpawned;
-
     /// <summary>Блок-мир (B2): карта v10 по MapPath либо дев-полигон. Клиент получает копию блобом при логине.</summary>
     public Shared.World.Blocks.BlockGrid? BlockWorld { get; private set; }
 
@@ -150,6 +145,11 @@ public class GameServer
                 foreach (var conflict in Zones.Conflicts)
                     Console.WriteLine($"[Zones] КОНФЛИКТ: зона {conflict.ZoneId} — номера этажей {string.Join(", ", conflict.Floors)}");
             }
+
+            var mapItems = BlockWorld.ItemSpawns;
+            for (int i = 0; i < mapItems.Count; i++)
+                SpawnGroundItem(mapItems[i].DefId, mapItems[i].Stack, mapItems[i].X, mapItems[i].Z, mapItems[i].Y);
+            Console.WriteLine($"[Map] spawned {mapItems.Count} map items");
         }
         Console.WriteLine($"[Map] Spawn at ({_spawnX}, {_spawnY}, z{_spawnZ})");
         _clients = new Dictionary<NetPeer, ClientConnection>();
@@ -169,15 +169,6 @@ public class GameServer
         _server = new NetManager(listener);
         _server.Start(_config.Port);
         _isRunning = true;
-
-        // TEMP dev-спавн (4.4b, убрать при появлении лута/размещения 4.5): 1 тест-предмет у точки спавна. Через
-        // _mainThreadActions → выполнится на GameLoop-потоке (инвариант «_entities мутируется только там»). За флагом (default OFF).
-        if (DevSpawnTestItems && !_devItemsSpawned)
-        {
-            _devItemsSpawned = true;
-            _mainThreadActions.Enqueue(() =>
-                SpawnGroundItem(1, 1, (int)MathF.Floor(_spawnX), (int)MathF.Floor(_spawnY), _spawnZ));
-        }
 
         Console.WriteLine($"[Server] Started on port {_config.Port}");
         Console.WriteLine($"[Server] Max players: {_config.MaxPlayers}");
@@ -252,12 +243,16 @@ public class GameServer
         int cy = (int)MathF.Floor(client.Y);
         int z = client.Z;
 
-        for (int i = 0; i < client.Slots.Length; i++)
+        for (int c = 0; c < client.Slots.Length; c++)
         {
-            var h = client.Slots[i];
-            if (h.NetId == 0) continue;
-            SpawnGroundItemWithId(h.NetId, h.ItemDefId, h.StackCount, cx, cy, z);
-            client.Slots[i] = default;
+            var arr = client.Slots[c];
+            for (int i = 0; i < arr.Length; i++)
+            {
+                var h = arr[i];
+                if (h.NetId == 0) continue;
+                SpawnGroundItemWithId(h.NetId, h.ItemDefId, h.StackCount, cx, cy, z);
+                arr[i] = default;
+            }
         }
     }
 
@@ -637,11 +632,11 @@ public class GameServer
         int py = (int)MathF.Floor(client.Y);
         if (!InteractionRules.InReach(px, py, client.Z, gi.CellX, gi.CellY, gi.Z)) return;
 
-        if (client.Slots[client.ActiveHand].NetId != 0) return; // рука занята — тихий no-op, БЕЗ мутации
+        if (client.Slots[(int)SlotCategory.Hand][client.ActiveHand].NetId != 0) return;
 
         if (!DespawnGroundItem(msg.TargetNetId)) return; // проиграл гонку двух pickup за один NetId в один тик
 
-        client.Slots[client.ActiveHand] = new HeldItem { NetId = gi.NetId, ItemDefId = gi.ItemDefId, StackCount = gi.StackCount };
+        client.Slots[(int)SlotCategory.Hand][client.ActiveHand] = new HeldItem { NetId = gi.NetId, ItemDefId = gi.ItemDefId, StackCount = gi.StackCount };
         SendInventorySyncToOwner(client);
     }
 
@@ -649,16 +644,18 @@ public class GameServer
     /// не принимаются (анти-телепорт). Не-Walkable тайл под ногами — отклонить (нет висящих сирот).</summary>
     private void HandleDrop(ClientConnection client, in DropItem msg)
     {
-        var h = client.Slots[msg.SlotIndex];
-        if (h.NetId == 0) return; // пустой слот — тихо
+        var slot = client.Slots[(int)msg.Category];
+        if (msg.Index >= slot.Length) return;
+        var h = slot[msg.Index];
+        if (h.NetId == 0) return;
 
         int cx = (int)MathF.Floor(client.X);
         int cy = (int)MathF.Floor(client.Y);
         int z = client.Z;
         if (!_map.GetTile(cx, cy, z).Walkable) return;
 
-        SpawnGroundItemWithId(h.NetId, h.ItemDefId, h.StackCount, cx, cy, z); // ТОТ ЖЕ NetId
-        client.Slots[msg.SlotIndex] = default;
+        SpawnGroundItemWithId(h.NetId, h.ItemDefId, h.StackCount, cx, cy, z);
+        slot[msg.Index] = default;
         SendInventorySyncToOwner(client);
     }
 
@@ -674,12 +671,27 @@ public class GameServer
     /// (по типу слота) ОТЛОЖЕН — в 4.5a любой предмет идёт в любой слот.</summary>
     private void HandleMoveSlot(ClientConnection client, in MoveSlotRequest msg)
     {
-        if (client.Slots[msg.FromSlot].NetId == 0) return; // пустой источник — тихо
-        if (client.Slots[msg.ToSlot].NetId != 0) return;    // занят dest — fail, без авто-swap
+        var from = client.Slots[(int)msg.FromCategory];
+        var to = client.Slots[(int)msg.ToCategory];
+        if (msg.FromIndex >= from.Length || msg.ToIndex >= to.Length) return;
 
-        client.Slots[msg.ToSlot] = client.Slots[msg.FromSlot];
-        client.Slots[msg.FromSlot] = default;
+        var h = from[msg.FromIndex];
+        if (h.NetId == 0) return;
+        if (to[msg.ToIndex].NetId != 0) return;
+        if (!CanEquip(h.ItemDefId, msg.ToCategory)) return;
+
+        to[msg.ToIndex] = h;
+        from[msg.FromIndex] = default;
         SendInventorySyncToOwner(client);
+    }
+
+    public Func<ushort, SlotCategory?> EquipLookup = defId => ItemCatalogData.TryGetEquipSlot(defId, out var c) ? c : (SlotCategory?)null;
+
+    private bool CanEquip(ushort itemDefId, SlotCategory toCategory)
+    {
+        if (toCategory == SlotCategory.Hand) return true;
+        var eq = EquipLookup(itemDefId);
+        return eq.HasValue && eq.Value == toCategory;
     }
 
     /// <summary>Резолв цели интеракции в ЦЕЛЫЙ тайл, авторитетная проверка дальности и диспетч через реестр обработчиков.
@@ -960,13 +972,17 @@ public class GameServer
 
         foreach (var client in _clients.Values)
         {
-            for (int i = 0; i < client.Slots.Length; i++)
+            for (int c = 0; c < client.Slots.Length; c++)
             {
-                if (client.Slots[i].NetId != netId) continue;
-                location = ItemLocationKind.Held;
-                itemDefId = client.Slots[i].ItemDefId;
-                stackCount = client.Slots[i].StackCount;
-                return true;
+                var arr = client.Slots[c];
+                for (int i = 0; i < arr.Length; i++)
+                {
+                    if (arr[i].NetId != netId) continue;
+                    location = ItemLocationKind.Held;
+                    itemDefId = arr[i].ItemDefId;
+                    stackCount = arr[i].StackCount;
+                    return true;
+                }
             }
         }
 
@@ -1020,9 +1036,6 @@ public class GameServer
             if (entity is GroundItemEntity gi)
                 _broadcastItems[count++] = ToInstance(gi);
 
-        if (count == 0)
-            return; // нет предметов — не шлём вовсе
-
         if (_perClientItems.Length < count)
             _perClientItems = new ItemInstance[count];
 
@@ -1040,8 +1053,9 @@ public class GameServer
                     _perClientItems[k++] = _broadcastItems[e];
             }
 
-            if (k == 0)
-                continue; // клиент не видит ни одного предмета — ему не шлём
+            if (k == 0 && !client.SawGroundItems)
+                continue;
+            client.SawGroundItems = k > 0;
 
             var snapshot = new ItemSnapshot();
             _broadcastPayload.SetLength(0);
@@ -1348,22 +1362,28 @@ public class GameServer
     public void SendInventorySyncToOwner(ClientConnection owner)
     {
         int occupied = 0;
-        for (int i = 0; i < owner.Slots.Length; i++)
-            if (owner.Slots[i].NetId != 0) occupied++;
+        for (int c = 0; c < owner.Slots.Length; c++)
+        {
+            var arr = owner.Slots[c];
+            for (int i = 0; i < arr.Length; i++)
+                if (arr[i].NetId != 0) occupied++;
+        }
 
         var records = new SlotRecord[occupied];
         int k = 0;
-        for (byte i = 0; i < owner.Slots.Length; i++)
+        for (int c = 0; c < owner.Slots.Length; c++)
         {
-            var h = owner.Slots[i];
-            if (h.NetId == 0) continue;
-            records[k++] = new SlotRecord { SlotIndex = i, NetId = h.NetId, ItemDefId = h.ItemDefId, StackCount = h.StackCount };
+            var arr = owner.Slots[c];
+            for (byte i = 0; i < arr.Length; i++)
+            {
+                var h = arr[i];
+                if (h.NetId == 0) continue;
+                records[k++] = new SlotRecord { Category = (SlotCategory)c, Index = i, ItemDefId = h.ItemDefId, StackCount = h.StackCount };
+            }
         }
 
-        owner.InventoryVersion++;
         SendToClient(owner, new InventorySync
         {
-            InventoryVersion = owner.InventoryVersion,
             ActiveHand = owner.ActiveHand,
             Slots = records
         });

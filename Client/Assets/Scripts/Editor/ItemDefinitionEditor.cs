@@ -15,12 +15,16 @@ namespace Client.Editor.Inspectors
         private static readonly GUIContent LUnits = new GUIContent("Размер, юниты", "То же в мировых юнитах (= % · TileSize). Правишь одно — второе пересчитывается.");
 
         private SerializedProperty _renderScale;
+        private SerializedProperty _equippable;
+        private SerializedProperty _equipSlot;
 
         private void OnEnable()
         {
             // null-гард ([[inspector-so-field-coupling]]): `_renderScale` — зона MainCoder; поле может ещё
             // не появиться на диске → FindProperty вернёт null.
             _renderScale = serializedObject.FindProperty("_renderScale");
+            _equippable = serializedObject.FindProperty("_equippable");
+            _equipSlot = serializedObject.FindProperty("_equipSlot");
         }
 
         public override void OnInspectorGUI()
@@ -28,7 +32,16 @@ namespace Client.Editor.Inspectors
             serializedObject.Update();
 
             // Обычные поля (id/имя/спрайт); размер рисуем связанной парой ниже, поэтому исключаем.
-            DrawPropertiesExcluding(serializedObject, "m_Script", "_renderScale");
+            DrawPropertiesExcluding(serializedObject, "m_Script", "_renderScale", "_equippable", "_equipSlot");
+
+            EditorGUILayout.Space(8);
+            EditorGUILayout.LabelField("Экипировка", EditorStyles.boldLabel);
+            if (_equippable != null)
+            {
+                EditorGUILayout.PropertyField(_equippable, new GUIContent("Экипируется"));
+                if (_equippable.boolValue && _equipSlot != null)
+                    EditorGUILayout.PropertyField(_equipSlot, new GUIContent("Слот категории"));
+            }
 
             EditorGUILayout.Space(8);
             EditorGUILayout.LabelField("Размер", EditorStyles.boldLabel);

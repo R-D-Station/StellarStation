@@ -95,9 +95,9 @@ namespace Server.Network
 
         // Инвентарь (4.5a): identity-only слоты, БЕЗ ссылок на _entities/GroundItemEntity. Held-предметы физически
         // удалены из общего реестра сущностей на pickup — живут ТОЛЬКО здесь, никогда не идут в PVS.
-        public readonly HeldItem[] Slots = new HeldItem[InventorySlot.SlotCount];
-        public byte ActiveHand; // 0/1 (дефолт HandLeft); СЕРВЕРНО-авторитетно, клиент его не диктует
-        public uint InventoryVersion; // монотонно ++ на каждую мутацию инвентаря
+        public readonly HeldItem[][] Slots;
+        public byte ActiveHand;
+        public bool SawGroundItems;
 
         public readonly ConcurrentQueue<PickupItem> PickupQueue = new();
         public readonly ConcurrentQueue<DropItem> DropQueue = new();
@@ -120,7 +120,10 @@ namespace Server.Network
             ConnectionId = connectionId;
             ConnectedAt = DateTime.UtcNow;
             LastActivity = DateTime.UtcNow;
-            // PlayerNetId НЕ ставим =connectionId: NetId отвязан от ConnectionId, его выдаёт GameServer из NetIdAllocator.
+
+            Slots = new HeldItem[InventorySlot.CategoryCount][];
+            for (int c = 0; c < InventorySlot.CategoryCount; c++)
+                Slots[c] = new HeldItem[InventorySlot.DefaultCount((SlotCategory)c)];
         }
     }
 }

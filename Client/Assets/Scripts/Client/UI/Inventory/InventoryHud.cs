@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using Shared.Messages.Interaction;
 using Shared.World.Items;
@@ -12,7 +13,9 @@ namespace Client.UI.Inventory
         [SerializeField] private ItemCatalog _catalog;
         [SerializeField] private NetworkRunner _runner;
 
-        private readonly InventorySlotHud[] _byIndex = new InventorySlotHud[InventorySlot.SlotCount];
+        private readonly Dictionary<int, InventorySlotHud> _byKey = new Dictionary<int, InventorySlotHud>();
+
+        private static int Key(SlotCategory cat, byte index) => ((int)cat << 8) | index;
 
         private void Awake()
         {
@@ -22,7 +25,7 @@ namespace Client.UI.Inventory
                 var slot = _slots[i];
                 if (slot == null) continue;
                 slot.Clicked += OnSlotClicked;
-                if (slot.Slot < _byIndex.Length) _byIndex[slot.Slot] = slot;
+                _byKey[Key(slot.Category, slot.Index)] = slot;
             }
         }
 
@@ -43,19 +46,22 @@ namespace Client.UI.Inventory
             if (slots != null)
                 for (int i = 0; i < slots.Length; i++)
                 {
-                    byte idx = slots[i].SlotIndex;
-                    if (idx < _byIndex.Length && _byIndex[idx] != null)
-                        _byIndex[idx].SetFilled(in slots[i], _catalog);
+                    var rec = slots[i];
+                    if (_byKey.TryGetValue(Key(rec.Category, rec.Index), out var comp) && comp != null)
+                        comp.SetFilled(rec.ItemDefId, rec.StackCount, _catalog);
                 }
 
             if (_slots != null)
                 for (int i = 0; i < _slots.Length; i++)
-                    if (_slots[i] != null) _slots[i].SetHighlight(_slots[i].Slot == sync.ActiveHand);
+                {
+                    var slot = _slots[i];
+                    if (slot != null) slot.SetHighlight(slot.Category == SlotCategory.Hand && slot.Index == sync.ActiveHand);
+                }
         }
 
-        private void OnSlotClicked(byte slot)
+        private void OnSlotClicked(SlotCategory cat, byte index)
         {
-            if (_runner != null) _runner.SendDrop(slot);
+            if (_runner != null) _runner.SendDrop(cat, index);
         }
     }
 }
