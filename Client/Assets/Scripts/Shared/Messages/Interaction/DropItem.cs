@@ -4,6 +4,7 @@ using Shared.World.Items;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Выбросить предмет из слота (client→server): адрес (Category, Index), drop-at-feet на серверных координатах.</summary>
     public struct DropItem : INetMessage
     {
         public SlotCategory Category;

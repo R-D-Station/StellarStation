@@ -4,6 +4,7 @@ using Shared.World.Items;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Один занятый слот в <see cref="InventorySync"/>: адрес (Category, Index) + содержимое.</summary>
     public struct SlotRecord
     {
         public SlotCategory Category;
@@ -12,6 +13,7 @@ namespace Shared.Messages.Interaction
         public byte StackCount;
     }
 
+    /// <summary>Полный слепок инвентаря (server→client, owner-only): ActiveHand + только занятые слоты (variable-length, cap 64).</summary>
     public struct InventorySync : INetMessage
     {
         public byte ActiveHand;

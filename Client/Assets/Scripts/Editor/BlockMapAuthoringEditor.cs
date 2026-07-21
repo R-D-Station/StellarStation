@@ -6,15 +6,15 @@ using Client.Map;
 
 namespace Client.Editor.Inspectors
 {
-    /// <summary>SceneView-кисть блок-карты <see cref="BlockMapAuthoring"/>: слой = высота Y, ЛКМ красит / Shift+ЛКМ стирает / [ ] меняют слой.</summary>
+    /// <summary>SceneView-кисть блок-карты <see cref="BlockMapAuthoring"/>: режим (Слой/Присоед./Вставка) = КАК ставим, раздел (Блоки/Предметы/Маркеры) = ЧТО ставим.</summary>
     [CustomEditor(typeof(BlockMapAuthoring))]
     public sealed class BlockMapAuthoringEditor : UnityEditor.Editor
     {
         private static int _layer; // высота Y текущего слоя (общая на сессию редактора)
         private static int _mode;
-        private static int _section;
-        private static int _markerIndex;
-        private static int _markerBlockIndex;
+        private static int _section; // Блоки/Предметы/Маркеры — для Предметов/Маркеров валиден только режим «Вставка»
+        private static int _markerIndex; // индекс в MarkerNames (0/1 — бейк потолка/пола, 2+ — маркерный блок)
+        private static int _markerBlockIndex; // индекс блока внутри выбранной маркерной категории
         private static int _facing; // поворот мульти-блока (R в SceneView, 90° по часовой)
         private static double _lastBrushTime; // пауза кисти присоединения (BrushInterval)
         private static readonly Vector3[] _cellRect = new Vector3[4]; // подсветка ячейки слоя (без аллокаций)
@@ -28,7 +28,7 @@ namespace Client.Editor.Inspectors
             Shared.World.Blocks.BlockCategory.MergeMarker,
             Shared.World.Blocks.BlockCategory.SpawnPoint
         };
-        private static int _itemStack = 1;
+        private static int _itemStack = 1; // размер стака кисти предметов (1–255, кламп в DrawItemPicker)
 
         // Поля сида кисти FloorAnchor (видны в GUI только при выбранной категории FloorAnchor).
         private static string _seedName = "Станция";
@@ -46,7 +46,7 @@ namespace Client.Editor.Inspectors
         private string[] _paletteNames;
         private int _paletteIndex;
 
-        private Client.Items.ItemDefinition[] _itemDefs = System.Array.Empty<Client.Items.ItemDefinition>();
+        private Client.Items.ItemDefinition[] _itemDefs = System.Array.Empty<Client.Items.ItemDefinition>(); // палитра раздела «Предметы», сорт по ItemDefId
         private string[] _itemNames = System.Array.Empty<string>();
         private int _itemIndex;
 
@@ -75,7 +75,7 @@ namespace Client.Editor.Inspectors
             LoadItemDefs();
         }
 
-        private void LoadItemDefs()
+        private void LoadItemDefs() // палитра раздела «Предметы» — все ItemDefinition-ассеты, сорт по ItemDefId
         {
             var items = new List<Client.Items.ItemDefinition>();
             foreach (string guid in AssetDatabase.FindAssets("t:ItemDefinition"))
@@ -156,9 +156,9 @@ namespace Client.Editor.Inspectors
             return -1;
         }
 
-        private static bool ModeAllowed(int mode) => _section == 0 || mode == 2;
+        private static bool ModeAllowed(int mode) => _section == 0 || mode == 2; // Предметы/Маркеры ставятся только «Вставкой»
 
-        private int MarkerPaletteIndex()
+        private int MarkerPaletteIndex() // индекс палитры для маркерного блока (-1 в бейк-режимах Потолки/Полы)
         {
             if (_markerIndex < 2)
                 return -1;
@@ -448,6 +448,7 @@ namespace Client.Editor.Inspectors
             SceneView.RepaintAll();
         }
 
+        // Маршрутизация раздела «Маркеры»: Потолки/Полы — бейк-биты (BakeMode), остальное — обычная вставка блока.
         private void MarkerInsert(BlockMapAuthoring t, Event e, Ray ray)
         {
             if (_markerIndex < 2)
@@ -462,6 +463,7 @@ namespace Client.Editor.Inspectors
             BlockInsert(t, e, ray);
         }
 
+        // Режим «Вставка»: рейкаст в занятую ячейку под курсором, при промахе — фолбэк на плоскость текущего слоя.
         private void BlockInsert(BlockMapAuthoring t, Event e, Ray ray)
         {
             Vector3Int cell;
@@ -490,6 +492,7 @@ namespace Client.Editor.Inspectors
             }
         }
 
+        // Кисть предметов: клик по ячейке слоя — AddItemSpawn, Shift+клик — RemoveItemSpawnsAt (ластик всей ячейки).
         private void ItemMode(BlockMapAuthoring t, Event e, Ray ray)
         {
             var plane = new Plane(Vector3.up, new Vector3(0f, _layer, 0f));
@@ -516,6 +519,7 @@ namespace Client.Editor.Inspectors
             }
         }
 
+        // Точки спавна видны всегда при загруженной карте — оранжевые wire-кубы + подпись «Имя ×N», без спавна объектов.
         private void DrawItemSpawns(BlockMapAuthoring t)
         {
             var spawns = t.Grid.ItemSpawns;

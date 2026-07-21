@@ -9,6 +9,7 @@ using Shared.Simulation;
 using Shared.World;
 using Shared.World.Items;
 using Server.Network.Interaction;
+using Server.Network.Messages;
 
 namespace Server.Network;
 
@@ -46,6 +47,7 @@ public class GameServer
     // единый источник логики лестниц: и legacy E (TryUseTile), и адресный InteractIntent-клик идут через него.
     private readonly StairHandler _stairHandler = new();
     private readonly IInteractionHandler[] _interactionHandlers;
+    private readonly MessageRouter _router = MessageRouter.CreateDefault();
 
     // Переиспользуемые буферы горячего broadcast-пути (ноль аллокаций при установившемся числе клиентов).
     private EntitySnapshot[] _broadcastEntities = Array.Empty<EntitySnapshot>();
@@ -107,7 +109,7 @@ public class GameServer
     /// <summary>Таблица зон последнего флудфилла (in-memory, не сериализуется — ZoneId в блоках уезжает клиенту существующим v12).</summary>
     public Shared.World.Blocks.ZoneFloodResult? Zones { get; private set; }
 
-    public GameServer(SVars config, GridMap? map = null)
+    public GameServer(SVars config, GridMap? map = null, IInteractionHandler[]? interactionHandlers = null)
     {
         _config = config;
         _map = map ?? new GridMap(); // пустая карта = мир без коллизии
@@ -148,14 +150,17 @@ public class GameServer
 
             var mapItems = BlockWorld.ItemSpawns;
             for (int i = 0; i < mapItems.Count; i++)
-                SpawnGroundItem(mapItems[i].DefId, mapItems[i].Stack, mapItems[i].X, mapItems[i].Z, mapItems[i].Y);
+            {
+                int restY = Shared.World.Blocks.ItemGroundSnap.SnapDown(BlockWorld, BlockShapes, mapItems[i].X, mapItems[i].Y, mapItems[i].Z);
+                SpawnGroundItem(mapItems[i].DefId, mapItems[i].Stack, mapItems[i].X, mapItems[i].Z, restY); // легаси-раскладка SpawnGroundItem: cellY=план(Z), z=высота(Y)
+            }
             Console.WriteLine($"[Map] spawned {mapItems.Count} map items");
         }
         Console.WriteLine($"[Map] Spawn at ({_spawnX}, {_spawnY}, z{_spawnZ})");
         _clients = new Dictionary<NetPeer, ClientConnection>();
         _mainThreadActions = new ConcurrentQueue<Action>();
         _broadcastPayloadWriter = new BinaryWriter(_broadcastPayload);
-        _interactionHandlers = new IInteractionHandler[] { _stairHandler };
+        _interactionHandlers = interactionHandlers ?? InteractionRegistry.Default();
     }
 
     public void Start()
@@ -206,6 +211,7 @@ public class GameServer
         Console.WriteLine($"[Server] Connection accepted from {request.RemoteEndPoint}");
     }
 
+    /// <summary>Подключение пира: завести клиента и поднять OnClientConnected + начальный InventorySync в main-потоке.</summary>
     private void OnPeerConnected(NetPeer peer)
     {
         var client = new ClientConnection(peer, _nextConnectionId++);
@@ -215,7 +221,11 @@ public class GameServer
 
         Console.WriteLine($"[Server] Client #{client.ConnectionId} connected from {peer.Address}");
 
-        _mainThreadActions.Enqueue(() => OnClientConnected?.Invoke(client));
+        _mainThreadActions.Enqueue(() =>
+        {
+            OnClientConnected?.Invoke(client);
+            SendInventorySyncToOwner(client); // ПОСЛЕ OnClientConnected — HUD видит начальный full-state со спавна
+        });
     }
 
     /// <summary>Отключение пира: убрать клиента и поднять OnClientDisconnected в main-потоке.</summary>
@@ -242,6 +252,7 @@ public class GameServer
         int cx = (int)MathF.Floor(client.X);
         int cy = (int)MathF.Floor(client.Y);
         int z = client.Z;
+        if (_config.BlocksWorld) z = Shared.World.Blocks.ItemGroundSnap.SnapDown(BlockWorld!, BlockShapes, cx, z, cy);
 
         for (int c = 0; c < client.Slots.Length; c++)
         {
@@ -266,92 +277,9 @@ public class GameServer
 
             client.LastActivity = DateTime.UtcNow;
 
-            MessageType type = (MessageType)reader.GetUShort();
+            ushort typeId = reader.GetUShort();
             byte[] data = reader.GetBytesWithLength();
-
-            switch (type)
-            {
-                case MessageType.UseIntent:
-                    // Действуем по текущему тайлу игрока в game-loop.
-                    client.UseRequested = true;
-                    break;
-
-                case MessageType.MoveIntent:
-                    var intent = new MoveIntent();
-                    intent.Deserialize(data);
-                    client.IntentQueue.Enqueue(intent);
-                    break;
-
-                case MessageType.InteractIntent:
-                    try
-                    {
-                        var interact = new InteractIntent();
-                        interact.Deserialize(data);
-                        client.InteractQueue.Enqueue(interact);
-                    }
-                    catch (Exception ex)
-                    {
-                        // Битый interact-пакет: лог, НЕ кикаем (request-only, не критично для сессии).
-                        Console.WriteLine($"[Server] Bad InteractIntent from #{client.ConnectionId}: {ex.Message}");
-                    }
-                    break;
-
-                case MessageType.PickupItem:
-                    try
-                    {
-                        var pickup = new PickupItem();
-                        pickup.Deserialize(data);
-                        client.PickupQueue.Enqueue(pickup);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Server] Bad PickupItem from #{client.ConnectionId}: {ex.Message}");
-                    }
-                    break;
-
-                case MessageType.DropItem:
-                    try
-                    {
-                        var drop = new DropItem();
-                        drop.Deserialize(data);
-                        client.DropQueue.Enqueue(drop);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Server] Bad DropItem from #{client.ConnectionId}: {ex.Message}");
-                    }
-                    break;
-
-                case MessageType.SwapHand:
-                    try
-                    {
-                        var swap = new SwapHandRequest();
-                        swap.Deserialize(data);
-                        client.SwapQueue.Enqueue(swap);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Server] Bad SwapHandRequest from #{client.ConnectionId}: {ex.Message}");
-                    }
-                    break;
-
-                case MessageType.MoveSlot:
-                    try
-                    {
-                        var moveSlot = new MoveSlotRequest();
-                        moveSlot.Deserialize(data);
-                        client.MoveSlotQueue.Enqueue(moveSlot);
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"[Server] Bad MoveSlotRequest from #{client.ConnectionId}: {ex.Message}");
-                    }
-                    break;
-
-                default:
-                    Console.WriteLine($"[Server] Unknown message type from #{client.ConnectionId}: {type}");
-                    break;
-            }
+            _router.Dispatch(client, typeId, data);
         }
         catch (Exception ex)
         {
@@ -630,7 +558,7 @@ public class GameServer
 
         int px = (int)MathF.Floor(client.X);
         int py = (int)MathF.Floor(client.Y);
-        if (!InteractionRules.InReach(px, py, client.Z, gi.CellX, gi.CellY, gi.Z)) return;
+        if (!Reachable(px, py, client.Z, gi.CellX, gi.CellY, gi.Z)) return;
 
         if (client.Slots[(int)SlotCategory.Hand][client.ActiveHand].NetId != 0) return;
 
@@ -641,7 +569,8 @@ public class GameServer
     }
 
     /// <summary>Drop-at-feet: Held→Ground на СЕРВЕРНОЙ позиции клиента (floor(X/Y), Z) — клиентские координаты
-    /// не принимаются (анти-телепорт). Не-Walkable тайл под ногами — отклонить (нет висящих сирот).</summary>
+    /// не принимаются (анти-телепорт). Тайл-мир: не-Walkable тайл под ногами — отклонить (нет висящих сирот).
+    /// Блок-мир: тайл-гейт пропущен (_map пуст, авторитет — BlockWorld) — дроп-в-ноги как при дисконнекте.</summary>
     private void HandleDrop(ClientConnection client, in DropItem msg)
     {
         var slot = client.Slots[(int)msg.Category];
@@ -652,7 +581,8 @@ public class GameServer
         int cx = (int)MathF.Floor(client.X);
         int cy = (int)MathF.Floor(client.Y);
         int z = client.Z;
-        if (!_map.GetTile(cx, cy, z).Walkable) return;
+        if (!_config.BlocksWorld && !_map.GetTile(cx, cy, z).Walkable) return;
+        if (_config.BlocksWorld) z = Shared.World.Blocks.ItemGroundSnap.SnapDown(BlockWorld!, BlockShapes, cx, z, cy);
 
         SpawnGroundItemWithId(h.NetId, h.ItemDefId, h.StackCount, cx, cy, z);
         slot[msg.Index] = default;
@@ -685,6 +615,7 @@ public class GameServer
         SendInventorySyncToOwner(client);
     }
 
+    /// <summary>Категория экипировки предмета по DefId (инъектируется тестами; дефолт — ItemCatalogData).</summary>
     public Func<ushort, SlotCategory?> EquipLookup = defId => ItemCatalogData.TryGetEquipSlot(defId, out var c) ? c : (SlotCategory?)null;
 
     private bool CanEquip(ushort itemDefId, SlotCategory toCategory)
@@ -693,6 +624,12 @@ public class GameServer
         var eq = EquipLookup(itemDefId);
         return eq.HasValue && eq.Value == toCategory;
     }
+
+    // Тайл-мир: тот же этаж + chebyshev. Блок-мир: ±1 ячейка по высоте (паритет с клиентским пикером ±1).
+    private bool Reachable(int px, int py, int pz, int tx, int ty, int tz)
+        => _config.BlocksWorld
+            ? InteractionRules.InReachBlocks(px, py, pz, tx, ty, tz)
+            : InteractionRules.InReach(px, py, pz, tx, ty, tz);
 
     /// <summary>Резолв цели интеракции в ЦЕЛЫЙ тайл, авторитетная проверка дальности и диспетч через реестр обработчиков.
     /// Tile-цель — координаты из intent; Entity-цель — floor СЕРВЕРНОЙ позиции сущности по TargetNetId (клиентские Tile*
@@ -714,7 +651,7 @@ public class GameServer
 
         int px = (int)MathF.Floor(client.X);
         int py = (int)MathF.Floor(client.Y);
-        if (!InteractionRules.InReach(px, py, client.Z, tx, ty, tz))
+        if (!Reachable(px, py, client.Z, tx, ty, tz))
             return; // вне дальности — тихий дроп (анти-telegrab)
 
         var ctx = new InteractContext(_map, client, tx, ty, tz, intent.Verb, intent.HandIndex);
@@ -1054,8 +991,8 @@ public class GameServer
             }
 
             if (k == 0 && !client.SawGroundItems)
-                continue;
-            client.SawGroundItems = k > 0;
+                continue; // и до, и сейчас пусто — не шлём (без wire-шума)
+            client.SawGroundItems = k > 0; // непусто→пусто: шлём РОВНО один пустой снапшот — клиентский backstop снесёт вью
 
             var snapshot = new ItemSnapshot();
             _broadcastPayload.SetLength(0);
@@ -1357,8 +1294,7 @@ public class GameServer
         SendToClient(client, new MapDataMessage { Map = _map });
     }
 
-    /// <summary>Полный слепок инвентаря владельцу (OWNER-ONLY — НИКОГДА не в foreach(_clients)). Бампает
-    /// InventoryVersion и шлёт ReliableOrdered через SendToClient.</summary>
+    /// <summary>Полный слепок инвентаря владельцу (OWNER-ONLY — НИКОГДА не в foreach(_clients)), ReliableOrdered через SendToClient.</summary>
     public void SendInventorySyncToOwner(ClientConnection owner)
     {
         int occupied = 0;

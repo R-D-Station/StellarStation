@@ -266,7 +266,9 @@ namespace ServerTests.Server.Network
             var peer = clientManager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
 
             // Регистрация в _entities идёт в OnPeerConnected на серверном PollEvents (GameLoop) — ждём.
-            for (int i = 0; i < 200 && _server.EntityCount == 0; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
+            // Ждём И spawned: колбэк OnClientConnected дренируется из _mainThreadActions ПОСЛЕ PollEvents того же
+            // тика — окно, где EntityCount уже 1, а spawned ещё null (ловилось как флейк ~1/10).
+            for (int i = 0; i < 200 && (spawned == null || _server.EntityCount == 0); i++) { clientManager.PollEvents(); Thread.Sleep(10); }
 
             Assert.Equal(1, _server.EntityCount);
             Assert.NotNull(spawned);

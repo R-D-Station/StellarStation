@@ -8,6 +8,7 @@ using Client.Items;
 
 namespace Client.Editor
 {
+    /// <summary>Кодоген Shared-зеркала экипировки: ItemDefinition SO → ItemCatalogData.g.cs (defId→EquipSlot, только equippable).</summary>
     public static class ItemCatalogCodegen
     {
         private const string OutputPath = "Assets/Scripts/Shared/World/Items/ItemCatalogData.g.cs";

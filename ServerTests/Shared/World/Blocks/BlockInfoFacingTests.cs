@@ -2,6 +2,7 @@ using Shared.World.Blocks;
 
 namespace ServerTests.Shared.World.Blocks
 {
+    /// <summary>Плашка у грани +Z поворачивается вслед за facing 1/2/3 в +X/-Z/-X — тракт вращения боксов (RotatedCW) верен.</summary>
     public class BlockInfoFacingTests
     {
         private static BlockInfo PlateAtZPlus()

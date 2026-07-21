@@ -387,8 +387,23 @@ namespace Client.Net
         public bool TryResolveHoverTile(Vector2 screenPos, out int tileX, out int tileY, out int tileZ)
         {
             tileX = 0; tileY = 0;
-            tileZ = _predictor.Z;
             var cam = ClickCamera;
+
+            if (BlocksWorld)
+            {
+                // Блок-мир: _predictor.Y — уже непрерывная высота в юнитах Unity (НЕ этаж×FloorHeight, как в тайл-ветке ниже).
+                tileZ = Mathf.FloorToInt(_predictor.Y);
+                if (cam == null) return false;
+                Ray rayBlocks = cam.ScreenPointToRay(screenPos);
+                var feetPlane = new Plane(Vector3.up, new Vector3(0f, _predictor.Y, 0f));
+                if (!feetPlane.Raycast(rayBlocks, out float enterBlocks)) return false;
+                Vector3 hitBlocks = rayBlocks.GetPoint(enterBlocks);
+                tileX = Mathf.FloorToInt(hitBlocks.x);
+                tileY = Mathf.FloorToInt(hitBlocks.z);
+                return true;
+            }
+
+            tileZ = _predictor.Z;
             if (cam == null) return false;
 
             // Плоскость этажа игрока (Unity-Y = z*FloorHeight): тайл на СВОЁМ Z (2.5D — курсор может визуально попасть на др. этаж).
@@ -419,9 +434,11 @@ namespace Client.Net
                 var view = kv.Value;
                 if (view == null) continue;
                 Vector3 p = view.transform.position;
-                if (Mathf.FloorToInt(p.x) == tx
-                    && Mathf.FloorToInt(p.z) == ty
-                    && Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == z)
+                // Блок-мир: floor(y) ± 1 этаж — паритет с серверным 3D-reach (RoundToInt/FloorHeight — тайловая формула, в блок-осях никогда не совпадала).
+                bool match = BlocksWorld
+                    ? Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.Abs(Mathf.FloorToInt(p.y) - z) <= 1
+                    : Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == z;
+                if (match)
                 {
                     pickedId = kv.Key;
                     return true;
@@ -440,9 +457,11 @@ namespace Client.Net
                 var view = kv.Value;
                 if (view == null) continue;
                 Vector3 p = view.transform.position;
-                if (Mathf.FloorToInt(p.x) == tx
-                    && Mathf.FloorToInt(p.z) == ty
-                    && Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == z)
+                // Блок-мир: floor(y) ± 1 этаж, см. TryPickEntity — та же формула-паритет с серверным reach.
+                bool match = BlocksWorld
+                    ? Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.Abs(Mathf.FloorToInt(p.y) - z) <= 1
+                    : Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == z;
+                if (match)
                 {
                     itemNetId = kv.Key;
                     return true;
@@ -480,6 +499,7 @@ namespace Client.Net
                 _blockRenderer.SetZoneFade(login.ZoneFadeDistance, login.ZoneFadeVertical);
                 var itemGrid = _blockGrid;
                 var itemShapes = baseShapes;
+                // Один раз на весь клиент: даёт ItemView высоту опоры под предметом — верх САМОЙ высокой не-полноблочной коробки блока (0 — пустой блок/пол).
                 Client.Net.View.ItemView.BlockSurface = (x, h, pz) =>
                 {
                     var boxes = itemShapes.GetBoxes(itemGrid.GetBlock(x, h, pz), itemGrid.GetState(x, h, pz));
@@ -717,6 +737,7 @@ namespace Client.Net
 
         private bool IsHandOccupied(byte hand) => hand < _handOccupied.Length && _handOccupied[hand];
 
+        /// <summary>Запрос drop-at-feet предмета из (category,index) — для UI/HUD, вне клавиш Q.</summary>
         public void SendDrop(SlotCategory category, byte index) => _net.SendDrop(category, index);
     }
 }

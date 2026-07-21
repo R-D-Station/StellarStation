@@ -230,6 +230,7 @@ namespace Shared.World.Blocks
 
         public void AddItemSpawn(in ItemSpawn spawn) => _itemSpawns.Add(spawn);
 
+        /// <summary>Стереть все спавны предмета в ячейке (ластик редактора). true — если что-то удалено.</summary>
         public bool RemoveItemSpawnsAt(int x, int y, int z)
         {
             bool removed = false;
@@ -242,6 +243,7 @@ namespace Shared.World.Blocks
             return removed;
         }
 
+        // Прямой доступ к списку — только для сериализатора (обход IReadOnlyList-обёртки).
         internal List<ItemSpawn> ItemSpawnList => _itemSpawns;
 
         /// <summary>Ключ секции, содержащей блок (для стрима/дельт).</summary>

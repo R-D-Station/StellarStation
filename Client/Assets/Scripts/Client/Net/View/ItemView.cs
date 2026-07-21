@@ -5,14 +5,14 @@ using Client.Items;
 
 namespace Client.Net.View
 {
-    /// <summary>Визуал наземного предмета: статичный world-спрайт в центре дискретной ячейки. Без SnapshotBuffer —
-    /// предмет не движется (Sequenced-снапшот задаёт позицию сразу).</summary>
+    /// <summary>Визуал наземного предмета: статичный world-спрайт в центре ячейки, без SnapshotBuffer (не движется).</summary>
     public class ItemView : MonoBehaviour
     {
         [SerializeField] private SpriteRenderer _spriteRenderer;
 
         public int NetId { get; private set; }
 
+        // Хук поверхности ячейки (x,высота,план→Y мира); ставится NetworkRunner при входе в блок-режим.
         public static System.Func<int, int, int, float> BlockSurface;
 
         private ushort _lastDefId;   // перевыбор спрайта только при смене ItemDefId
@@ -25,11 +25,11 @@ namespace Client.Net.View
         }
 
         /// <summary>Применить данные предмета из снапшота: позиция (центр ячейки) + спрайт по ItemDefId.</summary>
-        // ЕДИНСТВЕННОЕ место маппинга дискретной ячейки в визуальную высоту (выбрасываемый рендер; блок-мир его заменит).
         public void Apply(in ItemInstance data, ItemCatalog catalog)
         {
             if (NetEntityView.BlocksMode)
             {
+                // Блок-режим: оси 1:1 (X/Y=высота/Z=план), без тайловой Z·FloorHeight; предмет лежит на верхе бокса ячейки.
                 float surfaceY = BlockSurface != null ? BlockSurface(data.X, data.Z, data.Y) : data.Z;
                 transform.position = new Vector3(data.X + 0.5f, surfaceY, data.Y + 0.5f);
             }

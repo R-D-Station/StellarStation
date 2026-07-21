@@ -93,11 +93,12 @@ namespace Server.Network
         // Очередь адресных интеракций (клик по тайлу/сущности); дренируется в ProcessInteractions (request-only).
         public readonly ConcurrentQueue<InteractIntent> InteractQueue = new();
 
-        // Инвентарь (4.5a): identity-only слоты, БЕЗ ссылок на _entities/GroundItemEntity. Held-предметы физически
+        // Инвентарь: identity-only слоты, БЕЗ ссылок на _entities/GroundItemEntity. Held-предметы физически
         // удалены из общего реестра сущностей на pickup — живут ТОЛЬКО здесь, никогда не идут в PVS.
+        // Slots[cat][idx], размер второй оси = InventorySlot.DefaultCount(cat) (Фаза 1, раскладка по SlotCategory).
         public readonly HeldItem[][] Slots;
         public byte ActiveHand;
-        public bool SawGroundItems;
+        public bool SawGroundItems; // видел ли клиент наземные предметы ранее — гейт empty-transition ItemSnapshot
 
         public readonly ConcurrentQueue<PickupItem> PickupQueue = new();
         public readonly ConcurrentQueue<DropItem> DropQueue = new();

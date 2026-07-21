@@ -20,6 +20,7 @@ namespace Client.Items
         [SerializeField] private float _renderScale = 1f;
         public float RenderScale => _renderScale;
 
+        // !Equippable — предмет идёт только в руки; EquipSlot валиден, только пока Equippable=true (см. ItemCatalogCodegen).
         [SerializeField] private bool _equippable;
         [SerializeField] private SlotCategory _equipSlot;
         public bool Equippable => _equippable;

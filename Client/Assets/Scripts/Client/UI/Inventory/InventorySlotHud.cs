@@ -7,6 +7,7 @@ using Client.Items;
 
 namespace Client.UI.Inventory
 {
+    /// <summary>Самодостаточный UI-слот инвентаря: рендер (иконка/стек/подсветка) + клик по адресу (Category, Index).</summary>
     public sealed class InventorySlotHud : MonoBehaviour
     {
         [SerializeField] private SlotCategory _category;
@@ -33,6 +34,7 @@ namespace Client.UI.Inventory
 
         private void OnButtonClicked() => Clicked?.Invoke(_category, _index);
 
+        /// <summary>Отрисовать слот занятым: иконка по каталогу + счётчик стека (если &gt;1).</summary>
         public void SetFilled(ushort itemDefId, byte stackCount, ItemCatalog catalog)
         {
             var def = catalog != null ? catalog.For(itemDefId) : null;
@@ -50,6 +52,7 @@ namespace Client.UI.Inventory
             }
         }
 
+        /// <summary>Отрисовать слот пустым.</summary>
         public void SetEmpty()
         {
             if (_icon != null)
@@ -60,6 +63,7 @@ namespace Client.UI.Inventory
             if (_count != null) _count.gameObject.SetActive(false);
         }
 
+        /// <summary>Подсветка активной руки.</summary>
         public void SetHighlight(bool on)
         {
             if (_highlight != null) _highlight.enabled = on;

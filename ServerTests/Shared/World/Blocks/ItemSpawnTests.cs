@@ -4,6 +4,7 @@ using Shared.World.Blocks;
 
 namespace ServerTests.Shared.World.Blocks
 {
+    // v13 item-спавн лист: round-trip, побайтовая стабильность, legacy v12, обрезанный хвост, ластик ячейки, серверный спавн на загрузке.
     public class ItemSpawnTests
     {
         private static BlockGrid GridWithSpawns()

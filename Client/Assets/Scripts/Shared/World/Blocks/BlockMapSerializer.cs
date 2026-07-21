@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace Shared.World.Blocks
 {
-    /// <summary>Бинарная сериализация BlockGrid — формат .smap v12 (диск=wire), append-only поверх v10/v11 (bake→zone→seeds), детерминированный порядок → побайтовая стабильность.</summary>
+    /// <summary>Бинарная сериализация BlockGrid — формат .smap v13, append-only поверх v10/v11/v12 (bake→zone→seeds→item-спавны), детерминированный порядок → побайтовая стабильность.</summary>
     public static class BlockMapSerializer
     {
         public const int Magic = MapSerializer.Magic; // 'SMAP' — общее семейство форматов карт
@@ -37,6 +37,7 @@ namespace Shared.World.Blocks
                 WriteSection(w, grid.Sections[key]);
             }
 
+            // v13: хвост списка item-спавнов ПОСЛЕ секций (диск-only — в BlockChunkData/wire не входит).
             var spawns = grid.ItemSpawnList;
             w.Write((ushort)spawns.Count);
             for (int i = 0; i < spawns.Count; i++)
@@ -143,7 +144,7 @@ namespace Shared.World.Blocks
                 grid.AddSection(cx, cy, cz, ReadSection(r, version));
             }
 
-            if (version >= 13)
+            if (version >= 13) // v10-12: списка нет — грид без предметов, не ошибка
             {
                 ushort spawnCount = r.ReadUInt16();
                 for (int i = 0; i < spawnCount; i++)

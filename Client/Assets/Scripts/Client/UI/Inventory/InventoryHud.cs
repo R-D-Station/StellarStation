@@ -7,6 +7,7 @@ using Client.Net;
 
 namespace Client.UI.Inventory
 {
+    /// <summary>Тонкий менеджер слотов инвентаря: применяет <see cref="InventorySync"/> к <see cref="InventorySlotHud"/>-компонентам, роутит клики в drop.</summary>
     public sealed class InventoryHud : MonoBehaviour
     {
         [SerializeField] private InventorySlotHud[] _slots;
@@ -36,6 +37,7 @@ namespace Client.UI.Inventory
                 if (_slots[i] != null) _slots[i].Clicked -= OnSlotClicked;
         }
 
+        /// <summary>Полный ре-рендер по слепку: всё пустое → занятые слоты из sync → подсветка ActiveHand.</summary>
         public void Apply(in InventorySync sync)
         {
             if (_slots != null)

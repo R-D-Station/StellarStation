@@ -4,6 +4,7 @@ using Shared.World.Items;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Переместить предмет между слотами (client→server): адресация (FromCategory,FromIndex)→(ToCategory,ToIndex), same-slot отклоняется.</summary>
     public struct MoveSlotRequest : INetMessage
     {
         public SlotCategory FromCategory;
