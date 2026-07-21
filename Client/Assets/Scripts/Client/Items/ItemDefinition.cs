@@ -1,4 +1,5 @@
 using UnityEngine;
+using Shared.World.Items;
 
 namespace Client.Items
 {
@@ -18,5 +19,10 @@ namespace Client.Items
         // Размер предмета как ДОЛЯ тайла (1 = целый тайл); мировой размер = RenderScale·TileSize. Инспектор показывает %↔юниты (EditorCoder).
         [SerializeField] private float _renderScale = 1f;
         public float RenderScale => _renderScale;
+
+        [SerializeField] private bool _equippable;
+        [SerializeField] private SlotCategory _equipSlot;
+        public bool Equippable => _equippable;
+        public SlotCategory EquipSlot => _equipSlot;
     }
 }

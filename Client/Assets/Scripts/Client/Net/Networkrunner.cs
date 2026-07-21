@@ -75,13 +75,8 @@ namespace Client.Net
         private readonly HashSet<int> _seenItemIds = new HashSet<int>();
         private readonly List<int> _itemsToRemove = new List<int>();
 
-        // Инвентарь (4.5): version-guard на InventorySync (как ServerTick-guard в OnSnapshot) + owned-NetId набор,
-        // подавляющий ground-рендер held-предметов (кросс-канальная гонка ItemSnapshot vs InventorySync).
-        private uint _lastInventoryVersion;
-        private bool _invSeen;
-        private readonly HashSet<int> _heldNetIds = new HashSet<int>();
-        private byte _activeHand = InventorySlot.HandLeft; // эхо сервера (InventorySync.ActiveHand); без локального флипа
-        private readonly bool[] _slotOccupied = new bool[InventorySlot.SlotCount]; // занятость по последнему InventorySync
+        private byte _activeHand;
+        private readonly bool[] _handOccupied = new bool[InventorySlot.HandCount];
 
         // Хинт «Руки заняты»: ручной тайм-аут (CursorHint по умолчанию — Lifetime=∞, само-возврат не сработает).
         private PooledLabel _handsFullHandle;
@@ -262,9 +257,9 @@ namespace Client.Net
             // Инвентарь (4.5): Q — выбросить из активной руки; X — сменить руку. Request-only, без предсказания;
             // подсветка идёт по эхо сервера (InventorySync.ActiveHand), не по локальному флипу.
             if (Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame)
-                _net.SendDrop(_activeHand);
+                _net.SendDrop(SlotCategory.Hand, _activeHand);
             if (Keyboard.current != null && Keyboard.current.xKey.wasPressedThisFrame)
-                _net.SendSwapHand((byte)(_activeHand == InventorySlot.HandLeft ? InventorySlot.HandRight : InventorySlot.HandLeft));
+                _net.SendSwapHand((byte)(_activeHand == 0 ? 1 : 0));
 
             HandleInteractionInput();
 
@@ -483,6 +478,17 @@ namespace Client.Net
                 _blockRenderer = gameObject.AddComponent<Client.Map.BlockRenderer>();
                 _blockRenderer.Init(_blockGrid, baseShapes);
                 _blockRenderer.SetZoneFade(login.ZoneFadeDistance, login.ZoneFadeVertical);
+                var itemGrid = _blockGrid;
+                var itemShapes = baseShapes;
+                Client.Net.View.ItemView.BlockSurface = (x, h, pz) =>
+                {
+                    var boxes = itemShapes.GetBoxes(itemGrid.GetBlock(x, h, pz), itemGrid.GetState(x, h, pz));
+                    float top = 0f;
+                    for (int i = 0; i < boxes.Length; i++)
+                        if (boxes[i].MaxYf < 0.999f && boxes[i].MaxYf > top)
+                            top = boxes[i].MaxYf;
+                    return h + top;
+                };
             }
 
             Debug.Log($"[NetworkRunner] My NetId = {LocalNetId}, tickRate = {_tickRate}, blocks = {BlocksWorld}");
@@ -666,20 +672,6 @@ namespace Client.Net
             for (int i = 0; i < snap.Items.Length; i++)
             {
                 var item = snap.Items[i];
-
-                // Owned-NetId подавление: предмет уже в инвентаре (InventorySync) — кросс-канальная гонка двух
-                // стримов может прислать устаревший ground-снапшот того же NetId. Held не рендерится на земле;
-                // существующий ground-view (если остался с ДО-подбора кадра) — снести.
-                if (_heldNetIds.Contains(item.NetId))
-                {
-                    if (_itemViews.TryGetValue(item.NetId, out var heldView))
-                    {
-                        Destroy(heldView.gameObject);
-                        _itemViews.Remove(item.NetId);
-                    }
-                    continue;
-                }
-
                 _seenItemIds.Add(item.NetId);
 
                 if (!_itemViews.TryGetValue(item.NetId, out var view))
@@ -707,48 +699,24 @@ namespace Client.Net
             }
         }
 
-        /// <summary>Owner-only полный слепок инвентаря: version-guard (как ServerTick-guard в OnSnapshot), пересборка
-        /// owned-NetId набора (гейт ground-рендера), эхо активной руки, форвард в HUD.</summary>
         private void OnInventorySync(InventorySync sync)
         {
-            if (_invSeen && sync.InventoryVersion <= _lastInventoryVersion) return;
-            _invSeen = true;
-            _lastInventoryVersion = sync.InventoryVersion;
             _activeHand = sync.ActiveHand;
 
-            _heldNetIds.Clear();
-            System.Array.Clear(_slotOccupied, 0, _slotOccupied.Length);
+            System.Array.Clear(_handOccupied, 0, _handOccupied.Length);
             var slots = sync.Slots;
             if (slots != null)
-            {
                 for (int i = 0; i < slots.Length; i++)
-                {
-                    _heldNetIds.Add(slots[i].NetId);
-                    byte idx = slots[i].SlotIndex;
-                    if (idx < _slotOccupied.Length) _slotOccupied[idx] = true;
-                }
-            }
-
-            // Проактивно снести наземный вью подобранного предмета: авторитетный «держишь это» уже пришёл. При подборе
-            // ПОСЛЕДНЕГО предмета в PVS интерес пуст → BroadcastItemSnapshot (4.4a «empty→не шлём») снапшот НЕ шлёт →
-            // OnItemSnapshot (подавление/backstop) не вызывается → иначе ground-вью висел бы. Итерируем _heldNetIds, мутируем _itemViews (разные коллекции).
-            foreach (int heldId in _heldNetIds)
-                if (_itemViews.TryGetValue(heldId, out var groundView))
-                {
-                    Destroy(groundView.gameObject);
-                    _itemViews.Remove(heldId);
-                }
+                    if (slots[i].Category == SlotCategory.Hand && slots[i].Index < _handOccupied.Length)
+                        _handOccupied[slots[i].Index] = true;
 
             if (_inventoryHud != null) _inventoryHud.Apply(in sync);
         }
 
-        /// <summary>Активная рука по последнему эхо сервера (InventorySync.ActiveHand) — без локального флипа.</summary>
         public byte ActiveHand => _activeHand;
 
-        /// <summary>Занята ли рука (есть held-предмет в её слоте) — по последнему InventorySync.</summary>
-        private bool IsHandOccupied(byte hand) => hand < _slotOccupied.Length && _slotOccupied[hand];
+        private bool IsHandOccupied(byte hand) => hand < _handOccupied.Length && _handOccupied[hand];
 
-        /// <summary>Выбросить предмет из слота: клавиша Q (активная рука) или клик кнопки слота в HUD.</summary>
-        public void SendDrop(byte slotIndex) => _net.SendDrop(slotIndex);
+        public void SendDrop(SlotCategory category, byte index) => _net.SendDrop(category, index);
     }
 }

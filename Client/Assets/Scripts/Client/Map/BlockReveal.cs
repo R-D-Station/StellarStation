@@ -156,6 +156,23 @@ namespace Client.Map
         }
 
         /// <summary>Альфа зонного канала: 0, если ячейка засеяна не под этой zone (иначе то же budget/vertStep-затухание).</summary>
+        public ushort ZoneAt(int x, int z)
+        {
+            int lx = x - _originX, lz = z - _originZ;
+            if (lx < 0 || lz < 0 || lx >= _window || lz >= _window)
+                return 0;
+            return _seedZone[lz * _window + lx];
+        }
+
+        public int SrcYAt(int x, int z)
+        {
+            int lx = x - _originX, lz = z - _originZ;
+            if (lx < 0 || lz < 0 || lx >= _window || lz >= _window)
+                return int.MinValue;
+            int idx = lz * _window + lx;
+            return _budget[idx] > 0f ? _srcY[idx] : int.MinValue;
+        }
+
         public float AlphaFor(int x, int y, int z, ushort zone)
         {
             if (zone == 0)

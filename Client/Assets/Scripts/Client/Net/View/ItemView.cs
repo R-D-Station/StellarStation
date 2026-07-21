@@ -13,6 +13,8 @@ namespace Client.Net.View
 
         public int NetId { get; private set; }
 
+        public static System.Func<int, int, int, float> BlockSurface;
+
         private ushort _lastDefId;   // перевыбор спрайта только при смене ItemDefId
         private bool _hasDef;
 
@@ -26,8 +28,16 @@ namespace Client.Net.View
         // ЕДИНСТВЕННОЕ место маппинга дискретной ячейки в визуальную высоту (выбрасываемый рендер; блок-мир его заменит).
         public void Apply(in ItemInstance data, ItemCatalog catalog)
         {
-            // Сервер (X, Y=глубина, Z=этаж) → Unity (X, высота=Z·FloorHeight, Z=глубина). +0.5 — центр ячейки.
-            transform.position = new Vector3(data.X + 0.5f, data.Z * RenderConfig.FloorHeight, data.Y + 0.5f);
+            if (NetEntityView.BlocksMode)
+            {
+                float surfaceY = BlockSurface != null ? BlockSurface(data.X, data.Z, data.Y) : data.Z;
+                transform.position = new Vector3(data.X + 0.5f, surfaceY, data.Y + 0.5f);
+            }
+            else
+            {
+                // Сервер (X, Y=глубина, Z=этаж) → Unity (X, высота=Z·FloorHeight, Z=глубина). +0.5 — центр ячейки.
+                transform.position = new Vector3(data.X + 0.5f, data.Z * RenderConfig.FloorHeight, data.Y + 0.5f);
+            }
 
             if (!_hasDef || data.ItemDefId != _lastDefId)
             {

@@ -8,7 +8,7 @@ namespace Shared.World.Blocks
     public static class BlockMapSerializer
     {
         public const int Magic = MapSerializer.Magic; // 'SMAP' — общее семейство форматов карт
-        public const ushort Version = 12;
+        public const ushort Version = 13;
         public const ushort MinVersion = 10;
 
         private const byte EncodingPalette = 0;
@@ -35,6 +35,17 @@ namespace Shared.World.Blocks
                 w.Write(cy);
                 w.Write(cz);
                 WriteSection(w, grid.Sections[key]);
+            }
+
+            var spawns = grid.ItemSpawnList;
+            w.Write((ushort)spawns.Count);
+            for (int i = 0; i < spawns.Count; i++)
+            {
+                w.Write(spawns[i].X);
+                w.Write(spawns[i].Y);
+                w.Write(spawns[i].Z);
+                w.Write(spawns[i].DefId);
+                w.Write(spawns[i].Stack);
             }
         }
 
@@ -130,6 +141,20 @@ namespace Shared.World.Blocks
                 int cy = r.ReadInt32();
                 int cz = r.ReadInt32();
                 grid.AddSection(cx, cy, cz, ReadSection(r, version));
+            }
+
+            if (version >= 13)
+            {
+                ushort spawnCount = r.ReadUInt16();
+                for (int i = 0; i < spawnCount; i++)
+                {
+                    int x = r.ReadInt32();
+                    int y = r.ReadInt32();
+                    int z = r.ReadInt32();
+                    ushort defId = r.ReadUInt16();
+                    byte stack = r.ReadByte();
+                    grid.AddItemSpawn(new ItemSpawn(x, y, z, defId, stack));
+                }
             }
             return grid;
         }
