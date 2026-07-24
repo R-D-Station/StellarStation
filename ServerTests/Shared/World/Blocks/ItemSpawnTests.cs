@@ -102,7 +102,7 @@ namespace ServerTests.Shared.World.Blocks
             try
             {
                 BlockMapSerializer.SaveToFile(path, g);
-                var config = new SVars { BlocksWorld = true, MapPath = path };
+                var config = new SVars { MapPath = path };
                 var server = new global::Server.Network.GameServer(config);
 
                 Assert.Equal(3, server.EntityCount);

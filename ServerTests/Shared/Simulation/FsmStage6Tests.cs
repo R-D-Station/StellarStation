@@ -1,7 +1,6 @@
 using Server.Network;
 using Shared.Messages.Core;
 using Shared.Simulation;
-using Shared.World;
 
 namespace ServerTests.Shared.Simulation
 {
@@ -12,20 +11,24 @@ namespace ServerTests.Shared.Simulation
     /// </summary>
     public class FsmStage6Tests
     {
-        private static GridMap FloorRow()
+        private static void FreeStep(ref float x, ref float y, IntentDirection dir, bool sprint = false, bool crawl = false,
+            float baseStep = MovementLogic.StepPerTick)
         {
-            var map = new GridMap();
-            map.SetTile(0, 0, 0, Tile.Floor());
-            map.SetTile(0, 1, 0, Tile.Floor()); // путь на север свободен
-            return map;
+            MovementLogic.GetAxes(dir, out int dx, out int dy);
+            if (dx == 0 && dy == 0) return;
+            float step = baseStep * (sprint ? MovementLogic.SprintMultiplier : 1f);
+            if (dx != 0 && dy != 0) step *= MovementLogic.InvSqrt2;
+            if (crawl) step *= MovementLogic.CrawlMultiplier;
+            x += dx * step;
+            y += dy * step;
         }
 
         // Зеркало гейта движения GameServer.ProcessIntents: один тик, возвращает позицию после (не)движения.
-        private static (float x, float y) GatedMove(ClientConnection c, GridMap map, IntentDirection dir)
+        private static (float x, float y) GatedMove(ClientConnection c, IntentDirection dir)
         {
             float x = 0.5f, y = 0.5f;
             if (FsmLogic.MovementAllowed(c.State) && !c.DisableMovement)
-                MovementLogic.Apply(map, 0, ref x, ref y, dir, sprint: false, crawl: c.State == PlayerState.Laying);
+                FreeStep(ref x, ref y, dir, sprint: false, crawl: c.State == PlayerState.Laying);
             return (x, y);
         }
 
@@ -40,7 +43,7 @@ namespace ServerTests.Shared.Simulation
             Assert.True(c.DisableMovement);
             Assert.False(FsmLogic.MovementAllowed(c.State)); // Dead не пускает
 
-            var (x, y) = GatedMove(c, FloorRow(), IntentDirection.North);
+            var (x, y) = GatedMove(c, IntentDirection.North);
             Assert.Equal(0.5f, x);
             Assert.Equal(0.5f, y); // заморожен — позиция не изменилась
         }
@@ -55,7 +58,7 @@ namespace ServerTests.Shared.Simulation
             Assert.True(c.DisableMovement);
             Assert.False(FsmLogic.MovementAllowed(c.State));
 
-            var (x, y) = GatedMove(c, FloorRow(), IntentDirection.North);
+            var (x, y) = GatedMove(c, IntentDirection.North);
             Assert.Equal(0.5f, x);
             Assert.Equal(0.5f, y);
         }
@@ -67,11 +70,11 @@ namespace ServerTests.Shared.Simulation
             var c = new ClientConnection(null!, 1) { State = PlayerState.Stand, DisableMovement = true };
             Assert.True(FsmLogic.MovementAllowed(c.State)); // сам по себе Stand двигается
 
-            var (_, yFrozen) = GatedMove(c, FloorRow(), IntentDirection.North);
+            var (_, yFrozen) = GatedMove(c, IntentDirection.North);
             Assert.Equal(0.5f, yFrozen); // но DisableMovement замораживает
 
             c.DisableMovement = false; // контроль: без флага — двигается
-            var (_, yMoved) = GatedMove(c, FloorRow(), IntentDirection.North);
+            var (_, yMoved) = GatedMove(c, IntentDirection.North);
             Assert.True(yMoved > 0.5f, $"без DisableMovement должен двигаться, y={yMoved}");
         }
 

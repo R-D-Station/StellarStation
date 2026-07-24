@@ -48,9 +48,10 @@ namespace ServerTests.Server.Network
             Thread.Sleep(50);
         }
 
-        private GameServer StartServer(GridMap? map = null)
+        private GameServer StartServer()
         {
-            _server = new GameServer(_config, map);
+            _config.MapPath = "";
+            _server = new GameServer(_config);
             _server.Start();
             Thread.Sleep(50);
             SetContainerProto(_server);
@@ -176,9 +177,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Open_GroundContainer_InReach_AddsViewer()
         {
-            var map = new GridMap();
-            map.SetTile(5, 5, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
 
@@ -196,7 +195,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Open_GroundContainer_OutOfReach_Rejected()
         {
-            var server = StartServer(new GridMap());
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
 
@@ -417,7 +416,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Put_GroundContainerOutOfReach_Rejected()
         {
-            var server = StartServer(new GridMap());
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
             Hand(client, 0) = new HeldItem { NetId = 2000, ItemDefId = ItemDef, StackCount = 1 };
@@ -481,7 +480,7 @@ namespace ServerTests.Server.Network
         {
             var server = StartServer();
             var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1 };
             Slot(client, SlotCategory.Belt, 0) = new HeldItem { NetId = 1000, ItemDefId = ContDef, StackCount = 1 };
             client.OpenContainers.Add(1000);
 
@@ -495,7 +494,7 @@ namespace ServerTests.Server.Network
             Assert.Empty(client.OpenContainers);
             Assert.True(ContentsOf(server).ContainsKey(1000));
             Assert.Single(ContentsOf(server)[1000]);
-            Assert.Contains(server.GroundItemsInInterest(5.5f, 5.5f, 0), it => it.NetId == 1000);
+            Assert.Contains(server.GroundItemsInInterest(5.5f, 5.5f, 1), it => it.NetId == 1000);
             CleanupPeer(peer);
         }
 
@@ -509,9 +508,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void WorldOpen_ViewerRefcount_TwoOpenTwoClose()
         {
-            var map = new GridMap();
-            map.SetTile(5, 5, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
             var peerA = CreateConnectedPeer();
             var peerB = CreateConnectedPeer();
             var a = new ClientConnection(peerA, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
@@ -541,9 +538,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void WorldOpen_RepeatedOpenSameClient_NoDoubleCount()
         {
-            var map = new GridMap();
-            map.SetTile(5, 5, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var a = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
 
@@ -565,9 +560,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void WorldOpen_DisconnectLastViewer_Closes()
         {
-            var map = new GridMap();
-            map.SetTile(5, 5, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var a = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
 
@@ -588,9 +581,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void WorldOpen_DisconnectOneOfTwo_StaysOpen()
         {
-            var map = new GridMap();
-            map.SetTile(5, 5, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
             var peerA = CreateConnectedPeer();
             var peerB = CreateConnectedPeer();
             var a = new ClientConnection(peerA, 1) { X = 5.5f, Y = 5.5f, Z = 0 };

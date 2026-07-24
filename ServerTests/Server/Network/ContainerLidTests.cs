@@ -64,18 +64,8 @@ namespace ServerTests.Server.Network
             _ => new ItemProto(defId, SlotCategory.None, false, 1, 1, false, 0)
         };
 
-        private GameServer StartServer(GridMap? map = null)
+        private GameServer StartServer()
         {
-            _server = new GameServer(_config, map);
-            _server.Start();
-            Thread.Sleep(50);
-            _server.ProtoLookup = Protos;
-            return _server;
-        }
-
-        private GameServer StartBlockServer()
-        {
-            _config.BlocksWorld = true;
             _config.MapPath = "";
             _server = new GameServer(_config);
             _server.Start();
@@ -468,7 +458,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Spill_NonCollisionItem_BlockedRing_FallsToCenter()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var sc = WaitServerClient(server);
 
@@ -659,8 +649,8 @@ namespace ServerTests.Server.Network
             int crate = 0;
             OnGameLoop(server, () =>
             {
-                OnCell(sc, 5.5f, 5.5f, 0);
-                crate = server.SpawnGroundItem(CrateDef, 1, 5, 5, 0);
+                OnCell(sc, 5.5f, 5.5f, 1);
+                crate = server.SpawnGroundItem(CrateDef, 1, 5, 5, 1);
                 HandleOpen(server, sc, crate);
                 HandleOpen(server, sc, crate);
                 HandleOpen(server, sc, crate);
@@ -711,9 +701,9 @@ namespace ServerTests.Server.Network
             int crate = 0;
             OnGameLoop(server, () =>
             {
-                OnCell(a, 5.5f, 5.5f, 0);
-                OnCell(b, 5.5f, 5.5f, 0);
-                crate = server.SpawnGroundItem(CrateDef, 1, 5, 5, 0);
+                OnCell(a, 5.5f, 5.5f, 1);
+                OnCell(b, 5.5f, 5.5f, 1);
+                crate = server.SpawnGroundItem(CrateDef, 1, 5, 5, 1);
                 HandleOpen(server, a, crate);
                 HandleOpen(server, a, crate);
                 HandleOpen(server, a, crate);

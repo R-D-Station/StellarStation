@@ -33,7 +33,8 @@ namespace ServerTests.Server.Network
                 Port = _testPort,
                 MaxPlayers = 10,
                 TickRate = 30,
-                ConnectionKey = $"TestKey_{_testPort}"
+                ConnectionKey = $"TestKey_{_testPort}",
+                MapPath = ""
             };
 
             _server = new GameServer(_config);

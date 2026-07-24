@@ -65,7 +65,6 @@ namespace Server.Items
                 return;
             }
 
-            if (_server.BlockWorld == null) return;
             if (!_entities.TryGetValue(netId, out var e) || e is not GroundItemEntity gi) return;
 
             int px = (int)MathF.Floor(client.X);
@@ -102,7 +101,6 @@ namespace Server.Items
         /// <summary>Продвигает тянущиеся ящики к своим игрокам за тик (после движения игроков).</summary>
         public void ProcessFollow()
         {
-            if (_server.BlockWorld == null) return;
             foreach (var client in _clients.Values)
                 if (client.PulledNetId != 0)
                     FollowOne(client);

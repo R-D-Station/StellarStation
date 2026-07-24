@@ -49,20 +49,8 @@ namespace ServerTests.Server.Network
 
         private GameServer StartServer()
         {
-            _config.BlocksWorld = true;
             _config.MapPath = "";
             _server = new GameServer(_config);
-            _server.Start();
-            Thread.Sleep(50);
-            _server.ProtoLookup = defId => defId == PullDef
-                ? new ItemProto(PullDef, SlotCategory.None, false, 1, 1, false, 0, pullable: true)
-                : new ItemProto(defId, SlotCategory.None, false, 1, 1, false, 0);
-            return _server;
-        }
-
-        private GameServer StartTileServer()
-        {
-            _server = new GameServer(_config, new GridMap());
             _server.Start();
             Thread.Sleep(50);
             _server.ProtoLookup = defId => defId == PullDef
@@ -191,24 +179,6 @@ namespace ServerTests.Server.Network
         {
             peer?.Disconnect();
             Thread.Sleep(30);
-        }
-
-        [Fact]
-        public void Grab_TileMode_Rejected()
-        {
-            var server = StartTileServer();
-            var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
-
-            OnGameLoop(server, () =>
-            {
-                int netId = server.SpawnGroundItem(PullDef, 1, 5, 5, 0);
-                InvokePull(server, client, netId);
-            });
-
-            Assert.Equal(0, client.PulledNetId);
-            Assert.Equal(MovementLogic.StepPerTick, client.Speed.CurrentValue, 6);
-            CleanupPeer(peer);
         }
 
         [Fact]

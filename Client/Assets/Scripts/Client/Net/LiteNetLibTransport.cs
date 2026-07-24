@@ -18,12 +18,8 @@ namespace Client.Net
         public event Action<WorldSnapshot> OnWorldSnapshot;
         public event Action<MoveIntent> OnMoveIntentReceived;
         public event Action<LoginResponse> OnLoginResponse;
-        public event Action<MapDataMessage> OnMapData;
-        public event Action<TileUpdate> OnTileUpdate;
         public event Action<PlayerJoined> OnPlayerJoined;
         public event Action<PlayerLeft> OnPlayerLeft;
-        public event Action<ChunkData> OnChunkData;
-        public event Action<ChunkUnload> OnChunkUnload;
         public event Action<ItemSnapshot> OnItemSnapshot;
         public event Action<InventorySync> OnInventorySync;
         public event Action<ContainerSync> OnContainerSync;
@@ -47,12 +43,8 @@ namespace Client.Net
             { MessageType.MoveIntent, () => new MoveIntent() },
             { MessageType.WorldSnapshot, () => new WorldSnapshot() },
             { MessageType.LoginResponse, () => new LoginResponse() },
-            { MessageType.MapData, () => new MapDataMessage() },
-            { MessageType.TileUpdate, () => new TileUpdate() },
             { MessageType.PlayerJoined, () => new PlayerJoined() },
             { MessageType.PlayerLeft, () => new PlayerLeft() },
-            { MessageType.MapChunk, () => new ChunkData() },
-            { MessageType.MapChunkUnload, () => new ChunkUnload() },
             { MessageType.ItemSnapshot, () => new ItemSnapshot() },
             { MessageType.InventorySync, () => new InventorySync() },
             { MessageType.ContainerSync, () => new ContainerSync() },
@@ -142,28 +134,12 @@ namespace Client.Net
                     OnLoginResponse?.Invoke(login);
                     break;
 
-                case MapDataMessage map:
-                    OnMapData?.Invoke(map);
-                    break;
-
-                case TileUpdate tu:
-                    OnTileUpdate?.Invoke(tu);
-                    break;
-
                 case PlayerJoined pj:
                     OnPlayerJoined?.Invoke(pj);
                     break;
 
                 case PlayerLeft pl:
                     OnPlayerLeft?.Invoke(pl);
-                    break;
-
-                case ChunkData cd:
-                    OnChunkData?.Invoke(cd);
-                    break;
-
-                case ChunkUnload cu:
-                    OnChunkUnload?.Invoke(cu);
                     break;
 
                 case ItemSnapshot s:

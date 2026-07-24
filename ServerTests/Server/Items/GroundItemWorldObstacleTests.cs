@@ -110,9 +110,10 @@ namespace ServerTests.Server.Items
                 Port = 8999,
                 MaxPlayers = 2,
                 TickRate = 30,
-                ConnectionKey = "ObstacleTest"
+                ConnectionKey = "ObstacleTest",
+                MapPath = ""
             };
-            var server = new GameServer(config, new global::Shared.World.GridMap());
+            var server = new GameServer(config);
             server.ProtoLookup = Lookup;
 
             server.SpawnGroundItem(SolidDef, 1, 4, 5, 0);

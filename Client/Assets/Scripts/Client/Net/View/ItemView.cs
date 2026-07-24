@@ -111,19 +111,10 @@ namespace Client.Net.View
         /// <summary>Применить данные предмета из снапшота: float-позиция + спрайт по (ItemDefId, Open).</summary>
         public void Apply(in ItemInstance data, ItemCatalog catalog)
         {
-            if (NetEntityView.BlocksMode)
-            {
-                // Блок-режим: оси 1:1 (X/Y=высота/Z=план), без тайловой Z·FloorHeight; предмет лежит на верхе бокса ячейки.
-                float surfaceY = BlockSurface != null
-                    ? BlockSurface(Mathf.FloorToInt(data.X), Mathf.FloorToInt(data.Z), Mathf.FloorToInt(data.Y))
-                    : data.Z;
-                _targetPos = new Vector3(data.X, surfaceY, data.Y);
-            }
-            else
-            {
-                // Сервер (X, Y=глубина, Z=этаж) → Unity (X, высота=Z·FloorHeight, Z=глубина); X/Y — свободный float, не центр ячейки.
-                _targetPos = new Vector3(data.X, data.Z * RenderConfig.FloorHeight, data.Y);
-            }
+            float surfaceY = BlockSurface != null
+                ? BlockSurface(Mathf.FloorToInt(data.X), Mathf.FloorToInt(data.Z), Mathf.FloorToInt(data.Y))
+                : data.Z;
+            _targetPos = new Vector3(data.X, surfaceY, data.Y);
 
             if (!_hasTarget)
             {

@@ -31,7 +31,6 @@ namespace Client.Net.Prediction
         private readonly List<PendingInput> _pending = new List<PendingInput>();
 
         // Карта для коллизии — та же, что у сервера.
-        private GridMap _map;
         private int _z;
 
         // База скорости/тик из СНАПШОТА (серверное число): сидируется каждый реконсайл (как State/reason); между
@@ -71,7 +70,6 @@ namespace Client.Net.Prediction
         /// <summary>Предсказанно в воздухе (гейт «слать интент каждый тик, пока не заземлён» — вариант A).</summary>
         public bool Airborne => _blockGrid != null && !_mover.Grounded;
 
-        public void SetMap(GridMap map) => _map = map;
 
         /// <summary>Включить блок-режим: стримимый мир + формы (движение — та же логика, что у сервера).</summary>
         public void SetBlockWorld(IBlockSampler world, IBlockShapes shapes)
@@ -91,17 +89,7 @@ namespace Client.Net.Prediction
         {
             _state = FsmLogic.Step(_state, dir, layToggle, _reason, ref _timers);
             if (_blockGrid != null)
-            {
                 ApplyBlockStep(dir, sprint, jump);
-            }
-            else if (FsmLogic.MovementAllowed(_state))
-            {
-                float x = X, y = Y;
-                MovementLogic.Apply(_map, _z, ref x, ref y, dir, sprint, crawl: _state == PlayerState.Laying, baseStep: _baseStep);
-                X = x;
-                Y = y;
-                Facing = MovementLogic.ToFacing(dir, Facing);
-            }
 
             _pending.Add(new PendingInput(sequence, dir, sprint, layToggle, jump));
         }
@@ -159,39 +147,21 @@ namespace Client.Net.Prediction
             if (prune > 0)
                 _pending.RemoveRange(0, prune);
 
-            float x = serverX, y = serverY;
-            byte facing = serverFacing;
             _state = (PlayerState)serverState;    // авторитетный seed каждый реконсайл
             _reason = (LayingReason)serverReason; // причина лежания авторитетна (различает Voluntary vs KnockedDown)
             _baseStep = serverSpeed;              // эффективная скорость авторитетна из снапшота (не реконструируем)
             // _timers: таймеры намеренно не реплицируются (Stun/KnockedDown авторитетны — снапшот держит State).
 
-            if (_blockGrid != null)
-            {
-                X = serverX;
-                Y = serverY;
-                Facing = serverFacing;
-                foreach (var p in _pending)
-                {
-                    _state = FsmLogic.Step(_state, p.Direction, p.LayToggle, _reason, ref _timers);
-                    ApplyBlockStep(p.Direction, p.Sprint, p.Jump);
-                }
-                return;
-            }
+            X = serverX;
+            Y = serverY;
+            Facing = serverFacing;
+            if (_blockGrid == null) return;
 
             foreach (var p in _pending)
             {
                 _state = FsmLogic.Step(_state, p.Direction, p.LayToggle, _reason, ref _timers);
-                if (FsmLogic.MovementAllowed(_state))
-                {
-                    MovementLogic.Apply(_map, _z, ref x, ref y, p.Direction, p.Sprint, crawl: _state == PlayerState.Laying, baseStep: _baseStep);
-                    facing = MovementLogic.ToFacing(p.Direction, facing);
-                }
+                ApplyBlockStep(p.Direction, p.Sprint, p.Jump);
             }
-
-            X = x;
-            Y = y;
-            Facing = facing;
         }
     }
 }

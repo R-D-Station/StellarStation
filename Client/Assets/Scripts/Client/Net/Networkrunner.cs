@@ -11,7 +11,6 @@ using Client.Net.Prediction;
 using Client.Gameplay.Input;
 using Client.Gameplay.Entities;
 using Client.Gameplay.Camera;
-using Client.Gameplay.Interaction;
 using Client.UI.Inventory;
 using Client.UI.Container;
 using Client.UI.Labels;
@@ -38,18 +37,12 @@ namespace Client.Net
         [SerializeField] private int _tickRate = 30;
 
         [Header("Карта")]
-        [Tooltip("Рендерер, которому отдать карту, полученную от сервера.")]
-        [SerializeField] private View.MapRenderer _mapRenderer;
         [Tooltip("Опц.: камера, которая должна следовать за локальным игроком. Пусто — не трогаем.")]
         [SerializeField] private FollowCamera _camera;
-        [Tooltip("Опц.: туман войны (FOV). Пусто — без тумана.")]
-        [SerializeField] private View.FovRenderer _fov;
 
         [Tooltip("Опц.: камера для перевода клика в тайл. Пусто — Camera.main.")]
         [SerializeField] private UnityEngine.Camera _clickCamera;
 
-        [Tooltip("Опц.: контроллер hover-подсказок (IMGUI). Пусто — без подсказок.")]
-        [SerializeField] private HoverHintController _hoverHint;
 
         [Header("Инвентарь (4.5)")]
         [Tooltip("HUD 6 слотов инвентаря. Пусто — приём InventorySync работает, но не отображается.")]
@@ -106,8 +99,6 @@ namespace Client.Net
         private uint _lastServerTick;
         private bool _snapshotSeen;
 
-        // Реплика карты: один объект на предиктор и рендер, TileUpdate применяем один раз.
-        private GridMap _map;
 
         private float _tickAccumulator;
         private float TickInterval => 1f / _tickRate;
@@ -125,12 +116,8 @@ namespace Client.Net
             _net.OnBlockChunkData += OnBlockChunkData;
             _net.OnBlockSectionGone += OnBlockSectionGone;
             _net.OnBlockUpdateBatch += OnBlockUpdateBatch;
-            _net.OnMapData += OnMapData;
-            _net.OnTileUpdate += OnTileUpdate;
             _net.OnPlayerJoined += OnPlayerJoined;
             _net.OnPlayerLeft += OnPlayerLeft;
-            _net.OnChunkData += OnChunkData;
-            _net.OnChunkUnload += OnChunkUnload;
             _net.OnItemSnapshot += OnItemSnapshot;
             _net.OnInventorySync += OnInventorySync;
             _net.OnContainerSync += OnContainerSync;
@@ -139,61 +126,6 @@ namespace Client.Net
 
             _controls = new PlayerControl();
 
-            // Стрим-режим: сервер шлёт карту по чанкам, не целиком. Заводим ПУСТУЮ карту сразу и отдаём её
-            // предиктору/рендереру/FOV — коллизия/рендер/FOV работают до прихода чанков и наполняются ими (держим
-            // ОДИН общий экземпляр: OnChunkData мутирует его → все видят). Начальное окружение сервер шлёт на логине.
-            _map = new GridMap();
-            _predictor.SetMap(_map);
-            if (_mapRenderer != null) _mapRenderer.SetMap(_map);
-            if (_fov != null) _fov.SetMap(_map);
-        }
-
-        /// <summary>Принять карту с сервера: отдать предиктору (коллизия) и рендереру.</summary>
-        private void OnMapData(MapDataMessage msg)
-        {
-            _map = msg.Map;
-            _predictor.SetMap(msg.Map);
-            if (_mapRenderer != null) _mapRenderer.SetMap(msg.Map);
-            if (_fov != null) _fov.SetMap(msg.Map);
-            Debug.Log($"[NetworkRunner] Map received: {msg.Map.Chunks.Count} chunks");
-        }
-
-        /// <summary>Рантайм-изменение тайла (дверь): обновить GridMap и перерисовать.</summary>
-        private void OnTileUpdate(TileUpdate u)
-        {
-            _map?.SetTile(u.X, u.Y, u.Z, u.Tile);
-            if (_mapRenderer != null) _mapRenderer.RefreshTileAt(u.X, u.Y, u.Z);
-            if (_fov != null) _fov.MarkDirty(); // видимость изменилась
-        }
-
-        /// <summary>Приём чанка стрима: положить в общий GridMap (overwrite) + отрисовать + FOV грязный.
-        /// _map — общий экземпляр (предиктор/рендерер/FOV держат ссылку) → AddChunk виден всем без пере-SetMap.</summary>
-        private void OnChunkData(ChunkData msg)
-        {
-            _map.AddChunk(msg.Chunk); // overwrite: полный чанк заменит частичный (TileUpdate-дверь мог создать раньше)
-            if (_mapRenderer != null)
-            {
-                // Порядок: новый чанк уже в _map → ApplyChunk (его края резолвятся по загруженным соседям) →
-                // пере-резолв краёв соседей с новым чанком (стыки стен/пола «соединяются» СРАЗУ, без рефреша).
-                _mapRenderer.ApplyChunk(msg.Chunk);
-                _mapRenderer.ReapplyLoadedNeighbors(msg.Chunk.ChunkX, msg.Chunk.ChunkY, msg.Chunk.Z);
-                _mapRenderer.MarkRevealDirty(); // набор чанков сменился → reveal-кандидаты пересчитать (раз/кадр)
-            }
-            if (_fov != null) _fov.MarkDirty();
-        }
-
-        /// <summary>Выгрузка чанка стрима (давно вне радиуса): убрать из GridMap + снести его рендер + FOV грязный.</summary>
-        private void OnChunkUnload(ChunkUnload msg)
-        {
-            _map?.RemoveChunk(msg.ChunkX, msg.ChunkY, msg.Z);
-            if (_mapRenderer != null)
-            {
-                _mapRenderer.RemoveChunk(msg.ChunkX, msg.ChunkY, msg.Z);
-                // Край соседа, смотревший на удалённый чанк, теперь резолвится «нет соседа» → пере-резолв.
-                _mapRenderer.ReapplyLoadedNeighbors(msg.ChunkX, msg.ChunkY, msg.Z);
-                _mapRenderer.MarkRevealDirty(); // набор чанков сменился → reveal-кандидаты пересчитать (раз/кадр)
-            }
-            if (_fov != null) _fov.MarkDirty();
         }
 
         private void OnEnable()
@@ -212,16 +144,12 @@ namespace Client.Net
         {
             _net.Poll();
 
-            // После дренажа пачки чанков за кадр: пересчитать reveal-кандидаты, если стрим сменил набор (раз/кадр —
-            // естественный троттл). НЕ гейтим на IsInitialized: нужен только _map/_activeZ, карта может стримиться раньше.
-            if (_mapRenderer != null) _mapRenderer.RefreshRevealIfDirty();
-
             // Латчим one-shot LayToggle здесь (1×/кадр); тик-луп потребит его ровно один раз.
             if (_controls.Player.ToggleLaying.WasPressedThisFrame())
                 _layTogglePending = true;
 
             // Прыжок — тоже one-shot по НАЖАТИЮ (не по зажатию): латч на кадре, потребление одним тиком.
-            if (BlocksWorld && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
+            if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
                 _jumpPending = true;
 
             // Тик-луп фиксированной частоты: предсказание не зависит от FPS. Стартует только ПОСЛЕ логина —
@@ -245,7 +173,7 @@ namespace Client.Net
             // от отрыва и пока не приземлились/не опустились ниже старта — срез заморожен (слои не дёргаются).
             // Сущности — «купол видимости»: r = базовый радиус − потеря за каждый блок разницы высот
             // (непрерывно, без floor — иначе мигание при прыжках; вниз симметрично). Себя не трогаем.
-            if (BlocksWorld && _blockRenderer != null && _predictor.IsInitialized)
+            if (_blockRenderer != null && _predictor.IsInitialized)
             {
                 bool airborne = _predictor.Airborne;
                 if (airborne && !_wasAirborne)
@@ -264,13 +192,6 @@ namespace Client.Net
                     kv.Value.SetCulled(r <= 0f || dx * dx + dz * dz > r * r);
                 }
             }
-
-            if (_fov != null && _predictor.IsInitialized)
-                _fov.UpdateFov(_predictor.X, _predictor.Y, _predictor.Z);
-
-            // Динамический потолочный просвет (R1): радиус кольца у проёма растёт по близости игрока.
-            if (_mapRenderer != null && _predictor.IsInitialized)
-                _mapRenderer.UpdateCeilingReveal(_predictor.X, _predictor.Y);
 
             if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
                 HandleUseOrContainer();
@@ -317,7 +238,6 @@ namespace Client.Net
                 }
             }
 
-            _hoverHint?.Tick(this);
         }
 
         /// <summary>Один серверный тик: ввод -> intent -> предсказание + отправка.</summary>
@@ -456,48 +376,23 @@ namespace Client.Net
             _handsFullExpire = Time.unscaledTime + HandsFullHintSeconds;
         }
 
-        /// <summary>Экран→ЦЕЛЫЙ тайл по камере на плоскости ЭТАЖА игрока (строго PlayerPredictor.Z). ЕДИНЫЙ impl клика и
-        /// hover — чтобы они не расходились. tileZ = этаж игрока всегда; false — луч мимо плоскости (нет цели).</summary>
-        public bool TryResolveHoverTile(Vector2 screenPos, out int tileX, out int tileY, out int tileZ)
+        public bool TryResolveHoverTile(Vector2 screenPos, out int cellX, out int cellY, out int cellY2)
         {
-            tileX = 0; tileY = 0;
+            cellX = 0; cellY = 0;
+            cellY2 = Mathf.FloorToInt(_predictor.Y);
             var cam = ClickCamera;
-
-            if (BlocksWorld)
-            {
-                // Блок-мир: _predictor.Y — уже непрерывная высота в юнитах Unity (НЕ этаж×FloorHeight, как в тайл-ветке ниже).
-                tileZ = Mathf.FloorToInt(_predictor.Y);
-                if (cam == null) return false;
-                Ray rayBlocks = cam.ScreenPointToRay(screenPos);
-                var feetPlane = new Plane(Vector3.up, new Vector3(0f, _predictor.Y, 0f));
-                if (!feetPlane.Raycast(rayBlocks, out float enterBlocks)) return false;
-                Vector3 hitBlocks = rayBlocks.GetPoint(enterBlocks);
-                tileX = Mathf.FloorToInt(hitBlocks.x);
-                tileY = Mathf.FloorToInt(hitBlocks.z);
-                return true;
-            }
-
-            tileZ = _predictor.Z;
             if (cam == null) return false;
 
-            // Плоскость этажа игрока (Unity-Y = z*FloorHeight): тайл на СВОЁМ Z (2.5D — курсор может визуально попасть на др. этаж).
             Ray ray = cam.ScreenPointToRay(screenPos);
-            var floorPlane = new Plane(Vector3.up, new Vector3(0f, tileZ * RenderConfig.FloorHeight, 0f));
-            if (!floorPlane.Raycast(ray, out float enter)) return false;
-
+            var feetPlane = new Plane(Vector3.up, new Vector3(0f, _predictor.Y, 0f));
+            if (!feetPlane.Raycast(ray, out float enter)) return false;
             Vector3 hit = ray.GetPoint(enter);
-            tileX = Mathf.FloorToInt(hit.x); // Unity-X = серверный X
-            tileY = Mathf.FloorToInt(hit.z); // Unity-Z (глубина) = серверный Y
+            cellX = Mathf.FloorToInt(hit.x);
+            cellY = Mathf.FloorToInt(hit.z);
             return true;
         }
 
-        // Read-only поверхность для hover-hint: тайл игрока (floor(_predictor.X/Y), Z предиктора — reach-паритет в ОДНОМ месте),
-        // инициализация и доступ к тайлу карты (инкапсуляция _map).
-        public int PlayerTileX => Mathf.FloorToInt(_predictor.X);
-        public int PlayerTileY => Mathf.FloorToInt(_predictor.Y);
-        public int PlayerTileZ => _predictor.Z;
         public bool IsInitialized => _predictor.IsInitialized;
-        public Tile GetTileAt(int x, int y, int z) => _map.GetTile(x, y, z);
 
         /// <summary>Дистанция до наземного контейнера в пределах реча (для UI-гейта окна контейнера).</summary>
         public bool IsGroundContainerReachable(int netId)
@@ -506,14 +401,9 @@ namespace Client.Net
             if (!_itemViews.TryGetValue(netId, out var view) || view == null) return true;
 
             Vector3 p = view.transform.position;
-            if (BlocksWorld)
-                return Shared.Simulation.InteractionRules.InReachBlocks(
-                    Mathf.FloorToInt(_predictor.X), Mathf.FloorToInt(_predictor.ZF), Mathf.FloorToInt(_predictor.Y),
-                    Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.z), Mathf.FloorToInt(p.y));
-
-            return Shared.Simulation.InteractionRules.InReach(
-                Mathf.FloorToInt(_predictor.X), Mathf.FloorToInt(_predictor.Y), _predictor.Z,
-                Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.z), Mathf.RoundToInt(p.y / RenderConfig.FloorHeight));
+            return Shared.Simulation.InteractionRules.InReachBlocks(
+                Mathf.FloorToInt(_predictor.X), Mathf.FloorToInt(_predictor.ZF), Mathf.FloorToInt(_predictor.Y),
+                Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.z), Mathf.FloorToInt(p.y));
         }
 
         /// <summary>Чужая сущность на тайле (tx,ty) этажа z по её вьюхе; первую подходящую — в pickedId (себя пропускаем).</summary>
@@ -525,10 +415,7 @@ namespace Client.Net
                 var view = kv.Value;
                 if (view == null) continue;
                 Vector3 p = view.transform.position;
-                // Блок-мир: floor(y) ± 1 этаж — паритет с серверным 3D-reach (RoundToInt/FloorHeight — тайловая формула, в блок-осях никогда не совпадала).
-                bool match = BlocksWorld
-                    ? Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.Abs(Mathf.FloorToInt(p.y) - z) <= 1
-                    : Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == z;
+                bool match = Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.Abs(Mathf.FloorToInt(p.y) - z) <= 1;
                 if (match)
                 {
                     pickedId = kv.Key;
@@ -547,7 +434,7 @@ namespace Client.Net
             var cam = ClickCamera;
             if (cam == null) return false;
             Ray ray = cam.ScreenPointToRay(screenPos);
-            int pz = BlocksWorld ? Mathf.FloorToInt(_predictor.Y) : _predictor.Z;
+            int pz = Mathf.FloorToInt(_predictor.Y);
             int bestOrder = int.MinValue;
             float bestDist = float.MaxValue;
             foreach (var kv in _itemViews)
@@ -555,9 +442,7 @@ namespace Client.Net
                 var view = kv.Value;
                 if (view == null) continue;
                 Vector3 p = view.transform.position;
-                bool zOk = BlocksWorld
-                    ? Mathf.Abs(Mathf.FloorToInt(p.y) - pz) <= 1
-                    : Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == pz;
+                bool zOk = Mathf.Abs(Mathf.FloorToInt(p.y) - pz) <= 1;
                 if (!zOk) continue;
                 if (!view.HitTestPixel(ray, out float dist)) continue;
                 int order = view.SortingOrder;
@@ -599,10 +484,8 @@ namespace Client.Net
 
             // Блок-мир (фаза C): мир пустой, секции стримятся следом (ReliableOrdered — порядок гарантирован);
             // нестримленный объём для предикта — solid-стопор (StreamedBlockWorld, в.20).
-            BlocksWorld = login.BlocksWorld;
-            if (login.BlocksWorld && _blockGrid == null)
+            if (_blockGrid == null)
             {
-                NetEntityView.BlocksMode = true;
                 _blockGrid = new Shared.World.Blocks.BlockGrid();
                 _streamWorld = new Client.Map.StreamedBlockWorld(_blockGrid);
                 var baseShapes = login.ShapesMode == 1
@@ -628,11 +511,9 @@ namespace Client.Net
                 };
             }
 
-            Debug.Log($"[NetworkRunner] My NetId = {LocalNetId}, tickRate = {_tickRate}, blocks = {BlocksWorld}");
+            Debug.Log($"[NetworkRunner] My NetId = {LocalNetId}, tickRate = {_tickRate}");
         }
 
-        /// <summary>Блок-режим клиента (из LoginResponse): вьюхи/пикинг читают масштаб вертикали через это.</summary>
-        public static bool BlocksWorld { get; private set; }
 
         private Shared.World.Blocks.BlockGrid _blockGrid;
         private Client.Map.StreamedBlockWorld _streamWorld;
@@ -759,7 +640,6 @@ namespace Client.Net
                     // Свой игрок: reconciliation, без интерполяционного буфера. State сидируется в предиктор
                     // (seed для running-state нити), а вьюха берёт ПРЕДСКАЗАННЫЙ _predictor.State.
                     _predictor.Reconcile(e.X, e.Y, e.Z, e.VY, e.Facing, e.State, e.Reason, e.Speed, snap.LastProcessedInput);
-                    if (_mapRenderer != null && !BlocksWorld) _mapRenderer.SetActiveZ(_predictor.Z);
 
                     if (_localView == null)
                     {

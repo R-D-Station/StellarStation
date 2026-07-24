@@ -47,7 +47,7 @@ namespace Shared.Simulation
         }
 
         /// <summary>
-        /// Разрешено ли движение в этом состоянии (гейт для MovementLogic.Apply). Laying двигается
+        /// Разрешено ли движение в этом состоянии (гейт для шага движения). Laying двигается
         /// (ползёт) — множитель скорости применяется на месте вызова (Этап 5).
         /// </summary>
         public static bool MovementAllowed(PlayerState state)

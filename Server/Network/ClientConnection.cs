@@ -116,12 +116,6 @@ namespace Server.Network
 
         public int ContainedInNetId; // NetId SS14-ящика, в котором заперт игрок (0 = свободен); гейт ввода/спрайта, эхо в ContainSync
 
-        // Стриминг карты (2.3a). SentChunks — ключи уже отправленных клиенту чанков (упаковка = GridMap-ключ).
-        // ChunkLastInRangeTick — последний серверный тик, когда чанк был в радиусе (таймер выгрузки: долго вне
-        // радиуса → ChunkUnload + прун из обоих наборов). Одно-поточно (мутируются только на GameLoop-потоке).
-        public readonly HashSet<long> SentChunks = new();
-        public readonly Dictionary<long, int> ChunkLastInRangeTick = new();
-
         // Блочный стрим (фаза C): отправленные клиенту секции (адресация дельт — в.44B) + таймер выгрузки.
         public readonly HashSet<long> SentBlockSections = new();
         public readonly Dictionary<long, int> BlockSectionLastInRange = new();

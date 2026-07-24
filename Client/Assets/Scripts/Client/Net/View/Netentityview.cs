@@ -131,13 +131,12 @@ namespace Client.Net.View
         }
 
         /// <summary>Блок-мир (B2): снапшот уже в осях Unity (Y — высота) — позиция берётся 1:1. Ставит NetworkRunner.</summary>
-        public static bool BlocksMode;
 
         /// <summary>Задать предсказанную позицию локального игрока; State/Reason — авторитетные из снапшота.</summary>
         public void SetPredicted(float x, float y, float z, byte facing, byte state, byte reason)
         {
             _isLocal = true;
-            _targetPos = BlocksMode ? new Vector3(x, y, z) : new Vector3(x, z * RenderConfig.FloorHeight, y);
+            _targetPos = new Vector3(x, y, z);
 
             // Первый кадр — жёстко, без интерполяции из (0,0,0).
             if (!_hasTarget)
@@ -165,7 +164,7 @@ namespace Client.Net.View
                 return;
 
             // Тайлы: (X, Y=глубина, Z=этаж) → Unity (X, высота, Z=глубина); блок-мир: оси уже Unity — 1:1.
-            transform.position = BlocksMode ? new Vector3(x, y, z) : new Vector3(x, z * RenderConfig.FloorHeight, y);
+            transform.position = new Vector3(x, y, z);
 
             ApplySprite(state, facing, reason);
         }

@@ -42,17 +42,8 @@ namespace ServerTests.Server.Network
             Thread.Sleep(50);
         }
 
-        private GameServer StartServer(GridMap? map = null)
+        private GameServer StartServer()
         {
-            _server = new GameServer(_config, map);
-            _server.Start();
-            Thread.Sleep(50);
-            return _server;
-        }
-
-        private GameServer StartBlockServer()
-        {
-            _config.BlocksWorld = true;
             _config.MapPath = "";
             _server = new GameServer(_config);
             _server.Start();
@@ -177,13 +168,11 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Drop_ReversesPickup_SameNetId_AtFloorOfFractionalPosition()
         {
-            var map = new GridMap();
-            map.SetTile(4, 4, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
             var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 4.9f, Y = 4.5f, Z = 0, ActiveHand = 0 };
+            var client = new ClientConnection(peer, 1) { X = 4.9f, Y = 4.5f, Z = 1, ActiveHand = 0 };
 
-            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 2, 4, 4, 0));
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 2, 4, 4, 1));
             OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
             Assert.Equal(netId, Hand(client, 0).NetId);
             Assert.False(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
@@ -191,24 +180,8 @@ namespace ServerTests.Server.Network
             OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 }));
 
             Assert.Equal(0, Hand(client, 0).NetId);
-            var seen = server.GroundItemsInInterest(4.9f, 4.5f, 0);
+            var seen = server.GroundItemsInInterest(4.9f, 4.5f, 1);
             Assert.Contains(seen, it => it.NetId == netId && it.X == 4.9f && it.Y == 4.5f);
-
-            CleanupPeer(peer);
-        }
-
-        [Fact]
-        public void Drop_OnNonWalkableTile_Rejected()
-        {
-            var server = StartServer(new GridMap());
-            var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 10.5f, Y = 10.5f, Z = 0, ActiveHand = 0 };
-            Hand(client, 0) = new HeldItem { NetId = 42, ItemDefId = 1, StackCount = 1 };
-
-            OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 }));
-
-            Assert.Equal(42, Hand(client, 0).NetId);
-            Assert.False(OnGameLoop(server, () => server.DespawnGroundItem(42)));
 
             CleanupPeer(peer);
         }
@@ -216,16 +189,15 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Disconnect_DropsAllHeldItems_AtLastTile_WithPreservedNetIds()
         {
-            var map = new GridMap();
-            map.SetTile(3, 3, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
 
             ClientConnection? spawned = null;
             server.OnClientConnected += c =>
             {
-                c.X = 3.5f;
-                c.Y = 3.5f;
-                c.Z = 0;
+                c.Mover = new global::Shared.Simulation.Blocks.BlockMoverState(3.5f, 1f, 3.5f);
+                c.X = c.Mover.X;
+                c.Y = c.Mover.Z;
+                c.Z = (int)MathF.Floor(c.Mover.Y);
                 c.Slots[(int)SlotCategory.Hand][0] = new HeldItem { NetId = 501, ItemDefId = 7, StackCount = 1 };
                 c.Slots[(int)SlotCategory.Belt][0] = new HeldItem { NetId = 502, ItemDefId = 8, StackCount = 5 };
                 spawned = c;
@@ -245,7 +217,7 @@ namespace ServerTests.Server.Network
             for (int i = 0; i < 200 && !disconnected; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
             Assert.True(disconnected);
 
-            var ground = server.GroundItemsInInterest(3.5f, 3.5f, 0);
+            var ground = server.GroundItemsInInterest(3.5f, 3.5f, 1);
             Assert.Contains(ground, it => it.NetId == 501);
             Assert.Contains(ground, it => it.NetId == 502);
             Assert.Equal(2, server.EntityCount);
@@ -440,7 +412,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Drop_InBlockWorld_SkipsTileWalkableGate()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
             Hand(client, 0) = new HeldItem { NetId = 77, ItemDefId = 3, StackCount = 1 };
@@ -456,7 +428,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Pickup_InBlockWorld_ReachesItemOneCellUp()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
 
@@ -472,7 +444,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Pickup_InBlockWorld_TwoCellsUp_NotReached()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
 
@@ -488,7 +460,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Drop_InBlockWorld_MidAir_SnapsToFloorCell()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 5 };
             Hand(client, 0) = new HeldItem { NetId = 88, ItemDefId = 3, StackCount = 1 };
@@ -502,7 +474,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Drop_InBlockWorld_StandingOnFloor_RestsInFeetCell()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1 };
             Hand(client, 0) = new HeldItem { NetId = 89, ItemDefId = 3, StackCount = 1 };
@@ -515,7 +487,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Drop_InBlockWorld_AboveHalfStep_RestsInStepCell()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 6.5f, Y = 0.5f, Z = 5 };
             Hand(client, 0) = new HeldItem { NetId = 90, ItemDefId = 3, StackCount = 1 };
@@ -528,7 +500,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Drop_InBlockWorld_Vacuum_StaysAtDropCell()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 40.5f, Y = 40.5f, Z = 5 };
             Hand(client, 0) = new HeldItem { NetId = 91, ItemDefId = 3, StackCount = 1 };
@@ -541,7 +513,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void DropAllHeld_InBlockWorld_MidAir_AllSnapToFloor_NetIdsPreserved()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 5 };
             Hand(client, 0) = new HeldItem { NetId = 501, ItemDefId = 7, StackCount = 1 };
@@ -614,12 +586,10 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Drop_SpanTwo_ClearsBothSlots_SpawnsSingleGroundItem()
         {
-            var map = new GridMap();
-            map.SetTile(5, 5, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
             server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 2, 1, false, 0);
             var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1, ActiveHand = 0 };
             Hand(client, 0) = new HeldItem { NetId = 300, ItemDefId = 3, StackCount = 1 };
             Hand(client, 1) = new HeldItem { NetId = 300, ItemDefId = 3, StackCount = 1 };
 
@@ -628,7 +598,7 @@ namespace ServerTests.Server.Network
             Assert.Equal(0, Hand(client, 0).NetId);
             Assert.Equal(0, Hand(client, 1).NetId);
             int count = 0;
-            foreach (var it in server.GroundItemsInInterest(5.5f, 5.5f, 0)) if (it.NetId == 300) count++;
+            foreach (var it in server.GroundItemsInInterest(5.5f, 5.5f, 1)) if (it.NetId == 300) count++;
             Assert.Equal(1, count);
 
             CleanupPeer(peer);
@@ -740,14 +710,14 @@ namespace ServerTests.Server.Network
         {
             var server = StartServer();
             var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1 };
             Hand(client, 0) = new HeldItem { NetId = 700, ItemDefId = 3, StackCount = 1 };
             Hand(client, 1) = new HeldItem { NetId = 700, ItemDefId = 3, StackCount = 1 };
 
             OnGameLoop(server, () => Invoke(server, "DropAllHeldOnDisconnect", client));
 
             int count = 0;
-            foreach (var it in server.GroundItemsInInterest(5.5f, 5.5f, 0)) if (it.NetId == 700) count++;
+            foreach (var it in server.GroundItemsInInterest(5.5f, 5.5f, 1)) if (it.NetId == 700) count++;
             Assert.Equal(1, count);
 
             CleanupPeer(peer);
@@ -756,7 +726,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Drop_CollisionItem_LandsInFacingNeighborCell_NotUnderfoot()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 1, 1, false, 0, true, BlockBox.Full);
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1, ActiveHand = 0 };
@@ -773,7 +743,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Drop_CollisionItem_AllNeighborsBlocked_Refused()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 1, 1, false, 0, true, BlockBox.Full);
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1, ActiveHand = 0 };
@@ -797,7 +767,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Disconnect_CollisionItem_AllNeighborsBlocked_ForcedUnderfoot()
         {
-            var server = StartBlockServer();
+            var server = StartServer();
             server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 1, 1, false, 0, true, BlockBox.Full);
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1 };

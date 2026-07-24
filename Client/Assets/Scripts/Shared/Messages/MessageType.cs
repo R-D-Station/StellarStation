@@ -9,10 +9,8 @@ public enum MessageType : ushort
     MoveIntent = 1,
     WorldSnapshot = 2,
     EntitySnapshot = 3,
-    MapData = 4,
-    TileUpdate = 5,
-    MapChunk = 7,        // стриминг: один чанк карты (server→client)
-    MapChunkUnload = 8,  // стриминг: выгрузить чанк (server→client)
+    // 4/5/7/8 — RESERVED (тайл-легаси: MapData/TileUpdate/MapChunk/MapChunkUnload). НЕ переиспользовать:
+    // старый клиент истолкует новый id как старое сообщение.
     ItemSnapshot = 9,    // отдельный PVS-поток наземных предметов (server→client)
     BlockMapData = 10,   // ВЫВЕДЕН (был блоб-мост B2 до стрима); id зарезервирован, не переиспользовать
     BlockChunkData = 11,   // фаза C: одна секция 16³ (server→client, ReliableOrdered)

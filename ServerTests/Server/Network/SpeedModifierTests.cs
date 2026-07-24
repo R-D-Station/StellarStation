@@ -1,7 +1,6 @@
 using Server.Network;
 using Shared.Messages.Core;
 using Shared.Simulation;
-using Shared.World;
 
 namespace ServerTests.Server.Network
 {
@@ -12,11 +11,16 @@ namespace ServerTests.Server.Network
     /// </summary>
     public class SpeedModifierTests
     {
-        private static GridMap Corridor()
+        private static void FreeStep(ref float x, ref float y, IntentDirection dir, bool sprint = false, bool crawl = false,
+            float baseStep = MovementLogic.StepPerTick)
         {
-            var map = new GridMap();
-            for (int yy = 0; yy <= 20; yy++) map.SetTile(0, yy, 0, Tile.Floor());
-            return map;
+            MovementLogic.GetAxes(dir, out int dx, out int dy);
+            if (dx == 0 && dy == 0) return;
+            float step = baseStep * (sprint ? MovementLogic.SprintMultiplier : 1f);
+            if (dx != 0 && dy != 0) step *= MovementLogic.InvSqrt2;
+            if (crawl) step *= MovementLogic.CrawlMultiplier;
+            x += dx * step;
+            y += dy * step;
         }
 
         [Fact]
@@ -42,12 +46,11 @@ namespace ServerTests.Server.Network
         [Fact]
         public void AddSpeedScale_ScalesEffectiveStep_RemoveReverts()
         {
-            var map = Corridor();
             var c = new ClientConnection(null!, 1);
 
             // baseline без модификатора.
             float xb = 0.5f, yb = 0.5f;
-            MovementLogic.Apply(map, 0, ref xb, ref yb, IntentDirection.North, sprint: false, baseStep: c.Speed.CurrentValue);
+            FreeStep(ref xb, ref yb, IntentDirection.North, sprint: false, baseStep: c.Speed.CurrentValue);
             float baseDelta = yb - 0.5f;
 
             // ×1.5 скейл → CurrentValue ×1.5 → шаг ×1.5.
@@ -55,7 +58,7 @@ namespace ServerTests.Server.Network
             Assert.Equal(MovementLogic.StepPerTick * 1.5f, c.Speed.CurrentValue, 6);
 
             float xs = 0.5f, ys = 0.5f;
-            MovementLogic.Apply(map, 0, ref xs, ref ys, IntentDirection.North, sprint: false, baseStep: c.Speed.CurrentValue);
+            FreeStep(ref xs, ref ys, IntentDirection.North, sprint: false, baseStep: c.Speed.CurrentValue);
             float scaledDelta = ys - 0.5f;
             Assert.True(System.MathF.Abs(scaledDelta - 1.5f * baseDelta) < 1e-5f, $"base={baseDelta}, scaled={scaledDelta}");
 

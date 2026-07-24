@@ -15,12 +15,12 @@ namespace Server.Services
                 try
                 {
                     var grid = BlockMapSerializer.LoadFromFile(resolved);
-                    Console.WriteLine($"[Map] BlocksWorld: loaded v10 '{resolved}' ({grid.Sections.Count} sections)");
+                    Console.WriteLine($"[Map] Blocks: loaded v10 '{resolved}' ({grid.Sections.Count} sections)");
                     return (grid, true);
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine($"[Map] BlocksWorld: '{resolved}' не блочная карта ({e.Message}) — дев-полигон");
+                    Console.WriteLine($"[Map] Blocks: '{resolved}' не блочная карта ({e.Message}) — дев-полигон");
                 }
             }
 

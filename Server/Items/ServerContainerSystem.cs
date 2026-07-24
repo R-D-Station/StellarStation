@@ -254,8 +254,7 @@ namespace Server.Items
                     int nx = bx + ReleaseCells[i].dx;
                     int nz = bz + ReleaseCells[i].dz;
                     if (PlacedThisCall(nx, nz)) continue;
-                    bool standable = _server.BlockWorld == null
-                        || BlockMovementLogic.CanStand(_server.BlockWorld, _server.BlockShapes, nx + 0.5f, box.Z, nz + 0.5f);
+                    bool standable = BlockMovementLogic.CanStand(_server.BlockWorld!, _server.BlockShapes, nx + 0.5f, box.Z, nz + 0.5f);
                     if (standable && !CellOccupied(nx, nz, box.Z, c))
                     {
                         tx = nx;

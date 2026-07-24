@@ -38,7 +38,6 @@ namespace ServerTests.Server.Network
                 MaxPlayers = 10,
                 TickRate = 30,
                 ConnectionKey = $"FollowTest_{_testPort}",
-                BlocksWorld = true,
                 MapPath = ""
             };
         }

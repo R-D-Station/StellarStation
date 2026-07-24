@@ -14,7 +14,6 @@ namespace Server
         private static GameServer? _server;
         private static PlayerManager? _playerManager;
         private static bool _isRunning = true;
-        private static GridMap? _map;
 
         static async Task Main(string[] args)
         {
@@ -30,8 +29,7 @@ namespace Server
                 SVars.LoadFromJson("config.json");
                 var config = SVars.Instance;
 
-                _map = LoadMap(config.MapPath);
-                _server = new GameServer(config, _map);
+                _server = new GameServer(config);
                 _playerManager = new PlayerManager(_server);
 
                 _server.Start();
@@ -111,7 +109,7 @@ namespace Server
                 if (_server == null)
                 {
                     var config = SVars.Instance;
-                    _server = new GameServer(config, _map);
+                    _server = new GameServer(config);
                     _playerManager = new PlayerManager(_server);
                     _server.Start();
                     Console.WriteLine("[RECOVERY] Server restarted successfully");
@@ -123,31 +121,5 @@ namespace Server
             }
         }
 
-        /// <summary>Загружает карту из .smap; при отсутствии/ошибке — null (сервер без коллизии).</summary>
-        private static GridMap? LoadMap(string path)
-        {
-            // Относительный путь резолвим от папки exe, чтобы работало и при dotnet run, и у сборки.
-            string resolved = Path.IsPathRooted(path)
-                ? path
-                : Path.Combine(AppContext.BaseDirectory, path);
-
-            try
-            {
-                if (!File.Exists(resolved))
-                {
-                    Console.WriteLine($"[Map] No map at '{resolved}' - running without collision.");
-                    return null;
-                }
-
-                var map = MapSerializer.LoadFromFile(resolved);
-                Console.WriteLine($"[Map] Loaded '{resolved}': {map.Chunks.Count} chunks.");
-                return map;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[Map] Failed to load '{resolved}': {ex.Message} - running without collision.");
-                return null;
-            }
-        }
     }
 }

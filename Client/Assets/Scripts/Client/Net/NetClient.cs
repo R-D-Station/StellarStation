@@ -14,12 +14,8 @@ namespace Client.Net
 
         public event Action<WorldSnapshot> OnWorldSnapshot;
         public event Action<LoginResponse> OnLoginResponse;
-        public event Action<MapDataMessage> OnMapData;
-        public event Action<TileUpdate> OnTileUpdate;
         public event Action<PlayerJoined> OnPlayerJoined;
         public event Action<PlayerLeft> OnPlayerLeft;
-        public event Action<ChunkData> OnChunkData;
-        public event Action<ChunkUnload> OnChunkUnload;
         public event Action<ItemSnapshot> OnItemSnapshot;
         public event Action<InventorySync> OnInventorySync;
         public event Action<ContainerSync> OnContainerSync;
@@ -40,12 +36,8 @@ namespace Client.Net
             _transport.OnDisconnected += () => OnDisconnected?.Invoke();
             _transport.OnWorldSnapshot += snap => OnWorldSnapshot?.Invoke(snap);
             _transport.OnLoginResponse += login => OnLoginResponse?.Invoke(login);
-            _transport.OnMapData += map => OnMapData?.Invoke(map);
-            _transport.OnTileUpdate += tu => OnTileUpdate?.Invoke(tu);
             _transport.OnPlayerJoined += m => OnPlayerJoined?.Invoke(m);
             _transport.OnPlayerLeft += m => OnPlayerLeft?.Invoke(m);
-            _transport.OnChunkData += m => OnChunkData?.Invoke(m);
-            _transport.OnChunkUnload += m => OnChunkUnload?.Invoke(m);
             _transport.OnItemSnapshot += s => OnItemSnapshot?.Invoke(s);
             _transport.OnInventorySync += s => OnInventorySync?.Invoke(s);
             _transport.OnContainerSync += s => OnContainerSync?.Invoke(s);

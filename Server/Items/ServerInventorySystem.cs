@@ -14,22 +14,18 @@ namespace Server.Items
         private readonly GroundItemWorld _ground;
         private readonly Dictionary<NetPeer, ClientConnection> _clients;
         private readonly Dictionary<int, IWorldEntity> _entities;
-        private readonly SVars _config;
-        private readonly GridMap _map;
 
         /// <summary>Резолв ItemDefId→ItemProto; дефолт — ItemCatalogData, тесты подменяют лямбдой.</summary>
         public Func<ushort, ItemProto?> ProtoLookup = defId =>
             ItemCatalogData.TryGet(defId, out var p) ? p : (ItemProto?)null;
 
         public ServerInventorySystem(GameServer server, GroundItemWorld ground, Dictionary<NetPeer, ClientConnection> clients,
-            Dictionary<int, IWorldEntity> entities, SVars config, GridMap map)
+            Dictionary<int, IWorldEntity> entities)
         {
             _server = server;
             _ground = ground;
             _clients = clients;
             _entities = entities;
-            _config = config;
-            _map = map;
         }
 
         public void ProcessPickups()
@@ -147,23 +143,19 @@ namespace Server.Items
             int cx = (int)MathF.Floor(client.X);
             int cy = (int)MathF.Floor(client.Y);
             int z = client.Z;
-            if (!_config.BlocksWorld && !_map.GetTile(cx, cy, z).Walkable) return;
 
             float px = client.X, py = client.Y, pz = z;
-            if (_config.BlocksWorld)
+            var proto = ProtoLookup(h.ItemDefId);
+            if (proto.HasValue && proto.Value.HasCollision)
             {
-                var p = ProtoLookup(h.ItemDefId);
-                if (p.HasValue && p.Value.HasCollision)
-                {
-                    if (!TryFindCollisionDropCell(client, p.Value.CollisionBox, out int ncx, out int ncy, out int nz)) return;
-                    px = ncx + 0.5f;
-                    py = ncy + 0.5f;
-                    pz = nz;
-                }
-                else
-                {
-                    pz = Shared.World.Blocks.ItemGroundSnap.SnapDown(_server.BlockWorld!, _server.BlockShapes, cx, z, cy);
-                }
+                if (!TryFindCollisionDropCell(client, proto.Value.CollisionBox, out int ncx, out int ncy, out int nz)) return;
+                px = ncx + 0.5f;
+                py = ncy + 0.5f;
+                pz = nz;
+            }
+            else
+            {
+                pz = Shared.World.Blocks.ItemGroundSnap.SnapDown(_server.BlockWorld!, _server.BlockShapes, cx, z, cy);
             }
 
             ClearItemByNetId(client, msg.Category, h.NetId);
@@ -358,7 +350,7 @@ namespace Server.Items
             int cx = (int)MathF.Floor(client.X);
             int cy = (int)MathF.Floor(client.Y);
             int z = client.Z;
-            if (_config.BlocksWorld) z = Shared.World.Blocks.ItemGroundSnap.SnapDown(_server.BlockWorld!, _server.BlockShapes, cx, z, cy);
+            z = Shared.World.Blocks.ItemGroundSnap.SnapDown(_server.BlockWorld!, _server.BlockShapes, cx, z, cy);
 
             var seen = new HashSet<int>(); // span>1 items occupy N slots but share one NetId — drop once, not per-slot
             for (int c = 0; c < client.Slots.Length; c++)
@@ -371,19 +363,16 @@ namespace Server.Items
                     if (seen.Add(h.NetId))
                     {
                         float dx = client.X, dy = client.Y, dz = z;
-                        if (_config.BlocksWorld)
+                        var p = ProtoLookup(h.ItemDefId);
+                        if (p.HasValue && p.Value.HasCollision)
                         {
-                            var p = ProtoLookup(h.ItemDefId);
-                            if (p.HasValue && p.Value.HasCollision)
+                            if (TryFindCollisionDropCell(client, p.Value.CollisionBox, out int nx, out int ny, out int nz))
                             {
-                                if (TryFindCollisionDropCell(client, p.Value.CollisionBox, out int nx, out int ny, out int nz))
-                                {
-                                    dx = nx + 0.5f; dy = ny + 0.5f; dz = nz;
-                                }
-                                else
-                                {
-                                    Console.WriteLine($"[Items] disconnect drop: no free neighbor for collision item {h.NetId} — forced underfoot at ({cx},{cy},{z})");
-                                }
+                                dx = nx + 0.5f; dy = ny + 0.5f; dz = nz;
+                            }
+                            else
+                            {
+                                Console.WriteLine($"[Items] disconnect drop: no free neighbor for collision item {h.NetId} — forced underfoot at ({cx},{cy},{z})");
                             }
                         }
                         _ground.SpawnGroundItemWithId(h.NetId, h.ItemDefId, h.StackCount, dx, dy, dz);

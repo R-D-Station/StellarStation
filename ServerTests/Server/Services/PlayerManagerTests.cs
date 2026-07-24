@@ -37,7 +37,8 @@ namespace ServerTests.Server.Services
                 Port = _testPort,
                 MaxPlayers = 10,
                 TickRate = 30,
-                ConnectionKey = $"TestKey_{_testPort}"
+                ConnectionKey = $"TestKey_{_testPort}",
+                MapPath = ""
             };
 
             _server = new GameServer(_config);
@@ -96,131 +97,6 @@ namespace ServerTests.Server.Services
         }
 
         [Fact]
-        public void OnMoveIntentReceived_ValidIntent_North_MovesCorrectly()
-        {
-            var clientManager = CreateAndConnectClient();
-            Thread.Sleep(100);
-
-            var intent = new MoveIntent
-            {
-                Direction = IntentDirection.North,
-                Sprint = false,
-                Sequence = 1
-            };
-
-            SendMoveIntent(clientManager, intent);
-            Thread.Sleep(100);
-
-            var players = _playerManager.GetAllPlayers();
-            Assert.Single(players);
-
-            var client = players.First();
-            Assert.Equal(0, client.X);
-            Assert.Equal(0.1f, client.Y);
-        }
-
-        [Fact]
-        public void OnMoveIntentReceived_ValidIntent_South_MovesCorrectly()
-        {
-            var clientManager = CreateAndConnectClient();
-            Thread.Sleep(100);
-
-            var intent = new MoveIntent
-            {
-                Direction = IntentDirection.South,
-                Sprint = false,
-                Sequence = 1
-            };
-
-            SendMoveIntent(clientManager, intent);
-            Thread.Sleep(100);
-
-            var client = _playerManager.GetAllPlayers().First();
-            Assert.Equal(0, client.X);
-            Assert.Equal(-0.1f, client.Y);
-        }
-
-        [Fact]
-        public void OnMoveIntentReceived_ValidIntent_East_MovesCorrectly()
-        {
-            var clientManager = CreateAndConnectClient();
-            Thread.Sleep(100);
-
-            var intent = new MoveIntent
-            {
-                Direction = IntentDirection.East,
-                Sprint = false,
-                Sequence = 1
-            };
-
-            SendMoveIntent(clientManager, intent);
-            Thread.Sleep(100);
-
-            var client = _playerManager.GetAllPlayers().First();
-            Assert.Equal(0.1f, client.X);
-            Assert.Equal(0, client.Y);
-        }
-
-        [Fact]
-        public void OnMoveIntentReceived_ValidIntent_West_MovesCorrectly()
-        {
-            var clientManager = CreateAndConnectClient();
-            Thread.Sleep(100);
-
-            var intent = new MoveIntent
-            {
-                Direction = IntentDirection.West,
-                Sprint = false,
-                Sequence = 1
-            };
-
-            SendMoveIntent(clientManager, intent);
-            Thread.Sleep(100);
-
-            var client = _playerManager.GetAllPlayers().First();
-            Assert.Equal(-0.1f, client.X);
-            Assert.Equal(0, client.Y);
-        }
-
-        [Fact]
-        public void OnMoveIntentReceived_WithSprint_MovesDoubleSpeed()
-        {
-            var clientManager = CreateAndConnectClient();
-            Thread.Sleep(100);
-
-            var intent = new MoveIntent
-            {
-                Direction = IntentDirection.North,
-                Sprint = true,
-                Sequence = 1
-            };
-
-            SendMoveIntent(clientManager, intent);
-            Thread.Sleep(100);
-
-            var client = _playerManager.GetAllPlayers().First();
-            Assert.Equal(0, client.X);
-            Assert.Equal(0.2f, client.Y);
-        }
-
-        [Fact]
-        public void OnMoveIntentReceived_MultipleMoves_AccumulatesPosition()
-        {
-            var clientManager = CreateAndConnectClient();
-            Thread.Sleep(100);
-
-            SendMoveIntent(clientManager, new MoveIntent { Direction = IntentDirection.North, Sprint = false, Sequence = 1 });
-            SendMoveIntent(clientManager, new MoveIntent { Direction = IntentDirection.North, Sprint = false, Sequence = 2 });
-            SendMoveIntent(clientManager, new MoveIntent { Direction = IntentDirection.East, Sprint = false, Sequence = 3 });
-            SendMoveIntent(clientManager, new MoveIntent { Direction = IntentDirection.East, Sprint = false, Sequence = 4 });
-            Thread.Sleep(200);
-
-            var client = _playerManager.GetAllPlayers().First();
-            Assert.Equal(0.2f, client.X);
-            Assert.Equal(0.2f, client.Y);
-        }
-
-        [Fact]
         public void GetAllPlayers_ReturnsAllConnectedPlayers()
         {
             var clientManager1 = CreateAndConnectClient();
@@ -264,27 +140,6 @@ namespace ServerTests.Server.Services
 
             _clientManagers.Add(manager);
             return manager;
-        }
-
-        private void SendMoveIntent(NetManager clientManager, MoveIntent intent)
-        {
-            var peers = new List<NetPeer>();
-            clientManager.GetConnectedPeers(peers);
-
-            if (peers.Count == 0)
-                throw new Exception("No connected peers");
-
-            var peer = peers[0];
-
-            var writer = new NetDataWriter();
-            byte[] data = intent.Serialize();
-            writer.Put((ushort)MessageType.MoveIntent);
-            writer.PutBytesWithLength(data);
-
-            peer.Send(writer, DeliveryMethod.ReliableOrdered);
-
-            clientManager.PollEvents();
-            Thread.Sleep(50);
         }
     }
 }
