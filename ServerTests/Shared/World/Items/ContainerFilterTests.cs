@@ -2,6 +2,7 @@ using Shared.World.Items;
 
 namespace ServerTests.Shared.World.Items
 {
+    /// <summary>ContainerFilter.Allows: None/Whitelist/Blacklist по id и по тегу, пустые списки.</summary>
     public class ContainerFilterTests
     {
         private static ItemProto Container(ContainerFilterMode mode, ushort[] itemIds = null, ushort[] tagIds = null)

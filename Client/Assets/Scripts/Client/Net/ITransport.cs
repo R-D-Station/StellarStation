@@ -31,7 +31,7 @@ namespace Client.Net
         /// <summary>Отдельный PVS-поток наземных предметов (server→client, 4.4).</summary>
         event Action<ItemSnapshot> OnItemSnapshot;
 
-        /// <summary>Полный слепок инвентаря владельца (server→client, OWNER-ONLY, 4.5).</summary>
+        /// <summary>Слепок занятых слотов инвентаря владельца (server→client, OWNER-ONLY, 4.5).</summary>
         event Action<InventorySync> OnInventorySync;
 
         event Action<ContainerSync> OnContainerSync;

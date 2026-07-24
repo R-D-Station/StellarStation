@@ -1,3 +1,4 @@
+// Hover-аутлайн для ItemView: 8-соседовый alpha-edge вокруг спрайта, sharedMaterial-своп (SetHovered), без доп. геометрии.
 Shader "Station/SpriteOutline"
 {
     Properties

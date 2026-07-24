@@ -6,6 +6,7 @@ using Client.Items;
 
 namespace Client.UI.Container
 {
+    /// <summary>Один слот окна контейнера — иконка/стек/клик (аналог InventorySlotHud).</summary>
     public sealed class ContainerSlotHud : MonoBehaviour
     {
         [SerializeField] private Image _icon;
@@ -14,6 +15,7 @@ namespace Client.UI.Container
         [SerializeField] private int _index;
 
         public int Index { get => _index; set => _index = value; }
+        /// <summary>Клик по слоту, аргумент — индекс.</summary>
         public event Action<int> Clicked;
 
         private void Awake()
@@ -28,6 +30,7 @@ namespace Client.UI.Container
 
         private void OnButtonClicked() => Clicked?.Invoke(_index);
 
+        /// <summary>Показывает предмет в слоте (иконка из каталога, счётчик — только если стек &gt; 1).</summary>
         public void SetFilled(ushort itemDefId, byte stackCount, ItemCatalog catalog)
         {
             var def = catalog != null ? catalog.For(itemDefId) : null;
@@ -45,6 +48,7 @@ namespace Client.UI.Container
             }
         }
 
+        /// <summary>Очищает слот (нет предмета).</summary>
         public void SetEmpty()
         {
             if (_icon != null)

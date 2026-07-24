@@ -3,6 +3,7 @@ using Shared.World.Blocks;
 
 namespace Shared.World.Items
 {
+    /// <summary>Плоский (уже без наследования) прототип предмета — то, что видит сервер; строится ItemProtoResolver'ом.</summary>
     public readonly struct ItemProto
     {
         public readonly ushort ItemDefId;

@@ -7,6 +7,7 @@ using Client.UI.Windows;
 
 namespace Client.UI.Container
 {
+    /// <summary>Содержимое окна контейнера — слоты + кнопка «положить», применяет ContainerSync.</summary>
     public sealed class ContainerWindowContent : MonoBehaviour
     {
         [SerializeField] private ContainerSlotHud[] _slots;
@@ -38,6 +39,7 @@ namespace Client.UI.Container
             if (_putButton != null) _putButton.onClick.RemoveListener(OnPutClicked);
         }
 
+        /// <summary>Привязывает окно к контейнеру: сеть, каталог, заголовок и число активных слотов.</summary>
         public void Bind(int netId, string title, NetworkRunner runner, ItemCatalog catalog, int slotCount)
         {
             _netId = netId;
@@ -56,6 +58,7 @@ namespace Client.UI.Container
             if (window != null) window.SetTitle(title);
         }
 
+        /// <summary>Перерисовывает слоты из серверного снимка содержимого.</summary>
         public void Apply(in ContainerSync sync)
         {
             if (_slots == null) return;

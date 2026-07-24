@@ -3,6 +3,7 @@ using Shared.Messages.Interaction;
 
 namespace Server.Network.Messages
 {
+    /// <summary>TakeFromContainer → ClientConnection.TakeFromContainerQueue.</summary>
     public sealed class TakeFromContainerHandler : IClientMessageHandler
     {
         public MessageType Type => MessageType.TakeFromContainer;

@@ -3,6 +3,7 @@ using Shared.Messages.Interaction;
 
 namespace Server.Network.Messages
 {
+    /// <summary>CloseContainer → ClientConnection.CloseContainerQueue.</summary>
     public sealed class CloseContainerHandler : IClientMessageHandler
     {
         public MessageType Type => MessageType.CloseContainer;

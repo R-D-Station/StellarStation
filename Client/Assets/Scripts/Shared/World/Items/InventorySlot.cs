@@ -1,12 +1,12 @@
 namespace Shared.World.Items
 {
-    /// <summary>Раскладка слотов по категориям (Фаза 1, фикс-таблица); известна обеим сторонам, по проводу не шлётся.</summary>
+    /// <summary>Раскладка слотов по категориям (фикс-таблица); известна обеим сторонам, по проводу не шлётся.</summary>
     public static class InventorySlot
     {
         public const int CategoryCount = 15;
         public const byte HandCount = 2;
 
-        /// <summary>Кол-во слотов категории (0 — категория выключена/резерв, напр. <see cref="SlotCategory.Uniform"/>).</summary>
+        /// <summary>Кол-во слотов категории (0 для непокрытых значений enum, напр. None/Inherit).</summary>
         public static byte DefaultCount(SlotCategory cat) => cat switch
         {
             SlotCategory.Hand => 2,

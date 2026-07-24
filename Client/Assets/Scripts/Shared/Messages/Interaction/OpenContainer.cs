@@ -3,6 +3,7 @@ using System.IO;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Открыть/E-тоггл контейнер (client→server): UI-режим — добавляет клиента вьюером; SS14-режим — переключает физическую крышку.</summary>
     public struct OpenContainer : INetMessage
     {
         public int NetId;

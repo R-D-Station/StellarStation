@@ -7,6 +7,7 @@ using Server.Network;
 
 namespace Server.Items
 {
+    /// <summary>Авторитетная тяга ящиков (block-mode only): грэб/релиз-тоггл, штраф скорости, следование за игроком.</summary>
     public sealed class ServerPullSystem
     {
         private const float FollowDistance = 1.4f;
@@ -19,6 +20,7 @@ namespace Server.Items
         private readonly Dictionary<int, IWorldEntity> _entities;
         private readonly Dictionary<NetPeer, ClientConnection> _clients;
 
+        /// <summary>Собирает систему тяги над общими реестрами сервера (сущности/клиенты — общие с остальными системами).</summary>
         public ServerPullSystem(GameServer server, ServerInventorySystem inventory, GroundItemWorld ground,
             Dictionary<int, IWorldEntity> entities, Dictionary<NetPeer, ClientConnection> clients)
         {
@@ -29,6 +31,7 @@ namespace Server.Items
             _clients = clients;
         }
 
+        /// <summary>Дренирует очереди PullItem всех клиентов за тик (флуд-защита как у остальных intent-очередей).</summary>
         public void ProcessPullOps()
         {
             const int maxPerTick = 32;
@@ -52,6 +55,8 @@ namespace Server.Items
             Console.WriteLine($"[Server] {label} flood #{client.ConnectionId}: applied {applied}, dropped {dropped}");
         }
 
+        // Toggle: тот же NetId — отпустить. Иначе валидация грэба (world/reach/pullable/hands/not-taken),
+        // затем swap A→B = release старого + grab нового — ровно один скейл скорости, без стека.
         private void HandlePull(ClientConnection client, int netId)
         {
             if (client.PulledNetId == netId)
@@ -91,8 +96,10 @@ namespace Server.Items
                 _server.SendToClient(client, new PullSync { PulledNetId = 0, ItemDefId = 0 });
         }
 
+        /// <summary>Снимает штраф скорости без нотификации — пир уже недоступен; ящик остаётся в мире.</summary>
         public void OnClientDisconnect(ClientConnection client) => Release(client, notify: false);
 
+        /// <summary>Продвигает тянущиеся ящики к своим игрокам за тик (после движения игроков).</summary>
         public void ProcessFollow()
         {
             if (_server.BlockWorld == null) return;
@@ -101,6 +108,7 @@ namespace Server.Items
                     FollowOne(client);
         }
 
+        // Ящик держит FollowDistance от игрока; за LeashMax/HeightLeash — release, ящик остаётся free-float на месте (F1).
         private void FollowOne(ClientConnection client)
         {
             if (!_entities.TryGetValue(client.PulledNetId, out var e) || e is not GroundItemEntity gi)
@@ -140,6 +148,7 @@ namespace Server.Items
             float nz = gi.Y;
             float feetY = gi.Z + feetOffset;
 
+            // X→Z раздельно (sweep), высота Y ящика не меняется при следовании.
             if (mx != 0f && !FollowBlocked(nx + mx, feetY, nz, halfW, boxHeight, gi.NetId))
                 nx += mx;
             if (mz != 0f && !FollowBlocked(nx, feetY, nz + mz, halfW, boxHeight, gi.NetId))
@@ -149,6 +158,7 @@ namespace Server.Items
             _ground.MoveGroundItem(gi.NetId, nx, nz, gi.Z);
         }
 
+        // Блоки мира + AABB других предметов с коллизией + AABB игроков (себя исключаем по NetId).
         private bool FollowBlocked(float centerX, float feetY, float centerZ, float halfW, float boxHeight, int selfNetId)
         {
             if (BlockMovementLogic.CollidesBox(_server.BlockWorld!, _server.BlockShapes, centerX, feetY, centerZ, halfW, boxHeight))

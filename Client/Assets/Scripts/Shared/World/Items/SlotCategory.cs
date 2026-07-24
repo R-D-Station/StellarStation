@@ -1,6 +1,6 @@
 namespace Shared.World.Items
 {
-    /// <summary>Категория инвентарного слота (Фаза 1, заменяет фикс-6 SlotKind); Uniform — резерв, DefaultCount=0.</summary>
+    /// <summary>Адрес слота инвентаря (14 категорий); None/Inherit — сентинелы EquipSlot у ItemProto, НЕ адреса слотов.</summary>
     public enum SlotCategory : byte
     {
         Hand,

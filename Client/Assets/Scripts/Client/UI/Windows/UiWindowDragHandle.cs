@@ -3,6 +3,7 @@ using UnityEngine.EventSystems;
 
 namespace Client.UI.Windows
 {
+    /// <summary>Таскает окно за титлбар мышью (в паре с UiWindow на родителе).</summary>
     public sealed class UiWindowDragHandle : MonoBehaviour, IDragHandler, IPointerDownHandler
     {
         [SerializeField] private RectTransform _target;
@@ -13,7 +14,7 @@ namespace Client.UI.Windows
         private void Awake()
         {
             var canvas = GetComponentInParent<Canvas>();
-            if (canvas != null) _canvasScale = canvas.rootCanvas.scaleFactor;
+            if (canvas != null) _canvasScale = canvas.rootCanvas.scaleFactor; // компенсация масштаба Canvas Scaler для дельты в экранных px
             _window = GetComponentInParent<UiWindow>();
         }
 

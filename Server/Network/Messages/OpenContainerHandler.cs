@@ -3,6 +3,7 @@ using Shared.Messages.Interaction;
 
 namespace Server.Network.Messages
 {
+    /// <summary>OpenContainer → ClientConnection.OpenContainerQueue.</summary>
     public sealed class OpenContainerHandler : IClientMessageHandler
     {
         public MessageType Type => MessageType.OpenContainer;

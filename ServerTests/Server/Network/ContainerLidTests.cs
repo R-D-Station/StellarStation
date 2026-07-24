@@ -7,11 +7,13 @@ using Shared.Configs;
 using Shared.Messages.Core;
 using Shared.Simulation.Blocks;
 using Shared.World;
+using Shared.World.Blocks;
 using Shared.World.Items;
 using Server.Network;
 
 namespace ServerTests.Server.Network
 {
+    /// <summary>SS14-режим контейнеров: суск/высып, identity-крышка при пере-дропе, C3 заморозка/выпуск игроков на клетке ящика.</summary>
     public class ContainerLidTests : IDisposable
     {
         private const ushort CrateDef = 90;
@@ -50,22 +52,35 @@ namespace ServerTests.Server.Network
             Thread.Sleep(50);
         }
 
+        private static ItemProto? Protos(ushort defId) => defId switch
+        {
+            CrateDef => new ItemProto(CrateDef, SlotCategory.None, false, 1, 1, true, 4, containerMode: ContainerMode.SS14, suckRadius: 2f),
+            WhiteCrateDef => new ItemProto(WhiteCrateDef, SlotCategory.None, false, 1, 1, true, 4,
+                filterMode: ContainerFilterMode.Whitelist, filterItemIds: new ushort[] { AllowedDef },
+                containerMode: ContainerMode.SS14, suckRadius: 2f),
+            BigCrateDef => new ItemProto(BigCrateDef, SlotCategory.None, false, 1, 1, true, 25,
+                containerMode: ContainerMode.SS14, suckRadius: 3f),
+            50 => new ItemProto(50, SlotCategory.None, false, 1, 1, true, 4),
+            _ => new ItemProto(defId, SlotCategory.None, false, 1, 1, false, 0)
+        };
+
         private GameServer StartServer(GridMap? map = null)
         {
             _server = new GameServer(_config, map);
             _server.Start();
             Thread.Sleep(50);
-            _server.ProtoLookup = defId => defId switch
-            {
-                CrateDef => new ItemProto(CrateDef, SlotCategory.None, false, 1, 1, true, 4, containerMode: ContainerMode.SS14, suckRadius: 2f),
-                WhiteCrateDef => new ItemProto(WhiteCrateDef, SlotCategory.None, false, 1, 1, true, 4,
-                    filterMode: ContainerFilterMode.Whitelist, filterItemIds: new ushort[] { AllowedDef },
-                    containerMode: ContainerMode.SS14, suckRadius: 2f),
-                BigCrateDef => new ItemProto(BigCrateDef, SlotCategory.None, false, 1, 1, true, 25,
-                    containerMode: ContainerMode.SS14, suckRadius: 3f),
-                50 => new ItemProto(50, SlotCategory.None, false, 1, 1, true, 4),
-                _ => new ItemProto(defId, SlotCategory.None, false, 1, 1, false, 0)
-            };
+            _server.ProtoLookup = Protos;
+            return _server;
+        }
+
+        private GameServer StartBlockServer()
+        {
+            _config.BlocksWorld = true;
+            _config.MapPath = "";
+            _server = new GameServer(_config);
+            _server.Start();
+            Thread.Sleep(50);
+            _server.ProtoLookup = Protos;
             return _server;
         }
 
@@ -446,6 +461,33 @@ namespace ServerTests.Server.Network
                 Assert.Contains(7001 + i, g.Keys);
                 Assert.True(MathF.Abs(Dist(g[7001 + i], 5f, 5f) - 1.5f) < 0.03f);
             }
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Spill_NonCollisionItem_BlockedRing_FallsToCenter()
+        {
+            var server = StartBlockServer();
+            var peer = CreateConnectedPeer();
+            var sc = WaitServerClient(server);
+
+            int crate = 0;
+            OnGameLoop(server, () =>
+            {
+                server.BlockWorld!.SetBlock(6, 1, 5, DevBlockWorld.Full);
+                OnCell(sc, 5.5f, 5.5f, 1);
+                crate = server.SpawnGroundItem(CrateDef, 1, 5.5f, 5.5f, 1f);
+                ContentsOf(server)[crate] = new List<HeldItem>
+                {
+                    new HeldItem { NetId = 7001, ItemDefId = OtherDef, StackCount = 1 }
+                };
+                HandleOpen(server, sc, crate);
+            });
+
+            var g = GroundByNet(server, 5.5f, 5.5f, 1);
+            Assert.True(g.TryGetValue(7001, out var p));
+            Assert.True(Dist(p, 5.5f, 5.5f) < 0.05f);
 
             CleanupPeer(peer);
         }

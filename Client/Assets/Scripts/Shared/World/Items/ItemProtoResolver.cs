@@ -3,6 +3,7 @@ using System.Collections.Generic;
 
 namespace Shared.World.Items
 {
+    /// <summary>Гасит цепочки наследования ItemProtoRaw в плоские ItemProto (только на этапе кодогена, сервер видит уже плоское).</summary>
     public static class ItemProtoResolver
     {
         private const byte DefaultSlotSpan = 1;
@@ -10,6 +11,7 @@ namespace Shared.World.Items
         private const byte DefaultMaxContents = 0;
         private const SlotCategory DefaultEquipSlot = SlotCategory.None;
 
+        /// <summary>Резолвит массив сырых записей в плоские прототипы; кидает при дублях id, цикле или отсутствующем родителе.</summary>
         public static IReadOnlyList<ItemProto> Resolve(IReadOnlyList<ItemProtoRaw> raw)
         {
             var byId = new Dictionary<ushort, ItemProtoRaw>(raw.Count);
@@ -29,7 +31,7 @@ namespace Shared.World.Items
 
                 var seen = new HashSet<ushort>();
                 var cur = r;
-                while (true)
+                while (true) // идём от листа к корню, берём первое не-сентинел значение на каждое наследуемое поле
                 {
                     if (!seen.Add(cur.ItemDefId))
                         throw new InvalidOperationException($"Parent cycle at ItemDefId {cur.ItemDefId}");
@@ -51,6 +53,7 @@ namespace Shared.World.Items
                 if (stack == 0) stack = DefaultMaxStack;
                 if (contents == 0) contents = DefaultMaxContents;
 
+                // остальные поля НЕ наследуются — берутся напрямую с листа r, а не с цепочки
                 result.Add(new ItemProto(r.ItemDefId, equip, r.Equippable, span, stack, r.IsContainer, contents, r.HasCollision, r.CollisionBox, r.Pullable,
                     r.Tags, r.FilterMode, r.FilterItemIds, r.FilterTagIds, r.ContainerMode, r.SuckRadius));
             }

@@ -2,11 +2,13 @@ using Shared.Simulation.Blocks;
 
 namespace Shared.World.Blocks
 {
+    /// <summary>Определяет ячейку покоя предмета при свободном падении — общий алгоритм сервера и клиента (см. ItemView.BlockSurface).</summary>
     public static class ItemGroundSnap
     {
         public const int MaxScanDepth = 64;
-        private const float FullTop = 0.999f;
+        private const float FullTop = 0.999f; // порог "почти полный бокс" — считаем верхней твёрдой поверхностью (полблок/четверть-ступень — нет)
 
+        /// <summary>Сканирует вниз от startY по тем же коллизионным боксам, что движение, и возвращает ячейку Y, где предмет ляжет (без движения — та же startY).</summary>
         public static int SnapDown(IBlockSampler grid, IBlockShapes shapes, int x, int startY, int z)
         {
             for (int y = startY; y > startY - MaxScanDepth; y--)
@@ -23,10 +25,10 @@ namespace Shared.World.Blocks
                     else if (top > partialTop) partialTop = top;
                 }
 
-                if (full) return y + 1;
-                if (partialTop > 0f) return y;
+                if (full) return y + 1;    // полный/топ-слэб — предмет ложится в клетку НАД поверхностью
+                if (partialTop > 0f) return y; // частичный степ (полблок/четверть) — предмет остаётся В этой клетке
             }
-            return startY;
+            return startY; // ничего не найдено (вакуум/превышен MaxScanDepth) — предмет остаётся на старте
         }
     }
 }

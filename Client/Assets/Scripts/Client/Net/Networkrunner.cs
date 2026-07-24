@@ -82,6 +82,7 @@ namespace Client.Net
         private readonly HashSet<int> _seenItemIds = new HashSet<int>();
         private readonly List<int> _itemsToRemove = new List<int>();
 
+        // Коллизия от предметов с HasCollision для предиктора (F1b): полностью пересобирается каждый ItemSnapshot.
         private readonly Shared.Simulation.Blocks.DynamicObstacleSet _itemObstacles = new Shared.Simulation.Blocks.DynamicObstacleSet();
 
         private int _itemSpawnSeq;
@@ -296,6 +297,7 @@ namespace Client.Net
             {
                 Vector2 mp = Mouse.current.position.ReadValue();
                 float ppx = _predictor.X, ppy = _predictor.Y;
+                // Раскраска обводки — только на реальном изменении: мышь ИЛИ предсказанная позиция игрока (мир под курсором сместился).
                 if ((mp - _lastHoverMouse).sqrMagnitude > 0.01f
                     || Mathf.Abs(ppx - _lastHoverPlayerX) > 0.001f
                     || Mathf.Abs(ppy - _lastHoverPlayerY) > 0.001f)
@@ -333,7 +335,7 @@ namespace Client.Net
             bool jump = _jumpPending;
             _jumpPending = false;
 
-            if (_containedNetId != 0) return;
+            if (_containedNetId != 0) return; // C3: в контейнере — не двигаемся, интент/предсказание не шлём
 
             // Decouple send-vs-step: молчим только в полном покое (Stand + нет ввода/toggle) И на опоре — в воздухе
             // интент обязателен каждый тик (вариант A: серверная гравитация без вводов реконсилилась бы снапом).
@@ -390,6 +392,7 @@ namespace Client.Net
                 var def = _itemCatalog.For(view.ItemDefId);
                 if (def != null && def.IsContainer)
                 {
+                    // SS14-режим: окно открывает сервер (ContainSync/визуал в мире); иначе — чисто клиентский Toggle-UI.
                     if (def.ContainerMode == Shared.World.Items.ContainerMode.SS14) { _net.SendOpenContainer(netId); return; }
                     if (_containerWindows != null) { _containerWindows.Toggle(netId, view.ItemDefId); return; }
                 }
@@ -496,6 +499,23 @@ namespace Client.Net
         public bool IsInitialized => _predictor.IsInitialized;
         public Tile GetTileAt(int x, int y, int z) => _map.GetTile(x, y, z);
 
+        /// <summary>Дистанция до наземного контейнера в пределах реча (для UI-гейта окна контейнера).</summary>
+        public bool IsGroundContainerReachable(int netId)
+        {
+            if (!_predictor.IsInitialized) return true;
+            if (!_itemViews.TryGetValue(netId, out var view) || view == null) return true;
+
+            Vector3 p = view.transform.position;
+            if (BlocksWorld)
+                return Shared.Simulation.InteractionRules.InReachBlocks(
+                    Mathf.FloorToInt(_predictor.X), Mathf.FloorToInt(_predictor.ZF), Mathf.FloorToInt(_predictor.Y),
+                    Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.z), Mathf.FloorToInt(p.y));
+
+            return Shared.Simulation.InteractionRules.InReach(
+                Mathf.FloorToInt(_predictor.X), Mathf.FloorToInt(_predictor.Y), _predictor.Z,
+                Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.z), Mathf.RoundToInt(p.y / RenderConfig.FloorHeight));
+        }
+
         /// <summary>Чужая сущность на тайле (tx,ty) этажа z по её вьюхе; первую подходящую — в pickedId (себя пропускаем).</summary>
         private bool TryPickEntity(int tx, int ty, int z, out int pickedId)
         {
@@ -519,6 +539,7 @@ namespace Client.Net
             return false;
         }
 
+        // Пиксель-пик по спрайту (не bbox): среди попаданий берём макс. SortingOrder (топ визуально), при равенстве — ближайший луч.
         private bool TryPickItemPixel(Vector2 screenPos, out int itemNetId)
         {
             itemNetId = -1;
@@ -870,6 +891,7 @@ namespace Client.Net
             if (_localView != null) _localView.SetCulled(_containedNetId != 0);
         }
 
+        // Клавиша F: надеть equippable-предмет из активной руки в его worn-категорию (снятие — ЛКМ по worn-слоту, Unequip).
         private void HandleEquipToggle()
         {
             if (_lastSlots == null) return;
@@ -883,15 +905,10 @@ namespace Client.Net
                     _net.SendMoveSlot(SlotCategory.Hand, _activeHand, proto.EquipSlot, 0);
                 return;
             }
-
-            for (int i = 0; i < _lastSlots.Length; i++)
-            {
-                var rec = _lastSlots[i];
-                if (rec.Category == SlotCategory.Hand) continue;
-                _net.SendMoveSlot(rec.Category, rec.Index, SlotCategory.Hand, _activeHand);
-                return;
-            }
         }
+
+        /// <summary>Снять предмет из worn-слота в активную руку (сервер откажет, если рука занята).</summary>
+        public void Unequip(SlotCategory cat, byte index) => _net.SendMoveSlot(cat, index, SlotCategory.Hand, _activeHand);
 
         private static bool IsWornCategory(SlotCategory c)
             => c != SlotCategory.None && c != SlotCategory.Hand && c != SlotCategory.Inherit;
@@ -910,12 +927,16 @@ namespace Client.Net
         /// <summary>Запрос drop-at-feet предмета из (category,index) — для UI/HUD, вне клавиш Q.</summary>
         public void SendDrop(SlotCategory category, byte index) => _net.SendDrop(category, index);
 
+        /// <summary>Запрос положить предмет в контейнер (для ContainerWindows UI).</summary>
         public void SendPutInContainer(int netId) => _net.SendPutInContainer(netId);
 
+        /// <summary>Запрос взять предмет из слота контейнера по индексу.</summary>
         public void SendTakeFromContainer(int netId, ushort index) => _net.SendTakeFromContainer(netId, index);
 
+        /// <summary>Запрос открыть контейнер (SS14-режим).</summary>
         public void SendOpenContainer(int netId) => _net.SendOpenContainer(netId);
 
+        /// <summary>Запрос закрыть окно контейнера.</summary>
         public void SendCloseContainer(int netId) => _net.SendCloseContainer(netId);
     }
 }

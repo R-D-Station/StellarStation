@@ -6,6 +6,7 @@ using Client.Config;
 
 namespace Client.Editor.Inspectors
 {
+    /// <summary>Инспектор ItemDefinition: цветные сворачиваемые группы (паттерн BlockDefinitionEditor).</summary>
     [CustomEditor(typeof(ItemDefinition))]
     public sealed class ItemDefinitionEditor : UnityEditor.Editor
     {
@@ -124,6 +125,7 @@ namespace Client.Editor.Inspectors
 
             if (_isContainer != null)
             {
+                // "Категория" — UI-вью над _isContainer, отдельного поля данных нет.
                 EditorGUI.BeginChangeCheck();
                 int picked = EditorGUILayout.Popup(LCategory, _isContainer.boolValue ? 1 : 0, CategoryNames);
                 if (EditorGUI.EndChangeCheck())

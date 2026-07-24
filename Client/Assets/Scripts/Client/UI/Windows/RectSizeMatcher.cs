@@ -2,6 +2,7 @@ using UnityEngine;
 
 namespace Client.UI.Windows
 {
+    /// <summary>Подгоняет свой RectTransform под размер цели + отступ (окно под сетку слотов).</summary>
     public sealed class RectSizeMatcher : MonoBehaviour
     {
         [SerializeField] private RectTransform _target;
@@ -14,6 +15,7 @@ namespace Client.UI.Windows
 
         private void Awake() => _self = GetComponent<RectTransform>();
 
+        /// <summary>Пересчитывает свой размер от текущего размера цели.</summary>
         public void Apply()
         {
             if (_target == null || _self == null) return;

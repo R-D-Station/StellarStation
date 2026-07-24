@@ -3,6 +3,7 @@ using System.IO;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Клиент→сервер: грэб/релиз-тоггл тяги предмета по NetId.</summary>
     public struct PullItem : INetMessage
     {
         public int NetId;

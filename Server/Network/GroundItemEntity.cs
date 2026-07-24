@@ -1,7 +1,6 @@
 namespace Server.Network
 {
-    /// <summary>Предмет на земле как сущность общего реестра (_entities). Позиция — ДИСКРЕТНАЯ ЯЧЕЙКА CellX/CellY/Z
-    /// (этаж сейчас, блок потом). IWorldEntity.X/Y — float-каст ячейки для переиспользования InInterest (PVS); суб-ячейковой высоты нет.</summary>
+    /// <summary>Предмет на земле в общем реестре `_entities`; позиция — свободный float (Предметы 2.0), мутация только через <see cref="MoveTo"/>.</summary>
     public sealed class GroundItemEntity : IWorldEntity
     {
         public int NetId { get; }
@@ -12,11 +11,12 @@ namespace Server.Network
         public float Z { get; private set; }
         public byte Placement { get; set; }
 
-        // IWorldEntity: float-позиция = ячейка (для InInterest). CellX/CellY, чтобы не путать с float X/Y интерфейса.
+        // IWorldEntity: float-позиция как есть (для InInterest/PVS). CellX/CellY, чтобы не путать с float X/Y интерфейса.
         public float X => CellX;
         public float Y => CellY;
         int IWorldEntity.Z => (int)System.MathF.Floor(Z);
 
+        /// <summary>Мутирует позицию — единственная точка записи (обход только через GroundItemWorld, инвариант с obstacles/снапшотом).</summary>
         internal void MoveTo(float x, float y, float z)
         {
             CellX = x;

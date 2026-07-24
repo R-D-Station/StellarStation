@@ -3,6 +3,7 @@ using Shared.Messages.Interaction;
 
 namespace Server.Network.Messages
 {
+    /// <summary>PullItem → ClientConnection.PullQueue.</summary>
     public sealed class PullItemHandler : IClientMessageHandler
     {
         public MessageType Type => MessageType.PullItem;

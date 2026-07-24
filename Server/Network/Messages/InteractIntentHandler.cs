@@ -3,6 +3,7 @@ using Shared.Messages.Interaction;
 
 namespace Server.Network.Messages
 {
+    /// <summary>InteractIntent → ClientConnection.InteractQueue.</summary>
     public sealed class InteractIntentHandler : IClientMessageHandler
     {
         public MessageType Type => MessageType.InteractIntent;

@@ -4,6 +4,7 @@ using UnityEngine;
 
 namespace Client.Items
 {
+    /// <summary>Реестр тегов предмета: стабильные id (не перенумеровывать), новые — через NextFreeId/AddTag.</summary>
     [CreateAssetMenu(menuName = "Station/Tag Catalog", fileName = "TagCatalog")]
     public sealed class TagCatalog : ScriptableObject
     {

@@ -3,12 +3,14 @@ using System.IO;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Слот содержимого контейнера на проводе: id прототипа + размер стака (без NetId — содержимое не адресуется отдельно).</summary>
     public struct ContainerItem
     {
         public ushort ItemDefId;
         public byte StackCount;
     }
 
+    /// <summary>Полный слепок содержимого контейнера (server→viewers): шлётся всем открывшим UI-окно этого NetId после любой мутации.</summary>
     public struct ContainerSync : INetMessage
     {
         public int ContainerNetId;

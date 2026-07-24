@@ -3,6 +3,7 @@ using Shared.Messages.Interaction;
 
 namespace Server.Network.Messages
 {
+    /// <summary>PutInContainer → ClientConnection.PutInContainerQueue.</summary>
     public sealed class PutInContainerHandler : IClientMessageHandler
     {
         public MessageType Type => MessageType.PutInContainer;

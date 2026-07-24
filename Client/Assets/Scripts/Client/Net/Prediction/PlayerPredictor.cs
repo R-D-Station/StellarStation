@@ -80,9 +80,10 @@ namespace Client.Net.Prediction
             _blockShapes = shapes;
         }
 
+        /// <summary>Внешняя коллизия от предметов на земле (F1b) — используется предиктом и Reconcile-грейндом.</summary>
         public void SetDynamicObstacles(IDynamicObstacles items) => _itemObstacles = items;
 
-        private IDynamicObstacles _itemObstacles;
+        private IDynamicObstacles _itemObstacles; // текущий набор коллизий предметов (может быть null до первого SetDynamicObstacles)
 
         /// <summary>Применить ввод локально (предсказание) и запомнить для переигровки. Нить FSM+движение
         /// зеркалит GameServer.ProcessIntents/ApplyClientIntent байт-в-байт (детерминизм — иначе rubber-band).</summary>

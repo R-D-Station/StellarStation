@@ -86,9 +86,12 @@ namespace Client.UI.Inventory
             ApplyPullOverlay();
         }
 
+        // ЛКМ по слоту: рука → выброс на пол, worn-слот → снять в активную руку.
         private void OnSlotClicked(SlotCategory cat, byte index)
         {
-            if (_runner != null) _runner.SendDrop(cat, index);
+            if (_runner == null) return;
+            if (cat == SlotCategory.Hand) _runner.SendDrop(cat, index);
+            else _runner.Unequip(cat, index);
         }
     }
 }

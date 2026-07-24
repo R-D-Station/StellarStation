@@ -3,6 +3,7 @@ using System.IO;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Закрыть UI-окно контейнера (client→server): снимает клиента из вьюеров, содержимого не касается.</summary>
     public struct CloseContainer : INetMessage
     {
         public int NetId;

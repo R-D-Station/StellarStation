@@ -2,10 +2,13 @@ using Shared.World.Blocks;
 
 namespace Shared.World.Items
 {
+    /// <summary>Сырая запись одного ItemDefinition (с непогашенным наследованием) — вход ItemProtoResolver'а.</summary>
     public readonly struct ItemProtoRaw
     {
         public readonly ushort ItemDefId;
+        /// <summary>Id родителя по цепочке наследования; -1 = корень.</summary>
         public readonly int ParentDefId;
+        // EquipSlot=Inherit / SlotSpan,MaxStack,MaxContents=0 — сентинелы "не задано", резолвер идёт по цепочке к первому не-сентинелу.
         public readonly SlotCategory EquipSlot;
         public readonly bool Equippable;
         public readonly byte SlotSpan;

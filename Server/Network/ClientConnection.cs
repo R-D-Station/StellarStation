@@ -111,10 +111,10 @@ namespace Server.Network
         public readonly ConcurrentQueue<PutInContainer> PutInContainerQueue = new();
         public readonly ConcurrentQueue<TakeFromContainer> TakeFromContainerQueue = new();
 
-        public int PulledNetId;
+        public int PulledNetId; // NetId тянущегося предмета (0 = не тянет); эхо в PullSync владельцу
         public readonly ConcurrentQueue<PullItem> PullQueue = new();
 
-        public int ContainedInNetId;
+        public int ContainedInNetId; // NetId SS14-ящика, в котором заперт игрок (0 = свободен); гейт ввода/спрайта, эхо в ContainSync
 
         // Стриминг карты (2.3a). SentChunks — ключи уже отправленных клиенту чанков (упаковка = GridMap-ключ).
         // ChunkLastInRangeTick — последний серверный тик, когда чанк был в радиусе (таймер выгрузки: долго вне

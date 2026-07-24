@@ -3,6 +3,7 @@ using Shared.Messages.Core;
 
 namespace Server.Network.Messages
 {
+    /// <summary>MoveIntent → ClientConnection.IntentQueue.</summary>
     public sealed class MoveIntentHandler : IClientMessageHandler
     {
         public MessageType Type => MessageType.MoveIntent;

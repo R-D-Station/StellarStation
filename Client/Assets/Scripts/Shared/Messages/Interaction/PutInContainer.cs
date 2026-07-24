@@ -3,6 +3,7 @@ using System.IO;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Положить предмет из активной руки в открытый контейнер (client→server): фильтр/ёмкость/анти-нестинг проверяет сервер.</summary>
     public struct PutInContainer : INetMessage
     {
         public int NetId;

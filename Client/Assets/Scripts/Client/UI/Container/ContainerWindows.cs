@@ -7,6 +7,7 @@ using Client.UI.Windows;
 
 namespace Client.UI.Container
 {
+    /// <summary>Сервис сцены: владеет протоколом клиентских окон контейнеров (открытие/закрытие/синк/дальность).</summary>
     public sealed class ContainerWindows : MonoBehaviour
     {
         [SerializeField] private UiWindowManager _manager;
@@ -17,10 +18,24 @@ namespace Client.UI.Container
 
         private readonly Dictionary<int, UiWindow> _windows = new Dictionary<int, UiWindow>();
         private readonly Dictionary<int, ContainerWindowContent> _contents = new Dictionary<int, ContainerWindowContent>();
+        private readonly List<int> _closeScratch = new List<int>();
         private Vector2? _lastClosedPos;
 
         public bool IsOpen(int netId) => _windows.ContainsKey(netId);
 
+        // авто-закрытие открытых окон, если контейнер вышел из досягаемости (сервер больше не шлёт ContainerSync)
+        private void Update()
+        {
+            if (_runner == null || _windows.Count == 0) return;
+            _closeScratch.Clear();
+            foreach (var kv in _windows)
+                if (!_runner.IsGroundContainerReachable(kv.Key))
+                    _closeScratch.Add(kv.Key);
+            for (int i = 0; i < _closeScratch.Count; i++)
+                Close(_closeScratch[i]);
+        }
+
+        /// <summary>Открывает окно контейнера (или закрывает, если уже открыто); шлёт запрос серверу.</summary>
         public void Toggle(int netId, ushort defId)
         {
             if (IsOpen(netId)) { Close(netId); return; }
@@ -40,7 +55,7 @@ namespace Client.UI.Container
             var c = w.GetComponent<ContainerWindowContent>();
             if (c == null) { _manager.Close(w); return; }
 
-            int slots = def != null ? Mathf.Clamp(def.MaxContents, 4, 16) : 16;
+            int slots = def != null ? Mathf.Clamp(def.MaxContents, 4, 16) : 16; // 4..16 — держит окно в разумных пределах вне зависимости от данных предмета
             c.Bind(netId, def?.DisplayName ?? "", _runner, _catalog, slots);
             w.CloseRequested += _ => Close(netId);
 
@@ -48,6 +63,7 @@ namespace Client.UI.Container
             _contents[netId] = c;
         }
 
+        /// <summary>Единственный путь закрытия окна (крестик/повторный E/деспавн предмета) — уничтожает окно и уведомляет сервер.</summary>
         public void Close(int netId)
         {
             if (!_windows.TryGetValue(netId, out var w)) return;
@@ -59,12 +75,14 @@ namespace Client.UI.Container
             _runner?.SendCloseContainer(netId);
         }
 
+        /// <summary>Маршрутизирует ContainerSync в открытое окно по NetId контейнера.</summary>
         public void OnSync(in ContainerSync sync)
         {
             if (_contents.TryGetValue(sync.ContainerNetId, out var c) && c != null)
                 c.Apply(in sync);
         }
 
+        /// <summary>Закрывает окно, если контейнер-предмет исчез из мира (деспавн/подбор).</summary>
         public void OnItemGone(int netId)
         {
             if (IsOpen(netId)) Close(netId);

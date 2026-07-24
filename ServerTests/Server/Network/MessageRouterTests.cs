@@ -5,8 +5,10 @@ using Server.Network.Messages;
 
 namespace ServerTests.Server.Network
 {
+    /// <summary>Страхует полноту таблицы MessageRouter: новый клиент→сервер тип обязан попасть в ClientToServerTypes.</summary>
     public class MessageRouterTests
     {
+        // держать в синхроне с MessageRouter.CreateDefault() — источник регрессии "забыли зарегистрировать хендлер"
         private static readonly MessageType[] ClientToServerTypes =
         {
             MessageType.MoveIntent,

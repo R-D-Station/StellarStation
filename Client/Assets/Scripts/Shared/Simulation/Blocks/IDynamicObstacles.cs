@@ -1,5 +1,6 @@
 namespace Shared.Simulation.Blocks
 {
+    /// <summary>Мировые AABB динамических препятствий (двигающиеся ящики) для BlockMovementLogic; null = поведение не меняется.</summary>
     public interface IDynamicObstacles
     {
         int Count { get; }

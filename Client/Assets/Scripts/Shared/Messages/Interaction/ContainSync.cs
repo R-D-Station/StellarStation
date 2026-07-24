@@ -3,6 +3,7 @@ using System.IO;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Заморозка/освобождение владельца SS14-ящиком (server→owner): ContainerNetId≠0 — заперт (движение игнорируется, клиент скрывает), 0 — выпущен.</summary>
     public struct ContainSync : INetMessage
     {
         public int ContainerNetId;

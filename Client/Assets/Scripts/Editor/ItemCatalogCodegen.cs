@@ -10,6 +10,7 @@ using Shared.World.Items;
 
 namespace Client.Editor
 {
+    /// <summary>Собирает ItemDefinition-ассеты в ItemProtoRaw, резолвит наследование и генерирует ItemCatalogData.g.cs.</summary>
     public static class ItemCatalogCodegen
     {
         private const string OutputPath = "Assets/Scripts/Shared/World/Items/ItemCatalogData.g.cs";
@@ -38,6 +39,7 @@ namespace Client.Editor
             }
             catch (Exception e)
             {
+                // намеренно не пишем .g.cs при ошибке резолва — лучше стейл-каталог, чем битый
                 Debug.LogError($"[ItemCatalogCodegen] Разрешение прототипов провалено: {e.Message}");
                 return;
             }
@@ -114,7 +116,7 @@ namespace Client.Editor
             return result.ToArray();
         }
 
-        private static string F(float v) => v.ToString(System.Globalization.CultureInfo.InvariantCulture) + "f";
+        private static string F(float v) => v.ToString(System.Globalization.CultureInfo.InvariantCulture) + "f"; // RU-локаль даёт запятую в float-литерале → CS1729
 
         private static string ArrLit(ushort[] arr)
         {

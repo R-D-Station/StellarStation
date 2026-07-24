@@ -4266,7 +4266,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 6f89351c673ecd043a7ae44677f58942, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Client.Net.NetworkRunner
-  _entityViewPrefab: {fileID: 3239489999927283050, guid: c76554bb290174846ab59c0d69ab81d9, type: 3}
+  _entityViewPrefab: {fileID: -2903325721001189617, guid: c76554bb290174846ab59c0d69ab81d9, type: 3}
   _itemViewPrefab: {fileID: 3838010216627023794, guid: 889cac84fa8f33343a2984d5ed651c49, type: 3}
   _itemCatalog: {fileID: 11400000, guid: 907a125d66e99ac48909657e5676eea9, type: 2}
   _renderLayers: {fileID: 11400000, guid: 56326e2de83a542438fe671671958814, type: 2}

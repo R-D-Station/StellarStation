@@ -7,6 +7,7 @@ using Server.Network;
 
 namespace Server.Items
 {
+    /// <summary>Серверный инвентарь игроков: дренаж очередей pickup/drop/slot-op и правила экипировки/коллизионного дропа.</summary>
     public sealed class ServerInventorySystem
     {
         private readonly GameServer _server;
@@ -16,6 +17,7 @@ namespace Server.Items
         private readonly SVars _config;
         private readonly GridMap _map;
 
+        /// <summary>Резолв ItemDefId→ItemProto; дефолт — ItemCatalogData, тесты подменяют лямбдой.</summary>
         public Func<ushort, ItemProto?> ProtoLookup = defId =>
             ItemCatalogData.TryGet(defId, out var p) ? p : (ItemProto?)null;
 
@@ -121,6 +123,7 @@ namespace Server.Items
             if (span == 1)
             {
                 if (client.Slots[(int)SlotCategory.Hand][client.ActiveHand].NetId != 0) return;
+                // Despawn ПОСЛЕ всех return-проверок — проигравший гонку за один NetId в этот тик получит false, без утечки.
                 if (!_ground.DespawnGroundItem(msg.TargetNetId)) return;
                 client.Slots[(int)SlotCategory.Hand][client.ActiveHand] = item;
             }
@@ -172,6 +175,8 @@ namespace Server.Items
 
         private static int FacingToNeighborIndex(byte facing) => facing switch { 0 => 0, 2 => 1, 1 => 2, 3 => 3, _ => 0 };
 
+        // Коллизионный предмет нельзя дропнуть под ноги (занял бы клетку игрока) — сканируем N/E/S/W соседей,
+        // facing-клетку первой (UX: предмет падает перед игроком), остальные — fallback по кругу.
         private bool TryFindCollisionDropCell(ClientConnection client, in Shared.World.Blocks.BlockBox box, out int cx, out int cy, out int z)
         {
             int px = (int)MathF.Floor(client.X);
@@ -260,6 +265,7 @@ namespace Server.Items
             {
                 if (span > InventorySlot.DefaultCount(msg.ToCategory)) return;
                 int free = FreeCount(client, msg.ToCategory);
+                // Same-category move: предмет уже занимает свои N слотов — не считать их занятостью против самого себя.
                 if (msg.FromCategory == msg.ToCategory) free += CountItemByNetId(client, msg.ToCategory, h.NetId);
                 if (free < span) return;
                 ClearItemByNetId(client, msg.FromCategory, h.NetId);
@@ -316,6 +322,7 @@ namespace Server.Items
             return cleared;
         }
 
+        /// <summary>Шлёт владельцу полный слепок занятых слотов (только владельцу — held не виден чужим клиентам).</summary>
         public void SendInventorySyncToOwner(ClientConnection owner)
         {
             int occupied = 0;
@@ -353,7 +360,7 @@ namespace Server.Items
             int z = client.Z;
             if (_config.BlocksWorld) z = Shared.World.Blocks.ItemGroundSnap.SnapDown(_server.BlockWorld!, _server.BlockShapes, cx, z, cy);
 
-            var seen = new HashSet<int>();
+            var seen = new HashSet<int>(); // span>1 items occupy N slots but share one NetId — drop once, not per-slot
             for (int c = 0; c < client.Slots.Length; c++)
             {
                 var arr = client.Slots[c];

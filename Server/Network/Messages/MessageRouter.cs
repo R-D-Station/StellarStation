@@ -2,9 +2,10 @@ using Shared.Messages;
 
 namespace Server.Network.Messages
 {
+    /// <summary>Таблица wire-id → обработчик клиентских сообщений; заменяет switch в GameServer.OnNetworkReceive.</summary>
     public sealed class MessageRouter
     {
-        private readonly IClientMessageHandler?[] _table;
+        private readonly IClientMessageHandler?[] _table; // индекс по MessageType — без аллокаций на диспетче
 
         public MessageRouter(IReadOnlyList<IClientMessageHandler> handlers)
         {
@@ -22,6 +23,7 @@ namespace Server.Network.Messages
             }
         }
 
+        /// <summary>Полный список клиент→сервер хендлеров; новое сообщение — новая строка здесь + запись в MessageRouterTests.ClientToServerTypes.</summary>
         public static MessageRouter CreateDefault() => new MessageRouter(new IClientMessageHandler[]
         {
             new MoveIntentHandler(),
@@ -38,8 +40,10 @@ namespace Server.Network.Messages
             new PullItemHandler(),
         });
 
+        /// <summary>Хендлер по wire-id или null (server→client id / неизвестный id).</summary>
         public IClientMessageHandler? Resolve(ushort typeId) => typeId < _table.Length ? _table[typeId] : null;
 
+        /// <summary>Разбирает и обрабатывает один кадр; битый пакет только логируется (не кикает), т.к. Deserialize теперь тоже под try/catch.</summary>
         public void Dispatch(ClientConnection client, ushort typeId, byte[] data)
         {
             var handler = Resolve(typeId);

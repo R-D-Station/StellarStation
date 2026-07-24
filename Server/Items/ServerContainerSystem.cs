@@ -7,14 +7,17 @@ using Server.Network;
 
 namespace Server.Items
 {
+    /// <summary>Серверно-авторитетные контейнеры: UI-окно (viewer-очередь) и SS14-физический ящик (сос/высып через E), плюс заморозка игроков внутри.</summary>
     public sealed class ServerContainerSystem
     {
+        // внутреннее кольцо высыпа (8 направлений, r*0.5)
         private static readonly (float dx, float dz)[] InnerDirs =
         {
             (1f, 0f), (0.7071f, 0.7071f), (0f, 1f), (-0.7071f, 0.7071f),
             (-1f, 0f), (-0.7071f, -0.7071f), (0f, -1f), (0.7071f, -0.7071f)
         };
 
+        // внешнее кольцо высыпа (16 направлений, r*0.9)
         private static readonly (float dx, float dz)[] OuterDirs =
         {
             (1f, 0f), (0.9239f, 0.3827f), (0.7071f, 0.7071f), (0.3827f, 0.9239f),
@@ -27,8 +30,10 @@ namespace Server.Items
         private readonly ServerInventorySystem _inventory;
         private readonly Dictionary<int, IWorldEntity> _entities;
         private readonly Dictionary<NetPeer, ClientConnection> _clients;
+        // ключ — NetId контейнера (стабилен при ground↔hand), не identity сущности
         private readonly Dictionary<int, List<HeldItem>> _contents = new();
         private readonly Dictionary<int, int> _viewerCount = new();
+        // ключ — identity GroundItemEntity: пере-дроп того же NetId = новая сущность = крышка снова закрыта
         private readonly Dictionary<int, GroundItemEntity> _lidOpen = new();
         private readonly List<int> _lidPruneScratch = new();
 
@@ -41,6 +46,7 @@ namespace Server.Items
             _clients = clients;
         }
 
+        /// <summary>Дренирует close/open/put/take очереди всех клиентов (flood-guard 32/тик) + чистит протухшие lid/contained записи; вызывается раз в тик.</summary>
         public void ProcessContainerOps()
         {
             const int maxPerTick = 32;
@@ -101,12 +107,14 @@ namespace Server.Items
                 if (!_entities.TryGetValue(netId, out var e) || e is not GroundItemEntity gi) return;
                 if (IsLidOpen(netId))
                 {
+                    // E на открытой крышке = закрыть → всосать нэрбай предметы и запереть стоящих на клетке игроков
                     _lidOpen.Remove(netId);
                     SuckItems(netId, gi, p.Value);
                     ContainPlayersOnCell(gi);
                 }
                 else
                 {
+                    // E на закрытой = открыть → высыпать содержимое кольцами и выпустить запертых
                     _lidOpen[netId] = gi;
                     SpillContents(netId, gi, p.Value);
                     ReleasePlayers(netId, gi);
@@ -147,6 +155,7 @@ namespace Server.Items
             }
         }
 
+        // концентрические кольца от ящика: последний (max-slot) индекс — в центр, следующие 8 — внутреннее кольцо, остаток — внешнее
         private void SpillContents(int containerNetId, GroundItemEntity box, in ItemProto boxProto)
         {
             if (!_contents.TryGetValue(containerNetId, out var list) || list.Count == 0) return;
@@ -158,7 +167,7 @@ namespace Server.Items
                 var h = list[i];
                 var ip = _inventory.ProtoLookup(h.ItemDefId);
                 bool hasCol = ip.HasValue && ip.Value.HasCollision;
-                float halfW = 0.5f, height = 1f, feetOffset = 0f;
+                float halfW = 0.3f, height = 0.4f, feetOffset = 0f;
                 if (hasCol)
                 {
                     var b = ip.Value.CollisionBox;
@@ -186,7 +195,8 @@ namespace Server.Items
                     py = box.Y + d.dz * (r * 0.9f);
                 }
 
-                if (hasCol && _server.BlockWorld != null &&
+                // слот кольца перекрыт геометрией — не терять предмет, кинуть у самого ящика
+                if (_server.BlockWorld != null &&
                     BlockMovementLogic.CollidesBox(_server.BlockWorld, _server.BlockShapes, px, box.Z + feetOffset, py, halfW, height))
                 {
                     px = box.X;
@@ -198,6 +208,7 @@ namespace Server.Items
             list.Clear();
         }
 
+        // 9-клеточный скан (соседи + сама клетка) под свободное место при выпуске игрока
         private static readonly (int dx, int dz)[] ReleaseCells =
         {
             (1, 0), (-1, 0), (0, 1), (0, -1),
@@ -207,6 +218,7 @@ namespace Server.Items
 
         private readonly List<(int x, int z)> _releasePlaced = new();
 
+        // игрок, стоящий на клетке ящика на момент закрытия крышки, — запирается внутрь
         private void ContainPlayersOnCell(GroundItemEntity box)
         {
             int bx = (int)MathF.Floor(box.X);
@@ -225,6 +237,7 @@ namespace Server.Items
             }
         }
 
+        // выпускает всех запертых в этом ящике на свободную соседнюю клетку (без наложения друг на друга)
         private void ReleasePlayers(int containerNetId, GroundItemEntity box)
         {
             int bx = (int)MathF.Floor(box.X);
@@ -282,6 +295,7 @@ namespace Server.Items
             return false;
         }
 
+        // контейнер, в котором заперт игрок, уничтожен извне — освободить, не дожидаясь HandleOpen
         private void PruneStaleContained()
         {
             foreach (var c in _clients.Values)
@@ -305,8 +319,10 @@ namespace Server.Items
             else _viewerCount[netId] = n - 1;
         }
 
+        /// <summary>Открыт ли контейнер миру (UI-вьюер ИЛИ откинутая SS14-крышка) — гейт снапшот-видимости содержимого/скрытия предметов.</summary>
         public bool IsWorldOpen(int netId) => _viewerCount.ContainsKey(netId) || IsLidOpen(netId);
 
+        // identity-check, не только NetId: пере-дроп того же NetId создаёт новую GroundItemEntity → крышка снова закрыта
         private bool IsLidOpen(int netId) =>
             _lidOpen.TryGetValue(netId, out var ent)
             && _entities.TryGetValue(netId, out var cur)
@@ -337,7 +353,7 @@ namespace Server.Items
 
             var list = Contents(netId);
             if (list.Count >= p.Value.MaxContents) return;
-            if (_contents.TryGetValue(held.NetId, out var inner) && inner.Count > 0) return;
+            if (_contents.TryGetValue(held.NetId, out var inner) && inner.Count > 0) return; // не разрешаем вложенный контейнер с содержимым — без рекурсивного unwrap на suck/spill
 
             var heldProto = _inventory.ProtoLookup(held.ItemDefId);
             if (!heldProto.HasValue || !ContainerFilter.Allows(p.Value, heldProto.Value)) return;
@@ -367,6 +383,7 @@ namespace Server.Items
             _inventory.SendInventorySyncToOwner(client);
         }
 
+        /// <summary>Снимает клиента-вьюера со всех открытых им UI-контейнеров (содержимое не трогает).</summary>
         public void OnClientDisconnect(ClientConnection client)
         {
             foreach (var netId in client.OpenContainers)

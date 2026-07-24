@@ -14,7 +14,7 @@ using Server.Items;
 
 namespace Server.Network;
 
-/// <summary>Сетевой сервер: приём подключений, game-loop, симуляция и рассылка снапшотов мира.</summary>
+/// <summary>Сетевой сервер-оркестратор: подключения, game-loop, рассылка снапшотов; предметная логика делегирована подсистемам (_groundItems/_inventory/_containers/_pull).</summary>
 public class GameServer
 {
     private readonly SVars _config;
@@ -48,11 +48,11 @@ public class GameServer
     // единый источник логики лестниц: и legacy E (TryUseTile), и адресный InteractIntent-клик идут через него.
     private readonly StairHandler _stairHandler = new();
     private readonly IInteractionHandler[] _interactionHandlers;
-    private readonly MessageRouter _router = MessageRouter.CreateDefault();
-    private readonly GroundItemWorld _groundItems;
-    private readonly ServerInventorySystem _inventory;
-    private readonly ServerContainerSystem _containers;
-    private readonly ServerPullSystem _pull;
+    private readonly MessageRouter _router = MessageRouter.CreateDefault(); // диспетч входящих по MessageType — см. [[MessageRouter]]
+    private readonly GroundItemWorld _groundItems; // наземные предметы: спавн/деспавн/PVS — см. [[ServerItems]]
+    private readonly ServerInventorySystem _inventory; // руки/подбор/дроп/слоты/экип — см. [[ServerItems]]
+    private readonly ServerContainerSystem _containers; // контейнеры (открыт/закрыт, содержимое) — см. [[Containers]]
+    private readonly ServerPullSystem _pull; // тяга сущностей/предметов — см. [[HeavyPull]]
 
     // Переиспользуемые буферы горячего broadcast-пути (ноль аллокаций при установившемся числе клиентов).
     private EntitySnapshot[] _broadcastEntities = Array.Empty<EntitySnapshot>();
@@ -123,6 +123,7 @@ public class GameServer
         _clients = new Dictionary<NetPeer, ClientConnection>();
         _mainThreadActions = new ConcurrentQueue<Action>();
         _broadcastPayloadWriter = new BinaryWriter(_broadcastPayload);
+        // Composition root предметных систем: общие _entities/_clients, GameServer как фасад (this).
         _groundItems = new GroundItemWorld(_entities, _netIdAllocator, _clients);
         _inventory = new ServerInventorySystem(this, _groundItems, _clients, _entities, _config, _map);
         _containers = new ServerContainerSystem(this, _inventory, _entities, _clients);
@@ -251,7 +252,7 @@ public class GameServer
         }
     }
 
-    /// <summary>Приём сообщения от клиента: разбор типа и постановка в очередь обработки.</summary>
+    /// <summary>Приём сообщения от клиента: разбор типа и диспетч через <see cref="MessageRouter"/>.</summary>
     private void OnNetworkReceive(NetPeer peer, NetDataReader reader, byte channel, DeliveryMethod method)
     {
         try
@@ -294,7 +295,7 @@ public class GameServer
                 action();
             }
 
-            _groundItems.RebuildObstacles();
+            _groundItems.RebuildObstacles(); // раз/тик, ДО движения — свежая коллизия по крейтам для этого тика
             ProcessIntents();
             ProcessInteractions();
             _inventory.ProcessPickups();
@@ -385,6 +386,7 @@ public class GameServer
     /// БАЙТ-В-БАЙТ как в клиентском PlayerPredictor (ApplyLocal/Reconcile). Менять — только синхронно с ним.</summary>
     private void ApplyClientIntent(ClientConnection client, MoveIntent intent, bool hasIntent)
     {
+        // Внутри контейнера (шкаф/ящик) — движение заморожено: только консьюмим Sequence (реконсиляция не застревает).
         if (client.ContainedInNetId != 0)
         {
             if (hasIntent) client.LastProcessedSequence = intent.Sequence;
@@ -411,6 +413,7 @@ public class GameServer
                 sprint: hasIntent && intent.Sprint,
                 jump: canMove && hasIntent && intent.Jump,
                 crawl: client.State == PlayerState.Laying);
+            // Speed.CurrentValue — базовый шаг (баффы/дебаффы); Obstacles — динамическая коллизия по наземным предметам (крейты и т.п.).
             Shared.Simulation.Blocks.BlockMovementLogic.Step(BlockWorld!, BlockShapes, ref client.Mover, in input, client.Speed.CurrentValue, _groundItems.Obstacles);
             // Зеркало в legacy-поля (тайл-раскладка): X=X, Y=глубина плана (Mover.Z), Z=целый блок высоты (Mover.Y).
             client.X = client.Mover.X;
@@ -465,6 +468,7 @@ public class GameServer
         }
     }
 
+    /// <summary>Резолвер ItemProto по ItemDefId; фасад — прокидывает в _inventory и _groundItems разом.</summary>
     public Func<ushort, ItemProto?> ProtoLookup
     {
         get => _inventory.ProtoLookup;
@@ -637,6 +641,7 @@ public class GameServer
         return (spawnTileX + 0.5f, spawnTileY + 0.5f, spawnZ);
     }
 
+    // ItemDefId надетой формы (слот Uniform) для визуального оверлея на NetEntityView; 0 = ничего не надето.
     private static ushort WornDefOf(ClientConnection c)
     {
         int u = (int)Shared.World.Items.SlotCategory.Uniform;
@@ -692,7 +697,7 @@ public class GameServer
             for (int e = 0; e < count; e++)
             {
                 bool self = _broadcastEntities[e].NetId == client.PlayerNetId;
-                if (!self && _broadcastContained[e]) continue;
+                if (!self && _broadcastContained[e]) continue; // спрятан в контейнере — виден только себе (свой снапшот)
                 if (self
                     || (_config.BlocksWorld
                         ? InInterestBlocks(client.X, client.Y, client.Z, in _broadcastEntities[e], interestR, interestZ)
@@ -731,22 +736,28 @@ public class GameServer
         }
     }
 
+    // Тонкие фасады над _groundItems (совместимость вызывающих/тестов) — см. [[ServerItems]].
+
+    /// <summary>Заспавнить наземный предмет с автовыдачей NetId.</summary>
     public int SpawnGroundItem(ushort itemDefId, byte stackCount, float cellX, float cellY, float z, byte placement = 0)
         => _groundItems.SpawnGroundItem(itemDefId, stackCount, cellX, cellY, z, placement);
 
+    /// <summary>Заспавнить наземный предмет с заданным NetId (переиспользуется при drop — см. заметку памяти NetId reuse).</summary>
     public void SpawnGroundItemWithId(int netId, ushort itemDefId, byte stackCount, float cellX, float cellY, float z, byte placement = 0)
         => _groundItems.SpawnGroundItemWithId(netId, itemDefId, stackCount, cellX, cellY, z, placement);
 
+    /// <summary>Убрать наземный предмет из мира по NetId.</summary>
     public bool DespawnGroundItem(int netId) => _groundItems.DespawnGroundItem(netId);
 
+    /// <summary>Найти предмет по NetId в любом местоположении (земля/рука/слот/контейнер).</summary>
     public bool TryFindItemAnyLocation(int netId, out ItemLocationKind location, out ushort itemDefId, out byte stackCount)
         => _groundItems.TryFindItemAnyLocation(netId, out location, out itemDefId, out stackCount);
 
+    /// <summary>Наземные предметы в радиусе интереса точки (cx,cy,cz).</summary>
     public List<ItemInstance> GroundItemsInInterest(float cx, float cy, int cz)
         => _groundItems.GroundItemsInInterest(cx, cy, cz);
 
-    /// <summary>Рассылает наземные предметы в интересе каждого клиента ОТДЕЛЬНЫМ ItemSnapshot-потоком (Sequenced), НЕ смешивая
-    /// с player-WorldSnapshot. Нет предметов / клиент их не видит — не шлём (без wire-шума). Zero-alloc: переиспользуемые буферы.</summary>
+    /// <summary>Рассылает наземные предметы в интересе каждого клиента отдельным ItemSnapshot-потоком (Sequenced), не смешивая с WorldSnapshot.</summary>
     private void BroadcastItemSnapshot()
     {
         if (_clients.Count == 0)
@@ -761,7 +772,7 @@ public class GameServer
             if (entity is GroundItemEntity gi)
             {
                 var inst = GroundItemWorld.ToInstance(gi);
-                inst.Open = _containers.IsWorldOpen(inst.NetId) ? (byte)1 : (byte)0;
+                inst.Open = _containers.IsWorldOpen(inst.NetId) ? (byte)1 : (byte)0; // визуальный флаг открытой крышки — см. [[Containers]]
                 _broadcastItems[count++] = inst;
             }
 
@@ -1086,6 +1097,7 @@ public class GameServer
         SendToClient(client, new MapDataMessage { Map = _map });
     }
 
+    /// <summary>Фасад над _inventory: полный InventorySync владельцу (руки+слоты).</summary>
     public void SendInventorySyncToOwner(ClientConnection owner) => _inventory.SendInventorySyncToOwner(owner);
 
     /// <summary>Догнать новоприбывшего клиента текущими открытыми дверями (карта статична, двери — рантайм).</summary>

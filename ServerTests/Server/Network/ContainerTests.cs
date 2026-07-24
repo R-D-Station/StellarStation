@@ -11,6 +11,7 @@ using Server.Network;
 
 namespace ServerTests.Server.Network
 {
+    /// <summary>UI-режим контейнеров: viewer-refcount, open/close/put/take, фильтры, разрыв соединения.</summary>
     public class ContainerTests : IDisposable
     {
         private const ushort ContDef = 50;

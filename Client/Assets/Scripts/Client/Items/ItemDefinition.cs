@@ -32,12 +32,15 @@ namespace Client.Items
         public bool Equippable => _equippable;
         public SlotCategory EquipSlot => _equipSlot;
 
+        // Наследование гасится на кодогене (ItemCatalogCodegen → ItemProtoResolver), рантайм цепочку не обходит.
         [SerializeField] private ItemDefinition _parent;
         public ItemDefinition Parent => _parent;
 
+        // 0 = унаследовать от Parent (сентинел, см. ItemProtoResolver).
         [SerializeField] private byte _slotSpan;
         public byte SlotSpan => _slotSpan;
 
+        // 0 = унаследовать от Parent (сентинел, см. ItemProtoResolver).
         [SerializeField] private byte _maxStack;
         public byte MaxStack => _maxStack;
 
@@ -47,6 +50,7 @@ namespace Client.Items
         [SerializeField] private byte _maxContents;
         public byte MaxContents => _maxContents;
 
+        // Наземный предмет — препятствие в блок-мире (форма = целая ячейка, см. ItemProto.CollisionBox).
         [SerializeField] private bool _hasCollision;
         public bool HasCollision => _hasCollision;
 
@@ -65,17 +69,20 @@ namespace Client.Items
         [SerializeField] private ushort[] _filterTags;
         public ushort[] FilterTags => _filterTags;
 
+        // UI = наше окно; SS14 = физическая крышка (E закрыл — всосал, открыл — высыпал).
         [SerializeField] private ContainerMode _containerMode;
         public ContainerMode ContainerMode => _containerMode;
 
         [SerializeField] private float _suckRadius = 1.5f;
         public float SuckRadius => _suckRadius;
 
+        // Клиент-only (RenderLayerCatalog); в ItemProto/кодоген не идёт.
         [SerializeField] private ushort _renderLayer;
         public ushort RenderLayer => _renderLayer;
 
+        // Клиент-only worn-оверлей (NetEntityView); в ItemProto/кодоген не идёт.
         [SerializeField] private bool _wornVisible;
-        [SerializeField] private Sprite[] _wornSprites;
+        [SerializeField] private Sprite[] _wornSprites; // [N,S,E,W], см. Direction
         public bool WornVisible => _wornVisible;
         public Sprite[] WornSprites => _wornSprites;
     }

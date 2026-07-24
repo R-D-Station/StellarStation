@@ -5,7 +5,7 @@ using Client.Items;
 
 namespace Client.Net.View
 {
-    /// <summary>Визуал наземного предмета: статичный world-спрайт в центре ячейки, без SnapshotBuffer (не движется).</summary>
+    /// <summary>Визуал наземного предмета: world-спрайт на свободной float-позиции, сглаженной локально (без SnapshotBuffer).</summary>
     public class ItemView : MonoBehaviour
     {
         [SerializeField] private SpriteRenderer _spriteRenderer;
@@ -17,7 +17,7 @@ namespace Client.Net.View
         // Хук поверхности ячейки (x,высота,план→Y мира); ставится NetworkRunner при входе в блок-режим.
         public static System.Func<int, int, int, float> BlockSurface;
 
-        private ushort _lastDefId;   // перевыбор спрайта только при смене ItemDefId
+        private ushort _lastDefId;   // перевыбор спрайта только при смене ItemDefId или Open
         private byte _lastOpen;
         private bool _hasDef;
         private Vector3 _targetPos;
@@ -35,6 +35,7 @@ namespace Client.Net.View
 
         public int SortingOrder => _spriteRenderer != null ? _spriteRenderer.sortingOrder : 0;
 
+        /// <summary>Каталог порядка отрисовки (Order по RenderLayer) — задаётся раз при спавне вью.</summary>
         public void SetRenderLayers(RenderLayerCatalog c) => _renderLayers = c;
 
         public void Init(int netId)
@@ -44,6 +45,7 @@ namespace Client.Net.View
             if (_spriteRenderer != null) _baseMaterial = _spriteRenderer.sharedMaterial;
         }
 
+        /// <summary>Порядковый номер свежести (последний брошенный — сверху стопки); sortingOrder = слой·1000 + seq.</summary>
         public void SetSpawnSeq(int s)
         {
             _spawnSeq = s;
@@ -53,12 +55,14 @@ namespace Client.Net.View
 
         public void SetOutlineMaterial(Material m) => _outlineMaterial = m;
 
+        /// <summary>Переключает материал наведения (sharedMaterial, не material — без инстанс-клона на предмет).</summary>
         public void SetHovered(bool on)
         {
             if (_spriteRenderer == null || _outlineMaterial == null || _baseMaterial == null) return;
             _spriteRenderer.sharedMaterial = on ? _outlineMaterial : _baseMaterial;
         }
 
+        /// <summary>Точный клик по непрозрачному пикселю спрайта; нечитаемая текстура — деградация до bounds.</summary>
         public bool HitTestPixel(Ray ray, out float camDist)
         {
             camDist = 0f;
@@ -104,7 +108,7 @@ namespace Client.Net.View
             }
         }
 
-        /// <summary>Применить данные предмета из снапшота: позиция (центр ячейки) + спрайт по ItemDefId.</summary>
+        /// <summary>Применить данные предмета из снапшота: float-позиция + спрайт по (ItemDefId, Open).</summary>
         public void Apply(in ItemInstance data, ItemCatalog catalog)
         {
             if (NetEntityView.BlocksMode)
@@ -117,7 +121,7 @@ namespace Client.Net.View
             }
             else
             {
-                // Сервер (X, Y=глубина, Z=этаж) → Unity (X, высота=Z·FloorHeight, Z=глубина). +0.5 — центр ячейки.
+                // Сервер (X, Y=глубина, Z=этаж) → Unity (X, высота=Z·FloorHeight, Z=глубина); X/Y — свободный float, не центр ячейки.
                 _targetPos = new Vector3(data.X, data.Z * RenderConfig.FloorHeight, data.Y);
             }
 

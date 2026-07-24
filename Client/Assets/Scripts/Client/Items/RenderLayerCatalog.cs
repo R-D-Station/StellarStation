@@ -4,6 +4,7 @@ using UnityEngine;
 
 namespace Client.Items
 {
+    /// <summary>Реестр слоёв отрисовки предметов: стабильные id (не перенумеровывать) + сортировочный Order.</summary>
     [CreateAssetMenu(menuName = "Station/Render Layer Catalog", fileName = "RenderLayerCatalog")]
     public sealed class RenderLayerCatalog : ScriptableObject
     {

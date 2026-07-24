@@ -3,6 +3,7 @@ using System.IO;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Сервер→владельцу: состояние тяги для HUD (PulledNetId=0 — отпущено).</summary>
     public struct PullSync : INetMessage
     {
         public int PulledNetId;

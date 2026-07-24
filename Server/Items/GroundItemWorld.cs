@@ -9,6 +9,7 @@ using Server.Network;
 
 namespace Server.Items
 {
+    /// <summary>Жизненный цикл наземных предметов (`_entities` — общий реестр сервера, владение осталось в GameServer, передан по ссылке).</summary>
     public sealed class GroundItemWorld
     {
         private readonly Dictionary<int, IWorldEntity> _entities;
@@ -16,6 +17,7 @@ namespace Server.Items
         private readonly Dictionary<NetPeer, ClientConnection> _clients;
         private readonly Shared.Simulation.Blocks.DynamicObstacleSet _obstacles = new();
 
+        /// <summary>Резолв ItemDefId→ItemProto; дефолт — ItemCatalogData, тесты подменяют лямбдой.</summary>
         public Func<ushort, ItemProto?> ProtoLookup = defId =>
             ItemCatalogData.TryGet(defId, out var p) ? p : (ItemProto?)null;
 
@@ -36,6 +38,7 @@ namespace Server.Items
             return id;
         }
 
+        /// <summary>Спавн с заранее известным NetId — переиспользуется при drop (тот же предмет, тот же NetId по проводу).</summary>
         public void SpawnGroundItemWithId(int netId, ushort itemDefId, byte stackCount, float cellX, float cellY, float z, byte placement = 0)
         {
             if (_entities.ContainsKey(netId))
@@ -60,6 +63,7 @@ namespace Server.Items
             return false;
         }
 
+        /// <summary>Раз в тик: world-AABB коллизионных предметов, центрированные на float-позиции (F1b).</summary>
         public void RebuildObstacles()
         {
             _obstacles.Clear();
@@ -75,6 +79,7 @@ namespace Server.Items
             }
         }
 
+        /// <summary>Ищет предмет по NetId независимо от местоположения (Ground в `_entities`, иначе Held по всем клиентским слотам).</summary>
         public bool TryFindItemAnyLocation(int netId, out ItemLocationKind location, out ushort itemDefId, out byte stackCount)
         {
             if (_entities.TryGetValue(netId, out var e) && e is GroundItemEntity gi)
@@ -107,6 +112,7 @@ namespace Server.Items
             return false;
         }
 
+        /// <summary>PVS-выборка наземных предметов вокруг точки (тот же InInterest-предикат, что у игроков).</summary>
         public List<ItemInstance> GroundItemsInInterest(float cx, float cy, int cz)
         {
             float r = SVars.Instance.EntityInterestRadius;
@@ -122,6 +128,7 @@ namespace Server.Items
             return result;
         }
 
+        /// <summary>Спавнит предметы, размещённые в редакторе карты, снапая их на пол через ItemGroundSnap.</summary>
         public void SpawnMapItems(BlockGrid world, IBlockShapes shapes)
         {
             var mapItems = world.ItemSpawns;

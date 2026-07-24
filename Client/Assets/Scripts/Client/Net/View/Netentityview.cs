@@ -68,6 +68,7 @@ namespace Client.Net.View
 
         private SpriteRenderer _wornOverlay;
         private Sprite[] _wornSprites;
+        /// <summary>DefId надетой формы (0 = нет).</summary>
         public ushort WornDefId { get; private set; }
 
         public void Init(int netId)
@@ -91,6 +92,7 @@ namespace Client.Net.View
             _wornOverlay.enabled = false;
         }
 
+        /// <summary>Задать/снять оверлей надетой формы (sprites[4] по Direction; меньше 4 или null — оверлей выключен).</summary>
         public void SetWorn(ushort defId, Sprite[] sprites)
         {
             WornDefId = defId;
@@ -98,6 +100,7 @@ namespace Client.Net.View
             UpdateWornOverlay(_lastFacing < 4 ? (Direction)_lastFacing : Direction.South);
         }
 
+        // _culled в show: иначе одежда остаётся видимой поверх срезанного/скрытого тела (плавающая шмотка).
         private void UpdateWornOverlay(Direction dir)
         {
             if (_wornOverlay == null) return;

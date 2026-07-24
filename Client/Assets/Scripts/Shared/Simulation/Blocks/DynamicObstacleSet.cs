@@ -2,6 +2,7 @@ using System.Collections.Generic;
 
 namespace Shared.Simulation.Blocks
 {
+    /// <summary>Пересобираемый за тик набор world-AABB (центр+halfW+height) — реализация IDynamicObstacles для тянущихся ящиков.</summary>
     public sealed class DynamicObstacleSet : IDynamicObstacles
     {
         private readonly struct Aabb

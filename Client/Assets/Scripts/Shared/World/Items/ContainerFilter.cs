@@ -1,7 +1,9 @@
 namespace Shared.World.Items
 {
+    /// <summary>Чистая проверка допустимости предмета в контейнере по id/тегам (белый/чёрный список из ItemProto).</summary>
     public static class ContainerFilter
     {
+        /// <summary>Whitelist — допускает только совпавшие по id или тегу; Blacklist — инвертирует; None — пропускает всё.</summary>
         public static bool Allows(in ItemProto container, in ItemProto item)
         {
             if (container.FilterMode == ContainerFilterMode.None) return true;

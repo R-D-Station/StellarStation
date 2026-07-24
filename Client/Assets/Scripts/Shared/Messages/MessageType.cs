@@ -31,7 +31,7 @@ public enum MessageType : ushort
     InteractIntent = 200, // адресный клик по тайлу/сущности (перепрофиль заглушки ClickIntent; wire-id стабилен)
     PickupItem = 201,
     DropItem = 202,
-    InventorySync = 203, // server→client, OWNER-ONLY: полный слепок 6 слотов инвентаря
+    InventorySync = 203, // server→client, OWNER-ONLY: слепок занятых слотов (variable-length, адрес Category+Index)
     SwapHand = 204,      // client→server: сменить активную руку
     MoveSlot = 205,      // client→server: переместить предмет между слотами
     OpenContainer = 206,     // client→server: открыть контейнер (по NetId)

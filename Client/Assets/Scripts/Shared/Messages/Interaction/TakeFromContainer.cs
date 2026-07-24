@@ -3,6 +3,7 @@ using System.IO;
 
 namespace Shared.Messages.Interaction
 {
+    /// <summary>Взять предмет по индексу из открытого контейнера в активную руку (client→server): требует пустую руку.</summary>
     public struct TakeFromContainer : INetMessage
     {
         public int NetId;

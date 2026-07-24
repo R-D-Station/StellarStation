@@ -82,7 +82,7 @@ namespace ServerTests.Shared.Messages.Core
         public void ReadFrom_MatchesWriteTo_RoundTrips()
         {
             // 2.5-A: клиент читает сущность напрямую из reader (WorldSnapshot без per-entity len-prefix). ReadFrom
-            // должен байт-в-байт обратить WriteTo (тот же порядок/23 байта), что и Deserialize(byte[]).
+            // должен байт-в-байт обратить WriteTo (тот же порядок/SerializedSize байт), что и Deserialize(byte[]).
             var original = new EntitySnapshot
             {
                 NetId = -42, X = -7.5f, Y = 9.25f, Z = 3.0f,
@@ -92,7 +92,7 @@ namespace ServerTests.Shared.Messages.Core
             using var ms = new MemoryStream();
             using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
                 original.WriteTo(w);
-            Assert.Equal(EntitySnapshot.SerializedSize, ms.Length); // 23 байта, без len-prefix
+            Assert.Equal(EntitySnapshot.SerializedSize, ms.Length); // без len-prefix
 
             ms.Position = 0;
             using var r = new BinaryReader(ms);
@@ -106,7 +106,7 @@ namespace ServerTests.Shared.Messages.Core
             Assert.Equal(original.State, back.State);
             Assert.Equal(original.Reason, back.Reason);
             Assert.Equal(original.Speed, back.Speed);
-            Assert.Equal(ms.Length, ms.Position); // прочитано ровно 23 байта
+            Assert.Equal(ms.Length, ms.Position); // прочитано ровно SerializedSize байт
         }
 
         [Fact]

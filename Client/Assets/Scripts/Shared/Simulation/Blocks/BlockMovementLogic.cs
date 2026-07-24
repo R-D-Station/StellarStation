@@ -3,14 +3,7 @@ using Shared.World.Blocks;
 
 namespace Shared.Simulation.Blocks
 {
-    /// <summary>
-    /// Воксельное движение (фаза B): AABB игрока против коллизионных боксов блоков. Оси как в Unity:
-    /// X/Z — план, Y — высота. Единая логика сервера и клиента — детерминизм критичен (только
-    /// +,*,сравнения; поверхности квантованы 1/16). Один вызов Step = один тик. Порядок фаз тика
-    /// фиксирован: план (X, затем Z, автошаг с опоры) → проверка опоры → прыжок → гравитация →
-    /// вертикаль. Скорости — из MovementLogic (StepPerTick/Sprint/Crawl/диагональ); IntentDirection:
-    /// North = +Z плана. Отсутствие секции = Air.
-    /// </summary>
+    /// <summary>Воксельное движение (фаза B): AABB игрока/ящика против боксов блоков (X/Z план, Y высота); детерминированная, общая для сервера и клиента; Step = один тик в фиксированном порядке план→опора→прыжок→гравитация→вертикаль.</summary>
     public static class BlockMovementLogic
     {
         /// <summary>Применить один тик ввода к состоянию. Мир — через IBlockSampler (клиентский стопор фронтира).</summary>
@@ -57,6 +50,7 @@ namespace Shared.Simulation.Blocks
         public static bool IsGrounded(IBlockSampler grid, IBlockShapes shapes, float x, float y, float z, float vy, IDynamicObstacles dyn = null)
             => vy == 0f && HasSupport(grid, shapes, x, y, z, dyn);
 
+        /// <summary>Блок-коллизия под параметрическим футпринтом (не игрок) — для движущихся ящиков и т.п.</summary>
         public static bool CollidesBox(IBlockSampler grid, IBlockShapes shapes, float centerX, float y, float centerZ, float halfW, float height)
         {
             float minX = centerX - halfW, maxX = centerX + halfW;

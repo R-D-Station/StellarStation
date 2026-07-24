@@ -3,6 +3,7 @@ using Shared.Messages.Interaction;
 
 namespace Server.Network.Messages
 {
+    /// <summary>DropItem → ClientConnection.DropQueue.</summary>
     public sealed class DropItemHandler : IClientMessageHandler
     {
         public MessageType Type => MessageType.DropItem;

@@ -2,6 +2,7 @@ using Shared.World.Blocks;
 
 namespace ServerTests.Shared.World.Blocks
 {
+    /// <summary>ItemGroundSnap.SnapDown: полный блок/топ-слэб/полустеп/вакуум/старт-внутри-блока/глубина в пределах и за MaxScanDepth.</summary>
     public class ItemGroundSnapTests
     {
         private static BlockGrid Grid() => new BlockGrid();
