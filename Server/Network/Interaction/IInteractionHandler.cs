@@ -1,11 +1,8 @@
-using Shared.World;
-
 namespace Server.Network.Interaction
 {
-    /// <summary>Контекст одной адресной интеракции: карта, инициатор, разрешённый ЦЕЛЫЙ тайл-цель и параметры вызова.</summary>
+    /// <summary>Контекст одной адресной интеракции: инициатор, разрешённая ЦЕЛЕВАЯ клетка и параметры вызова.</summary>
     public readonly struct InteractContext
     {
-        public readonly GridMap Map;
         public readonly ClientConnection Client;
         public readonly int TileX;
         public readonly int TileY;
@@ -13,9 +10,8 @@ namespace Server.Network.Interaction
         public readonly byte Verb;
         public readonly byte HandIndex;
 
-        public InteractContext(GridMap map, ClientConnection client, int tileX, int tileY, int tileZ, byte verb, byte handIndex)
+        public InteractContext(ClientConnection client, int tileX, int tileY, int tileZ, byte verb, byte handIndex)
         {
-            Map = map;
             Client = client;
             TileX = tileX;
             TileY = tileY;

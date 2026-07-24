@@ -1,4 +1,5 @@
 using Shared.Messages.Core;
+using Shared.Simulation;
 using Shared.Simulation.Blocks;
 using Shared.World.Blocks;
 
@@ -41,17 +42,17 @@ namespace ServerTests.Shared.World.Blocks
             // Фаза 1: бег без прыжка — лесенка берётся автошагом, у стенки уступа (x=10) упор.
             var run = new BlockMoveInput(IntentDirection.East, sprint: true);
             for (int i = 0; i < 60; i++)
-                BlockMovementLogic.Step(g, DevBlockWorld.Shapes, ref s, in run);
+                BlockMovementLogic.Step(g, DevBlockWorld.Shapes, ref s, in run, MovementLogic.StepPerTick);
             Assert.InRange(s.X, 9.35f, 9.65f); // упор у стенки уступа (10.0 − HalfWidth, минус квант шага)
             Assert.Equal(1f, s.Y);
 
             // Фаза 2: с прыжком — заскакиваем на уступ.
             var jumpRun = new BlockMoveInput(IntentDirection.East, sprint: true, jump: true);
             for (int i = 0; i < 15; i++)
-                BlockMovementLogic.Step(g, DevBlockWorld.Shapes, ref s, in jumpRun);
+                BlockMovementLogic.Step(g, DevBlockWorld.Shapes, ref s, in jumpRun, MovementLogic.StepPerTick);
             var settle = new BlockMoveInput(IntentDirection.None);
             for (int i = 0; i < 25; i++)
-                BlockMovementLogic.Step(g, DevBlockWorld.Shapes, ref s, in settle);
+                BlockMovementLogic.Step(g, DevBlockWorld.Shapes, ref s, in settle, MovementLogic.StepPerTick);
 
             Assert.InRange(s.X, 10.4f, 12.6f); // стоим НА уступе x∈[10..13)
             Assert.Equal(2f, s.Y);             // его верх

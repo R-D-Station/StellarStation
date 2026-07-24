@@ -11,8 +11,8 @@ using Client.Net.Prediction;
 using Client.Gameplay.Input;
 using Client.Gameplay.Entities;
 using Client.Gameplay.Camera;
-using Client.Gameplay.Interaction;
 using Client.UI.Inventory;
+using Client.UI.Container;
 using Client.UI.Labels;
 using Shared.Simulation;
 using Shared.World;
@@ -30,29 +30,29 @@ namespace Client.Net
         [SerializeField] private ItemView _itemViewPrefab;
         [Tooltip("Каталог предметов: спрайт/метаданные по ItemDefId.")]
         [SerializeField] private ItemCatalog _itemCatalog;
+        [Tooltip("Реестр слоёв отрисовки: sortingOrder по RenderLayer предмета. Пусто — sortingOrder не трогаем.")]
+        [SerializeField] private RenderLayerCatalog _renderLayers;
 
         [Tooltip("Частота тиков. Дефолт до логина; затем перезаписывается серверным LoginResponse.TickRate.")]
         [SerializeField] private int _tickRate = 30;
 
         [Header("Карта")]
-        [Tooltip("Рендерер, которому отдать карту, полученную от сервера.")]
-        [SerializeField] private View.MapRenderer _mapRenderer;
         [Tooltip("Опц.: камера, которая должна следовать за локальным игроком. Пусто — не трогаем.")]
         [SerializeField] private FollowCamera _camera;
-        [Tooltip("Опц.: туман войны (FOV). Пусто — без тумана.")]
-        [SerializeField] private View.FovRenderer _fov;
 
         [Tooltip("Опц.: камера для перевода клика в тайл. Пусто — Camera.main.")]
         [SerializeField] private UnityEngine.Camera _clickCamera;
 
-        [Tooltip("Опц.: контроллер hover-подсказок (IMGUI). Пусто — без подсказок.")]
-        [SerializeField] private HoverHintController _hoverHint;
 
         [Header("Инвентарь (4.5)")]
         [Tooltip("HUD 6 слотов инвентаря. Пусто — приём InventorySync работает, но не отображается.")]
         [SerializeField] private InventoryHud _inventoryHud;
+        [Tooltip("Сервис окон контейнеров")]
+        [SerializeField] private ContainerWindows _containerWindows;
         [Tooltip("Пул экранных надписей — локальный хинт «Руки заняты» при попытке подбора без раунд-трипа.")]
         [SerializeField] private LabelManager _labels;
+        [Tooltip("Материал обводки предмета под курсором (шейдер Station/SpriteOutline). Пусто — без обводки.")]
+        [SerializeField] private Material _itemOutlineMaterial;
 
         private NetClient _net;
         private PlayerControl _controls;
@@ -75,13 +75,19 @@ namespace Client.Net
         private readonly HashSet<int> _seenItemIds = new HashSet<int>();
         private readonly List<int> _itemsToRemove = new List<int>();
 
-        // Инвентарь (4.5): version-guard на InventorySync (как ServerTick-guard в OnSnapshot) + owned-NetId набор,
-        // подавляющий ground-рендер held-предметов (кросс-канальная гонка ItemSnapshot vs InventorySync).
-        private uint _lastInventoryVersion;
-        private bool _invSeen;
-        private readonly HashSet<int> _heldNetIds = new HashSet<int>();
-        private byte _activeHand = InventorySlot.HandLeft; // эхо сервера (InventorySync.ActiveHand); без локального флипа
-        private readonly bool[] _slotOccupied = new bool[InventorySlot.SlotCount]; // занятость по последнему InventorySync
+        // Коллизия от предметов с HasCollision для предиктора (F1b): полностью пересобирается каждый ItemSnapshot.
+        private readonly Shared.Simulation.Blocks.DynamicObstacleSet _itemObstacles = new Shared.Simulation.Blocks.DynamicObstacleSet();
+
+        private int _itemSpawnSeq;
+        private int _hoveredItemNetId = -1;
+        private Vector2 _lastHoverMouse = new Vector2(float.MinValue, float.MinValue);
+        private float _lastHoverPlayerX = float.MinValue;
+        private float _lastHoverPlayerY = float.MinValue;
+        private readonly List<ItemView> _seqRenormBuffer = new List<ItemView>();
+
+        private byte _activeHand;
+        private readonly bool[] _handOccupied = new bool[InventorySlot.HandCount];
+        private SlotRecord[] _lastSlots;
 
         // Хинт «Руки заняты»: ручной тайм-аут (CursorHint по умолчанию — Lifetime=∞, само-возврат не сработает).
         private PooledLabel _handsFullHandle;
@@ -93,8 +99,6 @@ namespace Client.Net
         private uint _lastServerTick;
         private bool _snapshotSeen;
 
-        // Реплика карты: один объект на предиктор и рендер, TileUpdate применяем один раз.
-        private GridMap _map;
 
         private float _tickAccumulator;
         private float TickInterval => 1f / _tickRate;
@@ -112,72 +116,16 @@ namespace Client.Net
             _net.OnBlockChunkData += OnBlockChunkData;
             _net.OnBlockSectionGone += OnBlockSectionGone;
             _net.OnBlockUpdateBatch += OnBlockUpdateBatch;
-            _net.OnMapData += OnMapData;
-            _net.OnTileUpdate += OnTileUpdate;
             _net.OnPlayerJoined += OnPlayerJoined;
             _net.OnPlayerLeft += OnPlayerLeft;
-            _net.OnChunkData += OnChunkData;
-            _net.OnChunkUnload += OnChunkUnload;
             _net.OnItemSnapshot += OnItemSnapshot;
             _net.OnInventorySync += OnInventorySync;
+            _net.OnContainerSync += OnContainerSync;
+            _net.OnPullSync += OnPullSync;
+            _net.OnContainSync += OnContainSync;
 
             _controls = new PlayerControl();
 
-            // Стрим-режим: сервер шлёт карту по чанкам, не целиком. Заводим ПУСТУЮ карту сразу и отдаём её
-            // предиктору/рендереру/FOV — коллизия/рендер/FOV работают до прихода чанков и наполняются ими (держим
-            // ОДИН общий экземпляр: OnChunkData мутирует его → все видят). Начальное окружение сервер шлёт на логине.
-            _map = new GridMap();
-            _predictor.SetMap(_map);
-            if (_mapRenderer != null) _mapRenderer.SetMap(_map);
-            if (_fov != null) _fov.SetMap(_map);
-        }
-
-        /// <summary>Принять карту с сервера: отдать предиктору (коллизия) и рендереру.</summary>
-        private void OnMapData(MapDataMessage msg)
-        {
-            _map = msg.Map;
-            _predictor.SetMap(msg.Map);
-            if (_mapRenderer != null) _mapRenderer.SetMap(msg.Map);
-            if (_fov != null) _fov.SetMap(msg.Map);
-            Debug.Log($"[NetworkRunner] Map received: {msg.Map.Chunks.Count} chunks");
-        }
-
-        /// <summary>Рантайм-изменение тайла (дверь): обновить GridMap и перерисовать.</summary>
-        private void OnTileUpdate(TileUpdate u)
-        {
-            _map?.SetTile(u.X, u.Y, u.Z, u.Tile);
-            if (_mapRenderer != null) _mapRenderer.RefreshTileAt(u.X, u.Y, u.Z);
-            if (_fov != null) _fov.MarkDirty(); // видимость изменилась
-        }
-
-        /// <summary>Приём чанка стрима: положить в общий GridMap (overwrite) + отрисовать + FOV грязный.
-        /// _map — общий экземпляр (предиктор/рендерер/FOV держат ссылку) → AddChunk виден всем без пере-SetMap.</summary>
-        private void OnChunkData(ChunkData msg)
-        {
-            _map.AddChunk(msg.Chunk); // overwrite: полный чанк заменит частичный (TileUpdate-дверь мог создать раньше)
-            if (_mapRenderer != null)
-            {
-                // Порядок: новый чанк уже в _map → ApplyChunk (его края резолвятся по загруженным соседям) →
-                // пере-резолв краёв соседей с новым чанком (стыки стен/пола «соединяются» СРАЗУ, без рефреша).
-                _mapRenderer.ApplyChunk(msg.Chunk);
-                _mapRenderer.ReapplyLoadedNeighbors(msg.Chunk.ChunkX, msg.Chunk.ChunkY, msg.Chunk.Z);
-                _mapRenderer.MarkRevealDirty(); // набор чанков сменился → reveal-кандидаты пересчитать (раз/кадр)
-            }
-            if (_fov != null) _fov.MarkDirty();
-        }
-
-        /// <summary>Выгрузка чанка стрима (давно вне радиуса): убрать из GridMap + снести его рендер + FOV грязный.</summary>
-        private void OnChunkUnload(ChunkUnload msg)
-        {
-            _map?.RemoveChunk(msg.ChunkX, msg.ChunkY, msg.Z);
-            if (_mapRenderer != null)
-            {
-                _mapRenderer.RemoveChunk(msg.ChunkX, msg.ChunkY, msg.Z);
-                // Край соседа, смотревший на удалённый чанк, теперь резолвится «нет соседа» → пере-резолв.
-                _mapRenderer.ReapplyLoadedNeighbors(msg.ChunkX, msg.ChunkY, msg.Z);
-                _mapRenderer.MarkRevealDirty(); // набор чанков сменился → reveal-кандидаты пересчитать (раз/кадр)
-            }
-            if (_fov != null) _fov.MarkDirty();
         }
 
         private void OnEnable()
@@ -196,16 +144,12 @@ namespace Client.Net
         {
             _net.Poll();
 
-            // После дренажа пачки чанков за кадр: пересчитать reveal-кандидаты, если стрим сменил набор (раз/кадр —
-            // естественный троттл). НЕ гейтим на IsInitialized: нужен только _map/_activeZ, карта может стримиться раньше.
-            if (_mapRenderer != null) _mapRenderer.RefreshRevealIfDirty();
-
             // Латчим one-shot LayToggle здесь (1×/кадр); тик-луп потребит его ровно один раз.
             if (_controls.Player.ToggleLaying.WasPressedThisFrame())
                 _layTogglePending = true;
 
             // Прыжок — тоже one-shot по НАЖАТИЮ (не по зажатию): латч на кадре, потребление одним тиком.
-            if (BlocksWorld && Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
+            if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame)
                 _jumpPending = true;
 
             // Тик-луп фиксированной частоты: предсказание не зависит от FPS. Стартует только ПОСЛЕ логина —
@@ -229,7 +173,7 @@ namespace Client.Net
             // от отрыва и пока не приземлились/не опустились ниже старта — срез заморожен (слои не дёргаются).
             // Сущности — «купол видимости»: r = базовый радиус − потеря за каждый блок разницы высот
             // (непрерывно, без floor — иначе мигание при прыжках; вниз симметрично). Себя не трогаем.
-            if (BlocksWorld && _blockRenderer != null && _predictor.IsInitialized)
+            if (_blockRenderer != null && _predictor.IsInitialized)
             {
                 bool airborne = _predictor.Airborne;
                 if (airborne && !_wasAirborne)
@@ -249,22 +193,17 @@ namespace Client.Net
                 }
             }
 
-            if (_fov != null && _predictor.IsInitialized)
-                _fov.UpdateFov(_predictor.X, _predictor.Y, _predictor.Z);
-
-            // Динамический потолочный просвет (R1): радиус кольца у проёма растёт по близости игрока.
-            if (_mapRenderer != null && _predictor.IsInitialized)
-                _mapRenderer.UpdateCeilingReveal(_predictor.X, _predictor.Y);
-
             if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
-                _net.SendUse();
+                HandleUseOrContainer();
 
             // Инвентарь (4.5): Q — выбросить из активной руки; X — сменить руку. Request-only, без предсказания;
             // подсветка идёт по эхо сервера (InventorySync.ActiveHand), не по локальному флипу.
             if (Keyboard.current != null && Keyboard.current.qKey.wasPressedThisFrame)
-                _net.SendDrop(_activeHand);
+                _net.SendDrop(SlotCategory.Hand, _activeHand);
             if (Keyboard.current != null && Keyboard.current.xKey.wasPressedThisFrame)
-                _net.SendSwapHand((byte)(_activeHand == InventorySlot.HandLeft ? InventorySlot.HandRight : InventorySlot.HandLeft));
+                _net.SendSwapHand((byte)(_activeHand == 0 ? 1 : 0));
+            if (Keyboard.current != null && Keyboard.current.fKey.wasPressedThisFrame)
+                HandleEquipToggle();
 
             HandleInteractionInput();
 
@@ -275,7 +214,30 @@ namespace Client.Net
                 _handsFullHandle = null;
             }
 
-            _hoverHint?.Tick(this);
+            if (Mouse.current != null && _predictor.IsInitialized)
+            {
+                Vector2 mp = Mouse.current.position.ReadValue();
+                float ppx = _predictor.X, ppy = _predictor.Y;
+                // Раскраска обводки — только на реальном изменении: мышь ИЛИ предсказанная позиция игрока (мир под курсором сместился).
+                if ((mp - _lastHoverMouse).sqrMagnitude > 0.01f
+                    || Mathf.Abs(ppx - _lastHoverPlayerX) > 0.001f
+                    || Mathf.Abs(ppy - _lastHoverPlayerY) > 0.001f)
+                {
+                    _lastHoverMouse = mp;
+                    _lastHoverPlayerX = ppx;
+                    _lastHoverPlayerY = ppy;
+                    int hovered = TryPickItemPixel(mp, out int hid) ? hid : -1;
+                    if (hovered != _hoveredItemNetId)
+                    {
+                        if (_hoveredItemNetId != -1 && _itemViews.TryGetValue(_hoveredItemNetId, out var oldView) && oldView != null)
+                            oldView.SetHovered(false);
+                        if (hovered != -1 && _itemViews.TryGetValue(hovered, out var newView) && newView != null)
+                            newView.SetHovered(true);
+                        _hoveredItemNetId = hovered;
+                    }
+                }
+            }
+
         }
 
         /// <summary>Один серверный тик: ввод -> intent -> предсказание + отправка.</summary>
@@ -292,6 +254,8 @@ namespace Client.Net
             // ближайшим тиком и погаснет о гейт Grounded.
             bool jump = _jumpPending;
             _jumpPending = false;
+
+            if (_containedNetId != 0) return; // C3: в контейнере — не двигаемся, интент/предсказание не шлём
 
             // Decouple send-vs-step: молчим только в полном покое (Stand + нет ввода/toggle) И на опоре — в воздухе
             // интент обязателен каждый тик (вариант A: серверная гравитация без вводов реконсилилась бы снапом).
@@ -338,11 +302,30 @@ namespace Client.Net
         /// <summary>Камера обзора для world-anchored надписей (LabelManager): та же ленивая ClickCamera (резолв Camera.main).</summary>
         public UnityEngine.Camera ViewCamera => ClickCamera;
 
+        private void HandleUseOrContainer()
+        {
+            if (_predictor.IsInitialized && Mouse.current != null
+                && TryPickItemPixel(Mouse.current.position.ReadValue(), out int netId)
+                && _itemViews.TryGetValue(netId, out var view) && view != null
+                && _itemCatalog != null)
+            {
+                var def = _itemCatalog.For(view.ItemDefId);
+                if (def != null && def.IsContainer)
+                {
+                    // SS14-режим: окно открывает сервер (ContainSync/визуал в мире); иначе — чисто клиентский Toggle-UI.
+                    if (def.ContainerMode == Shared.World.Items.ContainerMode.SS14) { _net.SendOpenContainer(netId); return; }
+                    if (_containerWindows != null) { _containerWindows.Toggle(netId, view.ItemDefId); return; }
+                }
+            }
+            _net.SendUse();
+        }
+
         /// <summary>Клик мыши → адресная интеракция (в Update, не в Tick): request-only, без предсказания. Экран→ЦЕЛЫЙ
         /// тайл по камере на плоскости этажа игрока (строго PlayerPredictor.Z); опц. пик сущности, иначе цель-тайл.</summary>
         private void HandleInteractionInput()
         {
             if (!_predictor.IsInitialized || Mouse.current == null) return;
+            if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
 
             bool primary = Mouse.current.leftButton.wasPressedThisFrame;
             bool alt = Mouse.current.rightButton.wasPressedThisFrame;
@@ -354,9 +337,15 @@ namespace Client.Net
             // Pickup (4.5): ЛКМ по наземному предмету — ПРЕДМЕТ приоритетнее игрока на тайле. PickupItem не несёт
             // хенда на проводе — сервер кладёт в СВОЙ ActiveHand, поэтому гейтим по занятости именно активной руки
             // (без раунд-трипа); иначе шлём PickupItem вместо обычной интеракции.
-            if (primary && TryPickItem(tileX, tileY, pz, out int itemNetId))
+            if (primary && TryPickItemPixel(screen, out int itemNetId))
             {
-                if (IsHandOccupied(_activeHand))
+                if (_itemViews.TryGetValue(itemNetId, out var itemView) && itemView != null
+                    && _itemCatalog != null && _itemCatalog.For(itemView.ItemDefId)?.Pullable == true)
+                {
+                    _net.SendPullItem(itemNetId);
+                    return;
+                }
+                if (IsHandOccupied(_activeHand) || _pulledNetId != 0)
                     ShowHandsFullHint(screen);
                 else
                     _net.SendPickup(itemNetId);
@@ -387,33 +376,35 @@ namespace Client.Net
             _handsFullExpire = Time.unscaledTime + HandsFullHintSeconds;
         }
 
-        /// <summary>Экран→ЦЕЛЫЙ тайл по камере на плоскости ЭТАЖА игрока (строго PlayerPredictor.Z). ЕДИНЫЙ impl клика и
-        /// hover — чтобы они не расходились. tileZ = этаж игрока всегда; false — луч мимо плоскости (нет цели).</summary>
-        public bool TryResolveHoverTile(Vector2 screenPos, out int tileX, out int tileY, out int tileZ)
+        public bool TryResolveHoverTile(Vector2 screenPos, out int cellX, out int cellY, out int cellY2)
         {
-            tileX = 0; tileY = 0;
-            tileZ = _predictor.Z;
+            cellX = 0; cellY = 0;
+            cellY2 = Mathf.FloorToInt(_predictor.Y);
             var cam = ClickCamera;
             if (cam == null) return false;
 
-            // Плоскость этажа игрока (Unity-Y = z*FloorHeight): тайл на СВОЁМ Z (2.5D — курсор может визуально попасть на др. этаж).
             Ray ray = cam.ScreenPointToRay(screenPos);
-            var floorPlane = new Plane(Vector3.up, new Vector3(0f, tileZ * RenderConfig.FloorHeight, 0f));
-            if (!floorPlane.Raycast(ray, out float enter)) return false;
-
+            var feetPlane = new Plane(Vector3.up, new Vector3(0f, _predictor.Y, 0f));
+            if (!feetPlane.Raycast(ray, out float enter)) return false;
             Vector3 hit = ray.GetPoint(enter);
-            tileX = Mathf.FloorToInt(hit.x); // Unity-X = серверный X
-            tileY = Mathf.FloorToInt(hit.z); // Unity-Z (глубина) = серверный Y
+            cellX = Mathf.FloorToInt(hit.x);
+            cellY = Mathf.FloorToInt(hit.z);
             return true;
         }
 
-        // Read-only поверхность для hover-hint: тайл игрока (floor(_predictor.X/Y), Z предиктора — reach-паритет в ОДНОМ месте),
-        // инициализация и доступ к тайлу карты (инкапсуляция _map).
-        public int PlayerTileX => Mathf.FloorToInt(_predictor.X);
-        public int PlayerTileY => Mathf.FloorToInt(_predictor.Y);
-        public int PlayerTileZ => _predictor.Z;
         public bool IsInitialized => _predictor.IsInitialized;
-        public Tile GetTileAt(int x, int y, int z) => _map.GetTile(x, y, z);
+
+        /// <summary>Дистанция до наземного контейнера в пределах реча (для UI-гейта окна контейнера).</summary>
+        public bool IsGroundContainerReachable(int netId)
+        {
+            if (!_predictor.IsInitialized) return true;
+            if (!_itemViews.TryGetValue(netId, out var view) || view == null) return true;
+
+            Vector3 p = view.transform.position;
+            return Shared.Simulation.InteractionRules.InReachBlocks(
+                Mathf.FloorToInt(_predictor.X), Mathf.FloorToInt(_predictor.ZF), Mathf.FloorToInt(_predictor.Y),
+                Mathf.FloorToInt(p.x), Mathf.FloorToInt(p.z), Mathf.FloorToInt(p.y));
+        }
 
         /// <summary>Чужая сущность на тайле (tx,ty) этажа z по её вьюхе; первую подходящую — в pickedId (себя пропускаем).</summary>
         private bool TryPickEntity(int tx, int ty, int z, out int pickedId)
@@ -424,9 +415,8 @@ namespace Client.Net
                 var view = kv.Value;
                 if (view == null) continue;
                 Vector3 p = view.transform.position;
-                if (Mathf.FloorToInt(p.x) == tx
-                    && Mathf.FloorToInt(p.z) == ty
-                    && Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == z)
+                bool match = Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.Abs(Mathf.FloorToInt(p.y) - z) <= 1;
+                if (match)
                 {
                     pickedId = kv.Key;
                     return true;
@@ -436,25 +426,50 @@ namespace Client.Net
             return false;
         }
 
-        /// <summary>Наземный предмет на тайле (tx,ty,z) по его вьюхе; первый подходящий — в itemNetId. Пикается ДО
-        /// TryPickEntity (предмет приоритетнее игрока на том же тайле).</summary>
-        private bool TryPickItem(int tx, int ty, int z, out int itemNetId)
+        // Пиксель-пик по спрайту (не bbox): среди попаданий берём макс. SortingOrder (топ визуально), при равенстве — ближайший луч.
+        private bool TryPickItemPixel(Vector2 screenPos, out int itemNetId)
         {
+            itemNetId = -1;
+            if (!_predictor.IsInitialized) return false;
+            var cam = ClickCamera;
+            if (cam == null) return false;
+            Ray ray = cam.ScreenPointToRay(screenPos);
+            int pz = Mathf.FloorToInt(_predictor.Y);
+            int bestOrder = int.MinValue;
+            float bestDist = float.MaxValue;
             foreach (var kv in _itemViews)
             {
                 var view = kv.Value;
                 if (view == null) continue;
                 Vector3 p = view.transform.position;
-                if (Mathf.FloorToInt(p.x) == tx
-                    && Mathf.FloorToInt(p.z) == ty
-                    && Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == z)
+                bool zOk = Mathf.Abs(Mathf.FloorToInt(p.y) - pz) <= 1;
+                if (!zOk) continue;
+                if (!view.HitTestPixel(ray, out float dist)) continue;
+                int order = view.SortingOrder;
+                if (order > bestOrder || (order == bestOrder && dist < bestDist))
                 {
+                    bestOrder = order;
+                    bestDist = dist;
                     itemNetId = kv.Key;
-                    return true;
                 }
             }
-            itemNetId = -1;
-            return false;
+            return itemNetId != -1;
+        }
+
+        private int NextItemSpawnSeq()
+        {
+            if (_itemSpawnSeq >= 1000)
+            {
+                _seqRenormBuffer.Clear();
+                foreach (var kv in _itemViews)
+                    if (kv.Value != null) _seqRenormBuffer.Add(kv.Value);
+                _seqRenormBuffer.Sort((a, b) => a.SortingOrder.CompareTo(b.SortingOrder));
+                for (int i = 0; i < _seqRenormBuffer.Count; i++)
+                    _seqRenormBuffer[i].SetSpawnSeq(i);
+                _itemSpawnSeq = _seqRenormBuffer.Count;
+                _seqRenormBuffer.Clear();
+            }
+            return _itemSpawnSeq++;
         }
 
         private void OnLoginResponse(LoginResponse login)
@@ -469,10 +484,8 @@ namespace Client.Net
 
             // Блок-мир (фаза C): мир пустой, секции стримятся следом (ReliableOrdered — порядок гарантирован);
             // нестримленный объём для предикта — solid-стопор (StreamedBlockWorld, в.20).
-            BlocksWorld = login.BlocksWorld;
-            if (login.BlocksWorld && _blockGrid == null)
+            if (_blockGrid == null)
             {
-                NetEntityView.BlocksMode = true;
                 _blockGrid = new Shared.World.Blocks.BlockGrid();
                 _streamWorld = new Client.Map.StreamedBlockWorld(_blockGrid);
                 var baseShapes = login.ShapesMode == 1
@@ -480,16 +493,27 @@ namespace Client.Net
                     : Shared.World.Blocks.DevBlockWorld.Shapes;
                 _blockShapes = baseShapes;
                 _predictor.SetBlockWorld(_streamWorld, new Client.Map.ShapesWithUnknown(baseShapes));
+                _predictor.SetDynamicObstacles(_itemObstacles);
                 _blockRenderer = gameObject.AddComponent<Client.Map.BlockRenderer>();
                 _blockRenderer.Init(_blockGrid, baseShapes);
                 _blockRenderer.SetZoneFade(login.ZoneFadeDistance, login.ZoneFadeVertical);
+                var itemGrid = _blockGrid;
+                var itemShapes = baseShapes;
+                // Один раз на весь клиент: даёт ItemView высоту опоры под предметом — верх САМОЙ высокой не-полноблочной коробки блока (0 — пустой блок/пол).
+                Client.Net.View.ItemView.BlockSurface = (x, h, pz) =>
+                {
+                    var boxes = itemShapes.GetBoxes(itemGrid.GetBlock(x, h, pz), itemGrid.GetState(x, h, pz));
+                    float top = 0f;
+                    for (int i = 0; i < boxes.Length; i++)
+                        if (boxes[i].MaxYf < 0.999f && boxes[i].MaxYf > top)
+                            top = boxes[i].MaxYf;
+                    return h + top;
+                };
             }
 
-            Debug.Log($"[NetworkRunner] My NetId = {LocalNetId}, tickRate = {_tickRate}, blocks = {BlocksWorld}");
+            Debug.Log($"[NetworkRunner] My NetId = {LocalNetId}, tickRate = {_tickRate}");
         }
 
-        /// <summary>Блок-режим клиента (из LoginResponse): вьюхи/пикинг читают масштаб вертикали через это.</summary>
-        public static bool BlocksWorld { get; private set; }
 
         private Shared.World.Blocks.BlockGrid _blockGrid;
         private Client.Map.StreamedBlockWorld _streamWorld;
@@ -616,7 +640,6 @@ namespace Client.Net
                     // Свой игрок: reconciliation, без интерполяционного буфера. State сидируется в предиктор
                     // (seed для running-state нити), а вьюха берёт ПРЕДСКАЗАННЫЙ _predictor.State.
                     _predictor.Reconcile(e.X, e.Y, e.Z, e.VY, e.Facing, e.State, e.Reason, e.Speed, snap.LastProcessedInput);
-                    if (_mapRenderer != null && !BlocksWorld) _mapRenderer.SetActiveZ(_predictor.Z);
 
                     if (_localView == null)
                     {
@@ -624,7 +647,10 @@ namespace Client.Net
                         _localView.Init(e.NetId);
                         _views[e.NetId] = _localView;
                         if (_camera != null) _camera.SetTarget(_localView.transform);
+                        if (_containedNetId != 0) _localView.SetCulled(true);
                     }
+                    if (_localView.WornDefId != e.WornUniformDefId)
+                        _localView.SetWorn(e.WornUniformDefId, WornSpritesOf(e.WornUniformDefId));
                     continue;
                 }
 
@@ -635,6 +661,8 @@ namespace Client.Net
                     _views.Add(e.NetId, view);
                 }
                 view.Receive(e, now);
+                if (view.WornDefId != e.WornUniformDefId)
+                    view.SetWorn(e.WornUniformDefId, WornSpritesOf(e.WornUniformDefId));
             }
 
             // Backstop despawn: чужая сущность пропала из снапшота → снять её вьюху. «Нет в снапшоте» теперь означает
@@ -662,30 +690,26 @@ namespace Client.Net
         {
             if (_itemViewPrefab == null || snap.Items == null) return; // префаб не назначен — тихо пропускаем (без NRE)
 
+            _itemObstacles.Clear();
             _seenItemIds.Clear();
             for (int i = 0; i < snap.Items.Length; i++)
             {
                 var item = snap.Items[i];
-
-                // Owned-NetId подавление: предмет уже в инвентаре (InventorySync) — кросс-канальная гонка двух
-                // стримов может прислать устаревший ground-снапшот того же NetId. Held не рендерится на земле;
-                // существующий ground-view (если остался с ДО-подбора кадра) — снести.
-                if (_heldNetIds.Contains(item.NetId))
-                {
-                    if (_itemViews.TryGetValue(item.NetId, out var heldView))
-                    {
-                        Destroy(heldView.gameObject);
-                        _itemViews.Remove(item.NetId);
-                    }
-                    continue;
-                }
-
                 _seenItemIds.Add(item.NetId);
+
+                if (ItemCatalogData.TryGet(item.ItemDefId, out var proto) && proto.HasCollision)
+                {
+                    var box = proto.CollisionBox;
+                    _itemObstacles.Add(item.X, item.Z + box.MinYf, item.Y, (box.MaxXf - box.MinXf) * 0.5f, box.MaxYf - box.MinYf);
+                }
 
                 if (!_itemViews.TryGetValue(item.NetId, out var view))
                 {
                     view = Instantiate(_itemViewPrefab, transform);
                     view.Init(item.NetId);
+                    view.SetRenderLayers(_renderLayers);
+                    view.SetOutlineMaterial(_itemOutlineMaterial);
+                    view.SetSpawnSeq(NextItemSpawnSeq());
                     _itemViews.Add(item.NetId, view);
                 }
                 view.Apply(in item, _itemCatalog);
@@ -704,51 +728,95 @@ namespace Client.Net
                     Destroy(view.gameObject);
                     _itemViews.Remove(_itemsToRemove[i]);
                 }
+                if (_itemsToRemove[i] == _hoveredItemNetId) _hoveredItemNetId = -1;
+                _containerWindows?.OnItemGone(_itemsToRemove[i]);
             }
         }
 
-        /// <summary>Owner-only полный слепок инвентаря: version-guard (как ServerTick-guard в OnSnapshot), пересборка
-        /// owned-NetId набора (гейт ground-рендера), эхо активной руки, форвард в HUD.</summary>
         private void OnInventorySync(InventorySync sync)
         {
-            if (_invSeen && sync.InventoryVersion <= _lastInventoryVersion) return;
-            _invSeen = true;
-            _lastInventoryVersion = sync.InventoryVersion;
             _activeHand = sync.ActiveHand;
+            _lastSlots = sync.Slots;
 
-            _heldNetIds.Clear();
-            System.Array.Clear(_slotOccupied, 0, _slotOccupied.Length);
+            System.Array.Clear(_handOccupied, 0, _handOccupied.Length);
             var slots = sync.Slots;
             if (slots != null)
-            {
                 for (int i = 0; i < slots.Length; i++)
-                {
-                    _heldNetIds.Add(slots[i].NetId);
-                    byte idx = slots[i].SlotIndex;
-                    if (idx < _slotOccupied.Length) _slotOccupied[idx] = true;
-                }
-            }
-
-            // Проактивно снести наземный вью подобранного предмета: авторитетный «держишь это» уже пришёл. При подборе
-            // ПОСЛЕДНЕГО предмета в PVS интерес пуст → BroadcastItemSnapshot (4.4a «empty→не шлём») снапшот НЕ шлёт →
-            // OnItemSnapshot (подавление/backstop) не вызывается → иначе ground-вью висел бы. Итерируем _heldNetIds, мутируем _itemViews (разные коллекции).
-            foreach (int heldId in _heldNetIds)
-                if (_itemViews.TryGetValue(heldId, out var groundView))
-                {
-                    Destroy(groundView.gameObject);
-                    _itemViews.Remove(heldId);
-                }
+                    if (slots[i].Category == SlotCategory.Hand && slots[i].Index < _handOccupied.Length)
+                        _handOccupied[slots[i].Index] = true;
 
             if (_inventoryHud != null) _inventoryHud.Apply(in sync);
         }
 
-        /// <summary>Активная рука по последнему эхо сервера (InventorySync.ActiveHand) — без локального флипа.</summary>
+        private void OnContainerSync(ContainerSync sync)
+        {
+            _containerWindows?.OnSync(in sync);
+        }
+
+        private int _pulledNetId;
+
+        private void OnPullSync(PullSync sync)
+        {
+            _pulledNetId = sync.PulledNetId;
+            if (_inventoryHud == null) return;
+            if (sync.PulledNetId != 0) _inventoryHud.SetPullOverlay(sync.ItemDefId);
+            else _inventoryHud.ClearPullOverlay();
+        }
+
+        private int _containedNetId;
+
+        private void OnContainSync(ContainSync sync)
+        {
+            _containedNetId = sync.ContainerNetId;
+            if (_localView != null) _localView.SetCulled(_containedNetId != 0);
+        }
+
+        // Клавиша F: надеть equippable-предмет из активной руки в его worn-категорию (снятие — ЛКМ по worn-слоту, Unequip).
+        private void HandleEquipToggle()
+        {
+            if (_lastSlots == null) return;
+
+            for (int i = 0; i < _lastSlots.Length; i++)
+            {
+                var rec = _lastSlots[i];
+                if (rec.Category != SlotCategory.Hand || rec.Index != _activeHand) continue;
+                if (ItemCatalogData.TryGet(rec.ItemDefId, out var proto)
+                    && proto.Equippable && IsWornCategory(proto.EquipSlot))
+                    _net.SendMoveSlot(SlotCategory.Hand, _activeHand, proto.EquipSlot, 0);
+                return;
+            }
+        }
+
+        /// <summary>Снять предмет из worn-слота в активную руку (сервер откажет, если рука занята).</summary>
+        public void Unequip(SlotCategory cat, byte index) => _net.SendMoveSlot(cat, index, SlotCategory.Hand, _activeHand);
+
+        private static bool IsWornCategory(SlotCategory c)
+            => c != SlotCategory.None && c != SlotCategory.Hand && c != SlotCategory.Inherit;
+
+        private Sprite[] WornSpritesOf(ushort defId)
+        {
+            if (defId == 0 || _itemCatalog == null) return null;
+            var def = _itemCatalog.For(defId);
+            return (def != null && def.WornVisible) ? def.WornSprites : null;
+        }
+
         public byte ActiveHand => _activeHand;
 
-        /// <summary>Занята ли рука (есть held-предмет в её слоте) — по последнему InventorySync.</summary>
-        private bool IsHandOccupied(byte hand) => hand < _slotOccupied.Length && _slotOccupied[hand];
+        private bool IsHandOccupied(byte hand) => hand < _handOccupied.Length && _handOccupied[hand];
 
-        /// <summary>Выбросить предмет из слота: клавиша Q (активная рука) или клик кнопки слота в HUD.</summary>
-        public void SendDrop(byte slotIndex) => _net.SendDrop(slotIndex);
+        /// <summary>Запрос drop-at-feet предмета из (category,index) — для UI/HUD, вне клавиш Q.</summary>
+        public void SendDrop(SlotCategory category, byte index) => _net.SendDrop(category, index);
+
+        /// <summary>Запрос положить предмет в контейнер (для ContainerWindows UI).</summary>
+        public void SendPutInContainer(int netId) => _net.SendPutInContainer(netId);
+
+        /// <summary>Запрос взять предмет из слота контейнера по индексу.</summary>
+        public void SendTakeFromContainer(int netId, ushort index) => _net.SendTakeFromContainer(netId, index);
+
+        /// <summary>Запрос открыть контейнер (SS14-режим).</summary>
+        public void SendOpenContainer(int netId) => _net.SendOpenContainer(netId);
+
+        /// <summary>Запрос закрыть окно контейнера.</summary>
+        public void SendCloseContainer(int netId) => _net.SendCloseContainer(netId);
     }
 }

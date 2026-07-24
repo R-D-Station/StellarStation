@@ -4,13 +4,12 @@ using LiteNetLib;
 using Shared.Configs;
 using Shared.Messages.Interaction;
 using Shared.World;
+using Shared.World.Blocks;
 using Shared.World.Items;
 using Server.Network;
 
 namespace ServerTests.Server.Network
 {
-    /// <summary>Инвентарь (4.5a): pickup/drop/swap-hand/move-slot хендлеры сквозь реальный NetPeer (SendInventorySyncToOwner
-    /// шлёт по Peer.Send). Покрывает DoD a-i: атомарность pickup-гонки, owner-only send, disconnect drop-all.</summary>
     public class InventoryTests : IDisposable
     {
         private readonly SVars _config;
@@ -43,9 +42,10 @@ namespace ServerTests.Server.Network
             Thread.Sleep(50);
         }
 
-        private GameServer StartServer(GridMap? map = null)
+        private GameServer StartServer()
         {
-            _server = new GameServer(_config, map);
+            _config.MapPath = "";
+            _server = new GameServer(_config);
             _server.Start();
             Thread.Sleep(50);
             return _server;
@@ -72,136 +72,135 @@ namespace ServerTests.Server.Network
             return connectedPeer;
         }
 
-        // (a) pickup в пустую активную руку: Ground->Held, второй наблюдатель больше не видит его на земле.
+        private static ref HeldItem Hand(ClientConnection c, byte idx) => ref c.Slots[(int)SlotCategory.Hand][idx];
+        private static ref HeldItem Slot(ClientConnection c, SlotCategory cat, byte idx) => ref c.Slots[(int)cat][idx];
+
+        private static readonly System.Reflection.FieldInfo MainThreadActionsField =
+            typeof(GameServer).GetField("_mainThreadActions",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
+        private static T OnGameLoop<T>(GameServer server, Func<T> func)
+        {
+            var queue = (System.Collections.Concurrent.ConcurrentQueue<Action>)MainThreadActionsField.GetValue(server)!;
+            T result = default!;
+            Exception? error = null;
+            bool completed = false;
+            queue.Enqueue(() =>
+            {
+                try { result = func(); }
+                catch (Exception e) { error = e; }
+                finally { Volatile.Write(ref completed, true); }
+            });
+            for (int i = 0; i < 500 && !Volatile.Read(ref completed); i++) Thread.Sleep(10);
+            if (!Volatile.Read(ref completed)) throw new TimeoutException("GameLoop did not run the queued action");
+            if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
+            return result;
+        }
+
+        private static void OnGameLoop(GameServer server, Action action)
+            => OnGameLoop<object?>(server, () => { action(); return null; });
+
         [Fact]
         public void Pickup_EmptyActiveHand_MovesGroundToHeld_RemovedFromGround()
         {
             var server = StartServer();
             var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = InventorySlot.HandLeft };
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
 
-            int netId = server.SpawnGroundItem(10, 3, 5, 5, 0);
-            Assert.Contains(server.GroundItemsInInterest(5.5f, 5.5f, 0), it => it.NetId == netId); // на земле до подбора
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 3, 5, 5, 0));
+            Assert.Contains(server.GroundItemsInInterest(5.5f, 5.5f, 0), it => it.NetId == netId);
 
-            InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId });
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
 
-            // ground-стрим больше не отдаёт предмет второму наблюдателю — точно не в _entities.
             Assert.DoesNotContain(server.GroundItemsInInterest(5.5f, 5.5f, 0), it => it.NetId == netId);
-            Assert.False(server.DespawnGroundItem(netId));
-            Assert.Equal(netId, client.Slots[InventorySlot.HandLeft].NetId);
-            Assert.Equal((ushort)10, client.Slots[InventorySlot.HandLeft].ItemDefId);
-            Assert.Equal((byte)3, client.Slots[InventorySlot.HandLeft].StackCount);
+            Assert.False(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
+            Assert.Equal(netId, Hand(client, 0).NetId);
+            Assert.Equal((ushort)10, Hand(client, 0).ItemDefId);
+            Assert.Equal((byte)3, Hand(client, 0).StackCount);
 
             CleanupPeer(peer);
         }
 
-        // (b) pickup при занятой активной руке: no-op, наземный предмет цел, нет осиротевшего NetId.
         [Fact]
         public void Pickup_ActiveHandOccupied_NoOp_GroundItemIntact()
         {
             var server = StartServer();
             var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = InventorySlot.HandLeft };
-            client.Slots[InventorySlot.HandLeft] = new HeldItem { NetId = 999, ItemDefId = 1, StackCount = 1 };
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 999, ItemDefId = 1, StackCount = 1 };
 
-            int netId = server.SpawnGroundItem(10, 1, 5, 5, 0);
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 1, 5, 5, 0));
 
-            InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId });
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
 
-            Assert.True(server.DespawnGroundItem(netId)); // предмет всё ещё на земле — цел, не осиротел
-            Assert.Equal(999, client.Slots[InventorySlot.HandLeft].NetId); // рука не тронута (не перезаписана)
+            Assert.True(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
+            Assert.Equal(999, Hand(client, 0).NetId);
 
             CleanupPeer(peer);
         }
 
-        // (c) два клиента pickup один NetId в один тик: ровно ОДИН получает предмет, второй — тихий no-op.
         [Fact]
         public void Pickup_TwoClientsSameNetId_ExactlyOneWins_NoDuplication()
         {
             var server = StartServer();
             var peerA = CreateConnectedPeer();
             var peerB = CreateConnectedPeer();
-            var clientA = new ClientConnection(peerA, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = InventorySlot.HandLeft };
-            var clientB = new ClientConnection(peerB, 2) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = InventorySlot.HandLeft };
+            var clientA = new ClientConnection(peerA, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
+            var clientB = new ClientConnection(peerB, 2) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
 
-            int netId = server.SpawnGroundItem(10, 1, 5, 5, 0);
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 1, 5, 5, 0));
 
-            // Один тик: оба хендлера дренируются последовательно (ProcessPickups по клиентам) — второй TryGetValue
-            // на уже удалённый NetId эмулирует гонку двух pickup за один тик (DespawnGroundItem второго → false).
-            InvokeHandlePickup(server, clientA, new PickupItem { TargetNetId = netId });
-            InvokeHandlePickup(server, clientB, new PickupItem { TargetNetId = netId });
+            OnGameLoop(server, () =>
+            {
+                InvokeHandlePickup(server, clientA, new PickupItem { TargetNetId = netId });
+                InvokeHandlePickup(server, clientB, new PickupItem { TargetNetId = netId });
+            });
 
-            bool aHas = clientA.Slots[InventorySlot.HandLeft].NetId == netId;
-            bool bHas = clientB.Slots[InventorySlot.HandLeft].NetId == netId;
-            Assert.True(aHas ^ bHas); // ровно один выиграл (XOR)
-            Assert.False(server.DespawnGroundItem(netId)); // не осталось на земле, не задублировалось
+            bool aHas = Hand(clientA, 0).NetId == netId;
+            bool bHas = Hand(clientB, 0).NetId == netId;
+            Assert.True(aHas ^ bHas);
+            Assert.False(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
 
             CleanupPeer(peerA);
             CleanupPeer(peerB);
         }
 
-        // (d) drop разворачивает pickup с ТЕМ ЖЕ NetId на floor(client.X/Y) даже при дробном X, InReach туда-обратно.
         [Fact]
         public void Drop_ReversesPickup_SameNetId_AtFloorOfFractionalPosition()
         {
-            var map = new GridMap();
-            map.SetTile(4, 4, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
             var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 4.9f, Y = 4.5f, Z = 0, ActiveHand = InventorySlot.HandLeft };
+            var client = new ClientConnection(peer, 1) { X = 4.9f, Y = 4.5f, Z = 1, ActiveHand = 0 };
 
-            int netId = server.SpawnGroundItem(10, 2, 4, 4, 0);
-            InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId });
-            Assert.Equal(netId, client.Slots[InventorySlot.HandLeft].NetId);
-            Assert.False(server.DespawnGroundItem(netId)); // подобран — больше не на земле
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 2, 4, 4, 1));
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
+            Assert.Equal(netId, Hand(client, 0).NetId);
+            Assert.False(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
 
-            InvokeHandleDrop(server, client, new DropItem { SlotIndex = InventorySlot.HandLeft });
+            OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 }));
 
-            Assert.Equal(0, client.Slots[InventorySlot.HandLeft].NetId); // рука снова пуста
-            var seen = server.GroundItemsInInterest(4.9f, 4.5f, 0);
-            Assert.Contains(seen, it => it.NetId == netId && it.X == 4 && it.Y == 4); // floor(4.9)=4, floor(4.5)=4
+            Assert.Equal(0, Hand(client, 0).NetId);
+            var seen = server.GroundItemsInInterest(4.9f, 4.5f, 1);
+            Assert.Contains(seen, it => it.NetId == netId && it.X == 4.9f && it.Y == 4.5f);
 
             CleanupPeer(peer);
         }
 
-        // (e) drop на не-Walkable тайл отклонён.
-        [Fact]
-        public void Drop_OnNonWalkableTile_Rejected()
-        {
-            var server = StartServer(new GridMap()); // пустая карта = Tile.Space везде = не-Walkable
-            var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 10.5f, Y = 10.5f, Z = 0, ActiveHand = InventorySlot.HandLeft };
-            client.Slots[InventorySlot.HandLeft] = new HeldItem { NetId = 42, ItemDefId = 1, StackCount = 1 };
-
-            InvokeHandleDrop(server, client, new DropItem { SlotIndex = InventorySlot.HandLeft });
-
-            Assert.Equal(42, client.Slots[InventorySlot.HandLeft].NetId); // рука не опустела
-            Assert.False(server.DespawnGroundItem(42)); // предмет НЕ заспавнен на земле (rejected до SpawnGroundItemWithId)
-
-            CleanupPeer(peer);
-        }
-
-        // (f) disconnect с предметами в руках роняет все held на землю на последнем тайле с сохранёнными NetId.
         [Fact]
         public void Disconnect_DropsAllHeldItems_AtLastTile_WithPreservedNetIds()
         {
-            var map = new GridMap();
-            map.SetTile(3, 3, 0, Tile.Floor());
-            var server = StartServer(map);
+            var server = StartServer();
 
-            // OnClientConnected бежит через _mainThreadActions → колбэк исполняется СИНХРОННО на GameLoop-потоке
-            // (см. GameLoop: PollEvents → drain _mainThreadActions → Process*). Мутируем X/Y/Z/Slots ПРЯМО в колбэке,
-            // а не с тест-потока: так запись гарантированно происходит до любого Process*(ProcessFalls и т.п.) того же
-            // тика и без гонки с GameLoop — не полагаемся на «сервер не успеет тикнуть» (было источником флейков 1/315).
             ClientConnection? spawned = null;
             server.OnClientConnected += c =>
             {
-                c.X = 3.5f;
-                c.Y = 3.5f;
-                c.Z = 0;
-                c.Slots[InventorySlot.HandLeft] = new HeldItem { NetId = 501, ItemDefId = 7, StackCount = 1 };
-                c.Slots[InventorySlot.Belt] = new HeldItem { NetId = 502, ItemDefId = 8, StackCount = 5 };
-                spawned = c; // публикуем ссылку ПОСЛЕДНЕЙ (после того как поля уже выставлены)
+                c.Mover = new global::Shared.Simulation.Blocks.BlockMoverState(3.5f, 1f, 3.5f);
+                c.X = c.Mover.X;
+                c.Y = c.Mover.Z;
+                c.Z = (int)MathF.Floor(c.Mover.Y);
+                c.Slots[(int)SlotCategory.Hand][0] = new HeldItem { NetId = 501, ItemDefId = 7, StackCount = 1 };
+                c.Slots[(int)SlotCategory.Belt][0] = new HeldItem { NetId = 502, ItemDefId = 8, StackCount = 5 };
+                spawned = c;
             };
 
             var clientListener = new EventBasedNetListener();
@@ -218,21 +217,21 @@ namespace ServerTests.Server.Network
             for (int i = 0; i < 200 && !disconnected; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
             Assert.True(disconnected);
 
-            // Игрок ушёл из реестра, но оба held-предмета должны были вернуться на землю (drop-all СИНХРОННО до Remove).
-            var ground = server.GroundItemsInInterest(3.5f, 3.5f, 0);
+            var ground = server.GroundItemsInInterest(3.5f, 3.5f, 1);
             Assert.Contains(ground, it => it.NetId == 501);
             Assert.Contains(ground, it => it.NetId == 502);
-            Assert.Equal(2, server.EntityCount); // ровно 2 предмета остались (игрок удалён)
+            Assert.Equal(2, server.EntityCount);
 
             clientManager.Stop();
         }
 
-        // (h) смена инвентаря игрока A шлёт НОЛЬ байт InventorySync игроку B (owner-only) — wire-level: слушаем
-        // сырой NetworkReceiveEvent на КЛИЕНТСКОМ NetManager B и считаем InventorySync-пакеты после pickup игрока A.
         [Fact]
         public void Pickup_SendsInventorySync_OnlyToOwner_NotToOtherClient()
         {
             var server = StartServer();
+
+            ClientConnection? serverClient = null;
+            server.OnClientConnected += c => { if (serverClient == null) serverClient = c; };
 
             bool connectedA = false, connectedB = false;
 
@@ -266,20 +265,23 @@ namespace ServerTests.Server.Network
             }
             Assert.True(connectedA && connectedB);
 
-            ClientConnection? serverClient = null;
-            server.OnClientConnected += c => { if (serverClient == null) serverClient = c; };
-            // Первый увиденный сервером клиент (порядок accept не гарантирован — не важно КАКОЙ это физически A/B).
-            for (int i = 0; i < 100 && server.EntityCount < 2; i++) { managerA.PollEvents(); managerB.PollEvents(); Thread.Sleep(10); }
+            for (int i = 0; i < 100 && (server.EntityCount < 2 || serverClient == null); i++) { managerA.PollEvents(); managerB.PollEvents(); Thread.Sleep(10); }
             Assert.Equal(2, server.EntityCount);
             Assert.NotNull(serverClient);
 
-            int netId = server.SpawnGroundItem(10, 1, 0, 0, 0);
-            server.UpdatePlayerPosition(serverClient!, 0.5f, 0.5f, 0, 0);
-            InvokeHandlePickup(server, serverClient!, new PickupItem { TargetNetId = netId });
+            for (int i = 0; i < 20; i++) { managerA.PollEvents(); managerB.PollEvents(); Thread.Sleep(10); }
+            inventorySyncReceivedByA = 0;
+            inventorySyncReceivedByB = 0;
+
+            OnGameLoop(server, () =>
+            {
+                int netId = server.SpawnGroundItem(10, 1, 0, 0, 0);
+                server.UpdatePlayerPosition(serverClient!, 0.5f, 0.5f, 0, 0);
+                InvokeHandlePickup(server, serverClient!, new PickupItem { TargetNetId = netId });
+            });
 
             for (int i = 0; i < 30; i++) { managerA.PollEvents(); managerB.PollEvents(); Thread.Sleep(10); }
 
-            // Owner-only: ровно ОДИН из двух клиентских NetManager получил InventorySync (сам владелец), другой — ноль.
             Assert.True((inventorySyncReceivedByA > 0) ^ (inventorySyncReceivedByB > 0));
             Assert.Equal(1, inventorySyncReceivedByA + inventorySyncReceivedByB);
 
@@ -287,35 +289,66 @@ namespace ServerTests.Server.Network
             managerB.Stop();
         }
 
-        // (i) SwapHand ставит ActiveHand + bump version; MoveSlot в пустой слот успех, в занятый — fail.
         [Fact]
-        public void SwapHand_SetsActiveHand_BumpsVersion()
+        public void SwapHand_SetsActiveHand()
         {
             var server = StartServer();
             var peer = CreateConnectedPeer();
-            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0, ActiveHand = InventorySlot.HandLeft };
-            uint before = client.InventoryVersion;
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0, ActiveHand = 0 };
 
-            InvokeHandleSwapHand(server, client, new SwapHandRequest { Hand = 1 });
+            OnGameLoop(server, () => InvokeHandleSwapHand(server, client, new SwapHandRequest { Hand = 1 }));
 
             Assert.Equal((byte)1, client.ActiveHand);
-            Assert.True(client.InventoryVersion > before);
 
             CleanupPeer(peer);
         }
 
         [Fact]
-        public void MoveSlot_EmptyDest_Succeeds()
+        public void MoveSlot_ToHand_AlwaysAllowed()
         {
             var server = StartServer();
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0 };
-            client.Slots[InventorySlot.HandLeft] = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+            Slot(client, SlotCategory.Belt, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
 
-            InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromSlot = InventorySlot.HandLeft, ToSlot = InventorySlot.Belt });
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Belt, FromIndex = 0, ToCategory = SlotCategory.Hand, ToIndex = 1 }));
 
-            Assert.Equal(0, client.Slots[InventorySlot.HandLeft].NetId);
-            Assert.Equal(10, client.Slots[InventorySlot.Belt].NetId);
+            Assert.Equal(0, Slot(client, SlotCategory.Belt, 0).NetId);
+            Assert.Equal(10, Hand(client, 1).NetId);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void MoveSlot_ToMatchingEquipCategory_Allowed()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Belt, true, 1, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Hand, FromIndex = 0, ToCategory = SlotCategory.Belt, ToIndex = 0 }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.Equal(10, Slot(client, SlotCategory.Belt, 0).NetId);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void MoveSlot_ToWrongEquipCategory_Rejected()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Ear, true, 1, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Hand, FromIndex = 0, ToCategory = SlotCategory.Belt, ToIndex = 0 }));
+
+            Assert.Equal(10, Hand(client, 0).NetId);
+            Assert.Equal(0, Slot(client, SlotCategory.Belt, 0).NetId);
 
             CleanupPeer(peer);
         }
@@ -324,17 +357,575 @@ namespace ServerTests.Server.Network
         public void MoveSlot_OccupiedDest_Fails()
         {
             var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Belt, true, 1, 1, false, 0);
             var peer = CreateConnectedPeer();
             var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0 };
-            client.Slots[InventorySlot.HandLeft] = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
-            client.Slots[InventorySlot.Belt] = new HeldItem { NetId = 20, ItemDefId = 2, StackCount = 1 };
+            Hand(client, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+            Slot(client, SlotCategory.Belt, 0) = new HeldItem { NetId = 20, ItemDefId = 2, StackCount = 1 };
 
-            InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromSlot = InventorySlot.HandLeft, ToSlot = InventorySlot.Belt });
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Hand, FromIndex = 0, ToCategory = SlotCategory.Belt, ToIndex = 0 }));
 
-            Assert.Equal(10, client.Slots[InventorySlot.HandLeft].NetId); // не сдвинуто
-            Assert.Equal(20, client.Slots[InventorySlot.Belt].NetId);     // dest не тронут
+            Assert.Equal(10, Hand(client, 0).NetId);
+            Assert.Equal(20, Slot(client, SlotCategory.Belt, 0).NetId);
 
             CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Join_SendsInitialInventorySync_AndSwapHandUpdatesActiveHand()
+        {
+            var server = StartServer();
+
+            var listener = new EventBasedNetListener();
+            var manager = new NetManager(listener);
+            manager.Start();
+
+            var activeHands = new System.Collections.Generic.List<byte>();
+            listener.NetworkReceiveEvent += (peer, reader, channel, method) =>
+            {
+                if (reader.GetUShort() == (ushort)global::Shared.Messages.MessageType.InventorySync)
+                {
+                    var sync = new InventorySync();
+                    sync.Deserialize(reader.GetBytesWithLength());
+                    activeHands.Add(sync.ActiveHand);
+                }
+                reader.Recycle();
+            };
+
+            var peer = manager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
+
+            for (int i = 0; i < 200 && activeHands.Count == 0; i++) { manager.PollEvents(); Thread.Sleep(10); }
+            Assert.True(activeHands.Count >= 1);
+            Assert.Equal((byte)0, activeHands[0]);
+
+            var writer = new LiteNetLib.Utils.NetDataWriter();
+            writer.Put((ushort)global::Shared.Messages.MessageType.SwapHand);
+            writer.PutBytesWithLength(new SwapHandRequest { Hand = 1 }.Serialize());
+            peer.Send(writer, DeliveryMethod.ReliableOrdered);
+
+            for (int i = 0; i < 200 && !activeHands.Contains((byte)1); i++) { manager.PollEvents(); Thread.Sleep(10); }
+            Assert.Contains((byte)1, activeHands);
+
+            manager.Stop();
+        }
+
+        [Fact]
+        public void Drop_InBlockWorld_SkipsTileWalkableGate()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 77, ItemDefId = 3, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.True(OnGameLoop(server, () => server.DespawnGroundItem(77)));
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Pickup_InBlockWorld_ReachesItemOneCellUp()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
+
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(9, 1, 5, 5, 1));
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
+
+            Assert.Equal(netId, Hand(client, 0).NetId);
+            Assert.False(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Pickup_InBlockWorld_TwoCellsUp_NotReached()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0 };
+
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(9, 1, 5, 5, 2));
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.True(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Drop_InBlockWorld_MidAir_SnapsToFloorCell()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 5 };
+            Hand(client, 0) = new HeldItem { NetId = 88, ItemDefId = 3, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.Contains(server.GroundItemsInInterest(5.5f, 5.5f, 1), it => it.NetId == 88 && it.Z == 1);
+        }
+
+        [Fact]
+        public void Drop_InBlockWorld_StandingOnFloor_RestsInFeetCell()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1 };
+            Hand(client, 0) = new HeldItem { NetId = 89, ItemDefId = 3, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 }));
+
+            Assert.Contains(server.GroundItemsInInterest(5.5f, 5.5f, 1), it => it.NetId == 89 && it.Z == 1);
+        }
+
+        [Fact]
+        public void Drop_InBlockWorld_AboveHalfStep_RestsInStepCell()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 6.5f, Y = 0.5f, Z = 5 };
+            Hand(client, 0) = new HeldItem { NetId = 90, ItemDefId = 3, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 }));
+
+            Assert.Contains(server.GroundItemsInInterest(6.5f, 0.5f, 1), it => it.NetId == 90 && it.Z == 1);
+        }
+
+        [Fact]
+        public void Drop_InBlockWorld_Vacuum_StaysAtDropCell()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 40.5f, Y = 40.5f, Z = 5 };
+            Hand(client, 0) = new HeldItem { NetId = 91, ItemDefId = 3, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 }));
+
+            Assert.Contains(server.GroundItemsInInterest(40.5f, 40.5f, 5), it => it.NetId == 91 && it.Z == 5);
+        }
+
+        [Fact]
+        public void DropAllHeld_InBlockWorld_MidAir_AllSnapToFloor_NetIdsPreserved()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 5 };
+            Hand(client, 0) = new HeldItem { NetId = 501, ItemDefId = 7, StackCount = 1 };
+            Slot(client, SlotCategory.Belt, 0) = new HeldItem { NetId = 502, ItemDefId = 8, StackCount = 5 };
+
+            OnGameLoop(server, () => Invoke(server, "DropAllHeldOnDisconnect", client));
+
+            var ground = server.GroundItemsInInterest(5.5f, 5.5f, 1);
+            Assert.Contains(ground, it => it.NetId == 501 && it.Z == 1);
+            Assert.Contains(ground, it => it.NetId == 502 && it.Z == 1);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Pickup_SpanTwo_BothHandsFree_OccupiesBoth_SameNetId()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 2, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
+
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 1, 5, 5, 0));
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
+
+            Assert.Equal(netId, Hand(client, 0).NetId);
+            Assert.Equal(netId, Hand(client, 1).NetId);
+            Assert.False(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Pickup_SpanTwo_OneHandOccupied_Rejected_GroundIntact()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 2, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 999, ItemDefId = 1, StackCount = 1 };
+
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 1, 5, 5, 0));
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
+
+            Assert.Equal(999, Hand(client, 0).NetId);
+            Assert.Equal(0, Hand(client, 1).NetId);
+            Assert.True(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Pickup_SpanExceedsHandCount_Rejected()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 3, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
+
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 1, 5, 5, 0));
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.Equal(0, Hand(client, 1).NetId);
+            Assert.True(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Drop_SpanTwo_ClearsBothSlots_SpawnsSingleGroundItem()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 2, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1, ActiveHand = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 300, ItemDefId = 3, StackCount = 1 };
+            Hand(client, 1) = new HeldItem { NetId = 300, ItemDefId = 3, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 1 }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.Equal(0, Hand(client, 1).NetId);
+            int count = 0;
+            foreach (var it in server.GroundItemsInInterest(5.5f, 5.5f, 1)) if (it.NetId == 300) count++;
+            Assert.Equal(1, count);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void MoveSlot_SpanTwo_TwoFreeInDest_OccupiesBoth()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Ear, true, 2, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+            Hand(client, 1) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Hand, FromIndex = 0, ToCategory = SlotCategory.Ear, ToIndex = 0 }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.Equal(0, Hand(client, 1).NetId);
+            Assert.Equal(10, Slot(client, SlotCategory.Ear, 0).NetId);
+            Assert.Equal(10, Slot(client, SlotCategory.Ear, 1).NetId);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void MoveSlot_SpanTwo_OneFreeInDest_Rejected()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Ear, true, 2, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+            Slot(client, SlotCategory.Ear, 0) = new HeldItem { NetId = 20, ItemDefId = 2, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Hand, FromIndex = 0, ToCategory = SlotCategory.Ear, ToIndex = 1 }));
+
+            Assert.Equal(10, Hand(client, 0).NetId);
+            Assert.Equal(20, Slot(client, SlotCategory.Ear, 0).NetId);
+            Assert.Equal(0, Slot(client, SlotCategory.Ear, 1).NetId);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void MoveSlot_SpanTwo_WithinOwnCategory_NotFalselyBlocked()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Ear, true, 2, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0 };
+            Slot(client, SlotCategory.Ear, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+            Slot(client, SlotCategory.Ear, 1) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Ear, FromIndex = 0, ToCategory = SlotCategory.Ear, ToIndex = 1 }));
+
+            Assert.Equal(10, Slot(client, SlotCategory.Ear, 0).NetId);
+            Assert.Equal(10, Slot(client, SlotCategory.Ear, 1).NetId);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void SendInventorySync_SpanTwoInBothHands_EmitsTwoRecords()
+        {
+            var server = StartServer();
+            ClientConnection? serverClient = null;
+            server.OnClientConnected += c => { if (serverClient == null) serverClient = c; };
+
+            var listener = new EventBasedNetListener();
+            var manager = new NetManager(listener);
+            manager.Start();
+
+            var received = new System.Collections.Generic.List<SlotRecord[]>();
+            listener.NetworkReceiveEvent += (peer, reader, channel, method) =>
+            {
+                if (reader.GetUShort() == (ushort)global::Shared.Messages.MessageType.InventorySync)
+                {
+                    var sync = new InventorySync();
+                    sync.Deserialize(reader.GetBytesWithLength());
+                    received.Add(sync.Slots);
+                }
+                reader.Recycle();
+            };
+
+            manager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
+            for (int i = 0; i < 200 && serverClient == null; i++) { manager.PollEvents(); Thread.Sleep(10); }
+            Assert.NotNull(serverClient);
+
+            OnGameLoop(server, () =>
+            {
+                serverClient!.Slots[(int)SlotCategory.Hand][0] = new HeldItem { NetId = 10, ItemDefId = 5, StackCount = 1 };
+                serverClient!.Slots[(int)SlotCategory.Hand][1] = new HeldItem { NetId = 10, ItemDefId = 5, StackCount = 1 };
+                Invoke(server, "SendInventorySyncToOwner", serverClient!);
+            });
+
+            for (int i = 0; i < 30; i++) { manager.PollEvents(); Thread.Sleep(10); }
+
+            Assert.NotEmpty(received);
+            var last = received[received.Count - 1];
+            Assert.Equal(2, last.Length);
+            Assert.All(last, r => Assert.Equal((ushort)5, r.ItemDefId));
+
+            manager.Stop();
+        }
+
+        [Fact]
+        public void DropAllHeld_SpanTwoInBothHands_SpawnsSingleGroundItem_NetIdDeduped()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1 };
+            Hand(client, 0) = new HeldItem { NetId = 700, ItemDefId = 3, StackCount = 1 };
+            Hand(client, 1) = new HeldItem { NetId = 700, ItemDefId = 3, StackCount = 1 };
+
+            OnGameLoop(server, () => Invoke(server, "DropAllHeldOnDisconnect", client));
+
+            int count = 0;
+            foreach (var it in server.GroundItemsInInterest(5.5f, 5.5f, 1)) if (it.NetId == 700) count++;
+            Assert.Equal(1, count);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Drop_CollisionItem_LandsInFacingNeighborCell_NotUnderfoot()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 1, 1, false, 0, true, BlockBox.Full);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1, ActiveHand = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 900, ItemDefId = 70, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.Contains(server.GroundItemsInInterest(5.5f, 5.5f, 1), it => it.NetId == 900 && it.X == 5.5f && it.Y == 6.5f && it.Z == 1);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Drop_CollisionItem_AllNeighborsBlocked_Refused()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 1, 1, false, 0, true, BlockBox.Full);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1, ActiveHand = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 900, ItemDefId = 70, StackCount = 1 };
+
+            OnGameLoop(server, () =>
+            {
+                server.SpawnGroundItem(70, 1, 5, 6, 1);
+                server.SpawnGroundItem(70, 1, 6, 5, 1);
+                server.SpawnGroundItem(70, 1, 5, 4, 1);
+                server.SpawnGroundItem(70, 1, 4, 5, 1);
+                InvokeHandleDrop(server, client, new DropItem { Category = SlotCategory.Hand, Index = 0 });
+            });
+
+            Assert.Equal(900, Hand(client, 0).NetId);
+            Assert.False(OnGameLoop(server, () => server.DespawnGroundItem(900)));
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Disconnect_CollisionItem_AllNeighborsBlocked_ForcedUnderfoot()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Hand, false, 1, 1, false, 0, true, BlockBox.Full);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 1 };
+            Hand(client, 0) = new HeldItem { NetId = 900, ItemDefId = 70, StackCount = 1 };
+
+            OnGameLoop(server, () =>
+            {
+                server.SpawnGroundItem(70, 1, 5, 6, 1);
+                server.SpawnGroundItem(70, 1, 6, 5, 1);
+                server.SpawnGroundItem(70, 1, 5, 4, 1);
+                server.SpawnGroundItem(70, 1, 4, 5, 1);
+                Invoke(server, "DropAllHeldOnDisconnect", client);
+            });
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.Contains(server.GroundItemsInInterest(5.5f, 5.5f, 1), it => it.NetId == 900 && it.X == 5.5f && it.Y == 5.5f && it.Z == 1);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Pickup_FractionalItemPosition_ReachableViaFloor()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
+
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 1, 5.3f, 5.7f, 0f));
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
+
+            Assert.Equal(netId, Hand(client, 0).NetId);
+            Assert.False(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Pickup_FractionalItemPosition_OutOfReachViaFloor()
+        {
+            var server = StartServer();
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 5.5f, Y = 5.5f, Z = 0, ActiveHand = 0 };
+
+            int netId = OnGameLoop(server, () => server.SpawnGroundItem(10, 1, 7.1f, 5.5f, 0f));
+            OnGameLoop(server, () => InvokeHandlePickup(server, client, new PickupItem { TargetNetId = netId }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.True(OnGameLoop(server, () => server.DespawnGroundItem(netId)));
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void MoveSlot_ToUniform_Equippable_Allowed()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Uniform, true, 1, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0, ActiveHand = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Hand, FromIndex = 0, ToCategory = SlotCategory.Uniform, ToIndex = 0 }));
+
+            Assert.Equal(0, Hand(client, 0).NetId);
+            Assert.Equal(10, Slot(client, SlotCategory.Uniform, 0).NetId);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void MoveSlot_FromUniform_ToHand_Allowed()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Uniform, true, 1, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0, ActiveHand = 0 };
+            Slot(client, SlotCategory.Uniform, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Uniform, FromIndex = 0, ToCategory = SlotCategory.Hand, ToIndex = 0 }));
+
+            Assert.Equal(0, Slot(client, SlotCategory.Uniform, 0).NetId);
+            Assert.Equal(10, Hand(client, 0).NetId);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void MoveSlot_ToUniform_NotEquippable_Rejected()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Uniform, false, 1, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0, ActiveHand = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Hand, FromIndex = 0, ToCategory = SlotCategory.Uniform, ToIndex = 0 }));
+
+            Assert.Equal(10, Hand(client, 0).NetId);
+            Assert.Equal(0, Slot(client, SlotCategory.Uniform, 0).NetId);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void MoveSlot_ToUniform_WrongEquipSlot_Rejected()
+        {
+            var server = StartServer();
+            server.ProtoLookup = _ => new ItemProto(1, SlotCategory.Belt, true, 1, 1, false, 0);
+            var peer = CreateConnectedPeer();
+            var client = new ClientConnection(peer, 1) { X = 0.5f, Y = 0.5f, Z = 0, ActiveHand = 0 };
+            Hand(client, 0) = new HeldItem { NetId = 10, ItemDefId = 1, StackCount = 1 };
+
+            OnGameLoop(server, () => InvokeHandleMoveSlot(server, client, new MoveSlotRequest { FromCategory = SlotCategory.Hand, FromIndex = 0, ToCategory = SlotCategory.Uniform, ToIndex = 0 }));
+
+            Assert.Equal(10, Hand(client, 0).NetId);
+            Assert.Equal(0, Slot(client, SlotCategory.Uniform, 0).NetId);
+
+            CleanupPeer(peer);
+        }
+
+        [Fact]
+        public void Broadcast_CarriesWornUniformDefId_ZeroThenSet()
+        {
+            var server = StartServer();
+            ClientConnection? sc = null;
+            server.OnClientConnected += c => { if (sc == null) sc = c; };
+            var peer = CreateConnectedPeer();
+            for (int i = 0; i < 200 && sc == null; i++) Thread.Sleep(10);
+            Assert.NotNull(sc);
+
+            ushort empty = OnGameLoop(server, () =>
+            {
+                InvokeBroadcast(server);
+                return WornOf(server, sc!.PlayerNetId);
+            });
+            Assert.Equal((ushort)0, empty);
+
+            ushort worn = OnGameLoop(server, () =>
+            {
+                sc!.Slots[(int)SlotCategory.Uniform][0] = new HeldItem { NetId = 55, ItemDefId = 77, StackCount = 1 };
+                InvokeBroadcast(server);
+                return WornOf(server, sc!.PlayerNetId);
+            });
+            Assert.Equal((ushort)77, worn);
+
+            CleanupPeer(peer);
+        }
+
+        private static void InvokeBroadcast(GameServer s)
+            => typeof(GameServer).GetMethod("BroadcastWorldSnapshot", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.Invoke(s, null);
+
+        private static ushort WornOf(GameServer s, int netId)
+        {
+            var ents = (global::Shared.Messages.Core.EntitySnapshot[])typeof(GameServer)
+                .GetField("_broadcastEntities", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(s)!;
+            for (int i = 0; i < ents.Length; i++)
+                if (ents[i].NetId == netId) return ents[i].WornUniformDefId;
+            return 0;
         }
 
         private void CleanupPeer(NetPeer peer)
@@ -343,7 +934,6 @@ namespace ServerTests.Server.Network
             Thread.Sleep(30);
         }
 
-        // Хендлеры private — зовём через рефлексию (мимо GameLoop-очередей, детерминированно, без гонки таймингов теста).
         private static void InvokeHandlePickup(GameServer server, ClientConnection client, PickupItem msg)
             => Invoke(server, "HandlePickup", client, msg);
 
@@ -356,13 +946,21 @@ namespace ServerTests.Server.Network
         private static void InvokeHandleMoveSlot(GameServer server, ClientConnection client, MoveSlotRequest msg)
             => Invoke(server, "HandleMoveSlot", client, msg);
 
+        private static readonly System.Reflection.FieldInfo InventoryField =
+            typeof(GameServer).GetField("_inventory",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+
         private static void Invoke(GameServer server, string methodName, params object[] args)
         {
-            var method = typeof(GameServer).GetMethod(methodName,
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            object inventory = InventoryField.GetValue(server)
+                ?? throw new InvalidOperationException("Field _inventory not found on GameServer");
+            var method = inventory.GetType().GetMethod(methodName,
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)
+                ?? inventory.GetType().GetMethod(methodName,
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
             if (method == null)
-                throw new InvalidOperationException($"Method {methodName} not found on GameServer");
-            method.Invoke(server, args);
+                throw new InvalidOperationException($"Method {methodName} not found on ServerInventorySystem");
+            method.Invoke(inventory, args);
         }
     }
 }

@@ -2,23 +2,25 @@ using System;
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using Shared.Messages.Interaction;
 using Shared.World.Items;
 using Client.Items;
 
 namespace Client.UI.Inventory
 {
+    /// <summary>Самодостаточный UI-слот инвентаря: рендер (иконка/стек/подсветка) + клик по адресу (Category, Index).</summary>
     public sealed class InventorySlotHud : MonoBehaviour
     {
-        [SerializeField] private SlotKind _kind;
+        [SerializeField] private SlotCategory _category;
+        [SerializeField] private byte _index;
         [SerializeField] private Image _icon;
         [SerializeField] private TMP_Text _count;
         [SerializeField] private Image _highlight;
         [SerializeField] private Button _button;
         [SerializeField] private Sprite _emptySprite;
 
-        public byte Slot => (byte)_kind;
-        public event Action<byte> Clicked;
+        public SlotCategory Category => _category;
+        public byte Index => _index;
+        public event Action<SlotCategory, byte> Clicked;
 
         private void Awake()
         {
@@ -30,11 +32,12 @@ namespace Client.UI.Inventory
             if (_button != null) _button.onClick.RemoveListener(OnButtonClicked);
         }
 
-        private void OnButtonClicked() => Clicked?.Invoke(Slot);
+        private void OnButtonClicked() => Clicked?.Invoke(_category, _index);
 
-        public void SetFilled(in SlotRecord rec, ItemCatalog catalog)
+        /// <summary>Отрисовать слот занятым: иконка по каталогу + счётчик стека (если &gt;1).</summary>
+        public void SetFilled(ushort itemDefId, byte stackCount, ItemCatalog catalog)
         {
-            var def = catalog != null ? catalog.For(rec.ItemDefId) : null;
+            var def = catalog != null ? catalog.For(itemDefId) : null;
             Sprite s = def != null ? def.Sprite : null;
             if (_icon != null)
             {
@@ -43,12 +46,13 @@ namespace Client.UI.Inventory
             }
             if (_count != null)
             {
-                bool show = rec.StackCount > 1;
+                bool show = stackCount > 1;
                 _count.gameObject.SetActive(show);
-                if (show) _count.text = rec.StackCount.ToString();
+                if (show) _count.text = stackCount.ToString();
             }
         }
 
+        /// <summary>Отрисовать слот пустым.</summary>
         public void SetEmpty()
         {
             if (_icon != null)
@@ -59,6 +63,7 @@ namespace Client.UI.Inventory
             if (_count != null) _count.gameObject.SetActive(false);
         }
 
+        /// <summary>Подсветка активной руки.</summary>
         public void SetHighlight(bool on)
         {
             if (_highlight != null) _highlight.enabled = on;

@@ -66,10 +66,47 @@ namespace Client.Net.View
 
         public int NetId { get; private set; }
 
+        private SpriteRenderer _wornOverlay;
+        private Sprite[] _wornSprites;
+        /// <summary>DefId надетой формы (0 = нет).</summary>
+        public ushort WornDefId { get; private set; }
+
         public void Init(int netId)
         {
             NetId = netId;
             if (_spriteRenderer == null) _spriteRenderer = GetComponent<SpriteRenderer>();
+            CreateWornOverlay();
+        }
+
+        private void CreateWornOverlay()
+        {
+            if (_spriteRenderer == null || _wornOverlay != null) return;
+            var go = new GameObject("WornOverlay");
+            go.transform.SetParent(_spriteRenderer.transform, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = Vector3.one;
+            _wornOverlay = go.AddComponent<SpriteRenderer>();
+            _wornOverlay.sortingLayerID = _spriteRenderer.sortingLayerID;
+            _wornOverlay.sortingOrder = _spriteRenderer.sortingOrder + 1;
+            _wornOverlay.enabled = false;
+        }
+
+        /// <summary>Задать/снять оверлей надетой формы (sprites[4] по Direction; меньше 4 или null — оверлей выключен).</summary>
+        public void SetWorn(ushort defId, Sprite[] sprites)
+        {
+            WornDefId = defId;
+            _wornSprites = (sprites != null && sprites.Length >= 4) ? sprites : null;
+            UpdateWornOverlay(_lastFacing < 4 ? (Direction)_lastFacing : Direction.South);
+        }
+
+        // _culled в show: иначе одежда остаётся видимой поверх срезанного/скрытого тела (плавающая шмотка).
+        private void UpdateWornOverlay(Direction dir)
+        {
+            if (_wornOverlay == null) return;
+            bool show = _wornSprites != null && !_culled;
+            _wornOverlay.sprite = show ? _wornSprites[(int)dir] : null;
+            _wornOverlay.enabled = show;
         }
 
         public void Receive(in EntitySnapshot snap, float now)
@@ -90,16 +127,16 @@ namespace Client.Net.View
             for (int i = 0; i < _allRenderers.Length; i++)
                 if (_allRenderers[i] != null)
                     _allRenderers[i].enabled = !culled;
+            UpdateWornOverlay(_lastFacing < 4 ? (Direction)_lastFacing : Direction.South);
         }
 
         /// <summary>Блок-мир (B2): снапшот уже в осях Unity (Y — высота) — позиция берётся 1:1. Ставит NetworkRunner.</summary>
-        public static bool BlocksMode;
 
         /// <summary>Задать предсказанную позицию локального игрока; State/Reason — авторитетные из снапшота.</summary>
         public void SetPredicted(float x, float y, float z, byte facing, byte state, byte reason)
         {
             _isLocal = true;
-            _targetPos = BlocksMode ? new Vector3(x, y, z) : new Vector3(x, z * RenderConfig.FloorHeight, y);
+            _targetPos = new Vector3(x, y, z);
 
             // Первый кадр — жёстко, без интерполяции из (0,0,0).
             if (!_hasTarget)
@@ -127,7 +164,7 @@ namespace Client.Net.View
                 return;
 
             // Тайлы: (X, Y=глубина, Z=этаж) → Unity (X, высота, Z=глубина); блок-мир: оси уже Unity — 1:1.
-            transform.position = BlocksMode ? new Vector3(x, y, z) : new Vector3(x, z * RenderConfig.FloorHeight, y);
+            transform.position = new Vector3(x, y, z);
 
             ApplySprite(state, facing, reason);
         }
@@ -141,6 +178,7 @@ namespace Client.Net.View
             _lastFacing = facing;
             _lastState = state;
             _lastReason = reason;
+            UpdateWornOverlay((Direction)facing);
         }
 
         // Спрайт по (State, Reason, Direction) для всех 6 PlayerState. Пустой слот → фолбэк в Stand-набор;

@@ -6,16 +6,29 @@ using Client.Map;
 
 namespace Client.Editor.Inspectors
 {
-    /// <summary>SceneView-кисть блок-карты <see cref="BlockMapAuthoring"/>: слой = высота Y, ЛКМ красит / Shift+ЛКМ стирает / [ ] меняют слой.</summary>
+    /// <summary>SceneView-кисть блок-карты <see cref="BlockMapAuthoring"/>: режим (Слой/Присоед./Вставка) = КАК ставим, раздел (Блоки/Предметы/Маркеры) = ЧТО ставим.</summary>
     [CustomEditor(typeof(BlockMapAuthoring))]
     public sealed class BlockMapAuthoringEditor : UnityEditor.Editor
     {
         private static int _layer; // высота Y текущего слоя (общая на сессию редактора)
-        private static int _mode;  // 0=Слой, 1=Присоединение, 2=Потолки, 3=Полы
+        private static int _mode;
+        private static int _section; // Блоки/Предметы/Маркеры — для Предметов/Маркеров валиден только режим «Вставка»
+        private static int _markerIndex; // индекс в MarkerNames (0/1 — бейк потолка/пола, 2+ — маркерный блок)
+        private static int _markerBlockIndex; // индекс блока внутри выбранной маркерной категории
         private static int _facing; // поворот мульти-блока (R в SceneView, 90° по часовой)
         private static double _lastBrushTime; // пауза кисти присоединения (BrushInterval)
         private static readonly Vector3[] _cellRect = new Vector3[4]; // подсветка ячейки слоя (без аллокаций)
-        private static readonly string[] ModeNames = { "Слой", "Присоед.", "Потолки", "Полы" };
+        private static readonly string[] ModeNames = { "Слой", "Присоед.", "Вставка" };
+        private static readonly string[] SectionNames = { "Блоки", "Предметы", "Маркеры" };
+        private static readonly string[] MarkerNames = { "Потолки", "Полы", "Marker", "Divider", "MergeMarker", "Точка спавна" };
+        private static readonly Shared.World.Blocks.BlockCategory[] MarkerBlockCats =
+        {
+            Shared.World.Blocks.BlockCategory.Marker,
+            Shared.World.Blocks.BlockCategory.Divider,
+            Shared.World.Blocks.BlockCategory.MergeMarker,
+            Shared.World.Blocks.BlockCategory.SpawnPoint
+        };
+        private static int _itemStack = 1; // размер стака кисти предметов (1–255, кламп в DrawItemPicker)
 
         // Поля сида кисти FloorAnchor (видны в GUI только при выбранной категории FloorAnchor).
         private static string _seedName = "Станция";
@@ -33,16 +46,24 @@ namespace Client.Editor.Inspectors
         private string[] _paletteNames;
         private int _paletteIndex;
 
+        private Client.Items.ItemDefinition[] _itemDefs = System.Array.Empty<Client.Items.ItemDefinition>(); // палитра раздела «Предметы», сорт по ItemDefId
+        private string[] _itemNames = System.Array.Empty<string>();
+        private int _itemIndex;
+
         // Палитра, сгруппированная по категории — источник двух списков кисти (Категория → Блок).
         private Shared.World.Blocks.BlockCategory[] _categories;
         private string[] _categoryNames;
         private int[][] _paletteByCategory;
         private string[][] _blockNamesByCategory;
+        private int[] _blockCats;
+        private string[] _blockCatNames;
         private int _categoryIndex;
         private int _blockIndex;
 
         private void OnEnable()
         {
+            if (_mode > 2)
+                _mode = 2;
             BlockDefinitionResolver.Invalidate(); // ассеты могли добавиться/переехать — кэш визуала заново
             var defs = BlockCatalogCodegen.LoadAllDefinitions();
             defs.Sort((a, b) => a.Type.CompareTo(b.Type));
@@ -51,6 +72,31 @@ namespace Client.Editor.Inspectors
             for (int i = 0; i < _palette.Length; i++)
                 _paletteNames[i] = $"{_palette[i].Type} — {_palette[i].DisplayName}";
             BuildCategoryGroups();
+            LoadItemDefs();
+        }
+
+        private void LoadItemDefs() // палитра раздела «Предметы» — все ItemDefinition-ассеты, сорт по ItemDefId
+        {
+            var items = new List<Client.Items.ItemDefinition>();
+            foreach (string guid in AssetDatabase.FindAssets("t:ItemDefinition"))
+            {
+                var def = AssetDatabase.LoadAssetAtPath<Client.Items.ItemDefinition>(AssetDatabase.GUIDToAssetPath(guid));
+                if (def != null)
+                    items.Add(def);
+            }
+            items.Sort((a, b) => a.ItemDefId.CompareTo(b.ItemDefId));
+            _itemDefs = items.ToArray();
+            _itemNames = new string[_itemDefs.Length];
+            for (int i = 0; i < _itemDefs.Length; i++)
+                _itemNames[i] = $"{_itemDefs[i].ItemDefId} — {_itemDefs[i].DisplayName}";
+        }
+
+        private string ItemName(ushort defId)
+        {
+            for (int i = 0; i < _itemDefs.Length; i++)
+                if (_itemDefs[i].ItemDefId == defId)
+                    return _itemDefs[i].DisplayName;
+            return defId.ToString();
         }
 
         // Одноразовая раскладка палитры по категориям (порядок enum, счётчик блоков в подписи).
@@ -85,14 +131,77 @@ namespace Client.Editor.Inspectors
                     names[k] = _paletteNames[list[k]];
                 _blockNamesByCategory[ci] = names;
             }
+
+            var blockCats = new List<int>();
+            for (int ci = 0; ci < _categories.Length; ci++)
+                if (!IsMarkerCategory(_categories[ci]))
+                    blockCats.Add(ci);
+            _blockCats = blockCats.ToArray();
+            _blockCatNames = new string[_blockCats.Length];
+            for (int i = 0; i < _blockCats.Length; i++)
+                _blockCatNames[i] = _categoryNames[_blockCats[i]];
+        }
+
+        private static bool IsMarkerCategory(Shared.World.Blocks.BlockCategory c)
+            => c == Shared.World.Blocks.BlockCategory.Marker
+            || c == Shared.World.Blocks.BlockCategory.Divider
+            || c == Shared.World.Blocks.BlockCategory.MergeMarker
+            || c == Shared.World.Blocks.BlockCategory.SpawnPoint;
+
+        private int CategoryGroupIndex(Shared.World.Blocks.BlockCategory c)
+        {
+            for (int ci = 0; ci < _categories.Length; ci++)
+                if (_categories[ci] == c)
+                    return ci;
+            return -1;
+        }
+
+        private static bool ModeAllowed(int mode) => _section == 0 || mode == 2; // Предметы/Маркеры ставятся только «Вставкой»
+
+        private int MarkerPaletteIndex() // индекс палитры для маркерного блока (-1 в бейк-режимах Потолки/Полы)
+        {
+            if (_markerIndex < 2)
+                return -1;
+            int ci = CategoryGroupIndex(MarkerBlockCats[_markerIndex - 2]);
+            if (ci < 0)
+                return -1;
+            var inCat = _paletteByCategory[ci];
+            return inCat[Mathf.Clamp(_markerBlockIndex, 0, inCat.Length - 1)];
         }
 
         public override void OnInspectorGUI()
         {
             var t = (BlockMapAuthoring)target;
 
-            _mode = GUILayout.Toolbar(_mode, ModeNames);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                for (int i = 0; i < ModeNames.Length; i++)
+                    using (new EditorGUI.DisabledScope(!ModeAllowed(i)))
+                    {
+                        bool on = GUILayout.Toggle(_mode == i, ModeNames[i], "Button");
+                        if (on && _mode != i)
+                            _mode = i;
+                    }
+            }
             EditorGUILayout.Space(4);
+
+            int newSection = EditorGUILayout.Popup(
+                new GUIContent("Раздел", "Что ставим: блоки, предметы или маркеры."), _section, SectionNames);
+            if (newSection != _section)
+            {
+                _section = newSection;
+                if (!ModeAllowed(_mode))
+                    _mode = 2;
+            }
+
+            if (_section == 0)
+                DrawBlockPicker();
+            else if (_section == 1)
+                DrawItemPicker();
+            else
+                DrawMarkerPicker();
+
+            EditorGUILayout.Space(6);
             EditorGUI.BeginChangeCheck();
             DrawDefaultInspector();
             if (EditorGUI.EndChangeCheck())
@@ -115,29 +224,6 @@ namespace Client.Editor.Inspectors
             EditorGUILayout.Space(6);
             _layer = EditorGUILayout.IntField(new GUIContent("Слой (Y)", "Высота кисти; [ и ] в SceneView."), _layer);
 
-            if (_palette.Length == 0)
-            {
-                EditorGUILayout.HelpBox("Нет BlockDefinition-ассетов — создай (Create → Station → Block Definition).", MessageType.Warning);
-            }
-            else
-            {
-                _categoryIndex = Mathf.Clamp(_categoryIndex, 0, _categories.Length - 1);
-                int newCat = EditorGUILayout.Popup(new GUIContent("Категория"), _categoryIndex, _categoryNames);
-                if (newCat != _categoryIndex) { _categoryIndex = newCat; _blockIndex = 0; }
-
-                var inCat = _paletteByCategory[_categoryIndex];
-                _blockIndex = Mathf.Clamp(_blockIndex, 0, inCat.Length - 1);
-                _blockIndex = EditorGUILayout.Popup(new GUIContent("Блок"), _blockIndex, _blockNamesByCategory[_categoryIndex]);
-                _paletteIndex = inCat[_blockIndex];
-
-                if (_categories[_categoryIndex] == Shared.World.Blocks.BlockCategory.FloorAnchor)
-                {
-                    _seedName = EditorGUILayout.TextField(new GUIContent("Имя", "Имя станции/этажа (лейбл блока этажа)."), _seedName);
-                    _seedRank = EditorGUILayout.IntField(new GUIContent("Ранг", "Меньший = истина. Игрок >0, админ/мапер <1."), _seedRank);
-                    _seedFloor = EditorGUILayout.IntField(new GUIContent("Этаж", "Номер этажа зоны."), _seedFloor);
-                }
-            }
-
             using (new EditorGUI.DisabledScope(!t.IsLoaded))
             using (new EditorGUILayout.HorizontalScope())
             {
@@ -159,6 +245,73 @@ namespace Client.Editor.Inspectors
                 EditorGUILayout.HelpBox("Карта не загружена: «Новая» или «Загрузить».", MessageType.Info);
             else
                 EditorGUILayout.HelpBox("SceneView: ЛКМ — красить, Shift+ЛКМ — стирать, [ / ] — слой.", MessageType.None);
+        }
+
+        private void DrawBlockPicker()
+        {
+            if (_palette.Length == 0)
+            {
+                EditorGUILayout.HelpBox("Нет BlockDefinition-ассетов — создай (Create → Station → Block Definition).", MessageType.Warning);
+                return;
+            }
+            if (_blockCats.Length == 0)
+            {
+                EditorGUILayout.HelpBox("Нет блоков не-маркерных категорий.", MessageType.Warning);
+                return;
+            }
+
+            _categoryIndex = Mathf.Clamp(_categoryIndex, 0, _blockCats.Length - 1);
+            int newCat = EditorGUILayout.Popup(new GUIContent("Категория"), _categoryIndex, _blockCatNames);
+            if (newCat != _categoryIndex) { _categoryIndex = newCat; _blockIndex = 0; }
+
+            int ci = _blockCats[_categoryIndex];
+            var inCat = _paletteByCategory[ci];
+            _blockIndex = Mathf.Clamp(_blockIndex, 0, inCat.Length - 1);
+            _blockIndex = EditorGUILayout.Popup(new GUIContent("Блок"), _blockIndex, _blockNamesByCategory[ci]);
+            _paletteIndex = inCat[_blockIndex];
+
+            if (_categories[ci] == Shared.World.Blocks.BlockCategory.FloorAnchor)
+            {
+                _seedName = EditorGUILayout.TextField(new GUIContent("Имя", "Имя станции/этажа (лейбл блока этажа)."), _seedName);
+                _seedRank = EditorGUILayout.IntField(new GUIContent("Ранг", "Меньший = истина. Игрок >0, админ/мапер <1."), _seedRank);
+                _seedFloor = EditorGUILayout.IntField(new GUIContent("Этаж", "Номер этажа зоны."), _seedFloor);
+            }
+        }
+
+        private void DrawItemPicker()
+        {
+            if (_itemDefs.Length == 0)
+            {
+                EditorGUILayout.HelpBox("Нет ItemDefinition-ассетов.", MessageType.Warning);
+                return;
+            }
+            _itemIndex = Mathf.Clamp(_itemIndex, 0, _itemDefs.Length - 1);
+            _itemIndex = EditorGUILayout.Popup(new GUIContent("Предмет"), _itemIndex, _itemNames);
+            _itemStack = Mathf.Clamp(
+                EditorGUILayout.IntField(new GUIContent("Стак", "Количество в точке спавна (1–255)."), _itemStack), 1, 255);
+        }
+
+        private void DrawMarkerPicker()
+        {
+            int newMarker = EditorGUILayout.Popup(new GUIContent("Категория"), _markerIndex, MarkerNames);
+            if (newMarker != _markerIndex) { _markerIndex = newMarker; _markerBlockIndex = 0; }
+            if (_markerIndex < 2)
+                return;
+
+            var cat = MarkerBlockCats[_markerIndex - 2];
+            int ci = CategoryGroupIndex(cat);
+            if (ci < 0)
+            {
+                EditorGUILayout.HelpBox($"Нет блоков категории {cat}.", MessageType.Warning);
+                return;
+            }
+            var inCat = _paletteByCategory[ci];
+            if (inCat.Length > 1)
+            {
+                _markerBlockIndex = Mathf.Clamp(_markerBlockIndex, 0, inCat.Length - 1);
+                _markerBlockIndex = EditorGUILayout.Popup(new GUIContent("Блок"), _markerBlockIndex, _blockNamesByCategory[ci]);
+            }
+            _paletteIndex = inCat[Mathf.Clamp(_markerBlockIndex, 0, inCat.Length - 1)];
         }
 
         private static void TryIO(System.Action action)
@@ -259,7 +412,9 @@ namespace Client.Editor.Inspectors
             var t = (BlockMapAuthoring)target;
             if (t.IsLoaded && _showZones && _zonesPreview != null)
                 DrawZonePreview();
-            if (!t.IsLoaded || _palette.Length == 0)
+            if (t.IsLoaded)
+                DrawItemSpawns(t);
+            if (!t.IsLoaded)
                 return;
 
             Event e = Event.current;
@@ -276,12 +431,107 @@ namespace Client.Editor.Inspectors
 
             Ray ray = HandleUtility.GUIPointToWorldRay(e.mousePosition);
 
-            if (_mode == 0)
-                LayerMode(t, e, ray);
-            else
-                RaycastModes(t, e, ray);
+            if (_section == 1)
+                ItemMode(t, e, ray);
+            else if (_section == 2)
+                MarkerInsert(t, e, ray);
+            else if (_palette.Length > 0 && _blockCats.Length > 0)
+            {
+                if (_mode == 0)
+                    LayerMode(t, e, ray);
+                else if (_mode == 1)
+                    AttachMode(t, e, ray);
+                else
+                    BlockInsert(t, e, ray);
+            }
 
             SceneView.RepaintAll();
+        }
+
+        // Маршрутизация раздела «Маркеры»: Потолки/Полы — бейк-биты (BakeMode), остальное — обычная вставка блока.
+        private void MarkerInsert(BlockMapAuthoring t, Event e, Ray ray)
+        {
+            if (_markerIndex < 2)
+            {
+                BakeMode(t, e, ray, ceiling: _markerIndex == 0);
+                return;
+            }
+            int idx = MarkerPaletteIndex();
+            if (idx < 0)
+                return;
+            _paletteIndex = idx;
+            BlockInsert(t, e, ray);
+        }
+
+        // Режим «Вставка»: рейкаст в занятую ячейку под курсором, при промахе — фолбэк на плоскость текущего слоя.
+        private void BlockInsert(BlockMapAuthoring t, Event e, Ray ray)
+        {
+            Vector3Int cell;
+            if (RaycastGrid(t, ray, 200f, out var hit, out _))
+                cell = hit;
+            else
+            {
+                var plane = new Plane(Vector3.up, new Vector3(0f, _layer, 0f));
+                if (!plane.Raycast(ray, out float enter))
+                    return;
+                Vector3 p = ray.GetPoint(enter);
+                cell = new Vector3Int(Mathf.FloorToInt(p.x), _layer, Mathf.FloorToInt(p.z));
+                DrawGrid(cell.x, cell.z);
+            }
+
+            bool erase = e.shift;
+            if (erase)
+                DrawEraseGhost(t, cell);
+            else
+                DrawGhost(t, cell.x, cell.y, cell.z, erase: false);
+
+            if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
+            {
+                PlaceOrErase(t, cell.x, cell.y, cell.z, erase);
+                e.Use();
+            }
+        }
+
+        // Кисть предметов: клик по ячейке слоя — AddItemSpawn, Shift+клик — RemoveItemSpawnsAt (ластик всей ячейки).
+        private void ItemMode(BlockMapAuthoring t, Event e, Ray ray)
+        {
+            var plane = new Plane(Vector3.up, new Vector3(0f, _layer, 0f));
+            if (!plane.Raycast(ray, out float enter))
+                return;
+            Vector3 hit = ray.GetPoint(enter);
+            int bx = Mathf.FloorToInt(hit.x);
+            int bz = Mathf.FloorToInt(hit.z);
+
+            DrawGrid(bx, bz);
+            bool erase = e.shift;
+            Handles.color = erase ? new Color(1f, 0.3f, 0.2f) : new Color(1f, 0.75f, 0.2f);
+            Handles.DrawWireCube(new Vector3(bx + 0.5f, _layer + 0.25f, bz + 0.5f), new Vector3(0.5f, 0.5f, 0.5f));
+
+            if (e.type == EventType.MouseDown && e.button == 0 && !e.alt)
+            {
+                if (erase)
+                    t.Grid.RemoveItemSpawnsAt(bx, _layer, bz);
+                else if (_itemDefs.Length > 0)
+                    t.Grid.AddItemSpawn(new Shared.World.Blocks.ItemSpawn(
+                        bx, _layer, bz, _itemDefs[Mathf.Clamp(_itemIndex, 0, _itemDefs.Length - 1)].ItemDefId,
+                        (byte)_itemStack));
+                e.Use();
+            }
+        }
+
+        // Точки спавна видны всегда при загруженной карте — оранжевые wire-кубы + подпись «Имя ×N», без спавна объектов.
+        private void DrawItemSpawns(BlockMapAuthoring t)
+        {
+            var spawns = t.Grid.ItemSpawns;
+            Handles.color = new Color(1f, 0.75f, 0.2f);
+            for (int i = 0; i < spawns.Count; i++)
+            {
+                var s = spawns[i];
+                var c = new Vector3(s.X + 0.5f, s.Y + 0.2f, s.Z + 0.5f);
+                Handles.DrawWireCube(c, new Vector3(0.4f, 0.4f, 0.4f));
+                string label = s.Stack > 1 ? $"{ItemName(s.DefId)} ×{s.Stack}" : ItemName(s.DefId);
+                Handles.Label(c + Vector3.up * 0.4f, label);
+            }
         }
 
         // Режим «Слой»: кисть по горизонтальной плоскости высоты _layer.
@@ -379,47 +629,49 @@ namespace Client.Editor.Inspectors
             }
         }
 
-        // Режимы по рейкасту в существующие блоки: «Присоединение» (ставим к грани) и правка бейка.
-        private void RaycastModes(BlockMapAuthoring t, Event e, Ray ray)
+        // Режим «Присоединение»: рейкаст в существующий блок, ставим к его грани; Shift — стереть сам объект.
+        private void AttachMode(BlockMapAuthoring t, Event e, Ray ray)
         {
             if (!RaycastGrid(t, ray, 200f, out var hit, out var prev))
                 return;
 
-            if (_mode == 1) // Присоединение: призрак на соседней от грани ячейке; Shift — стереть сам объект
-            {
-                bool erase = e.shift;
-                var cell = erase ? hit : prev;
-                if (erase)
-                    DrawEraseGhost(t, cell);           // весь мульти-объект под курсором
-                else
-                    DrawGhost(t, cell.x, cell.y, cell.z, erase: false); // футпринт мульти-блока
+            bool erase = e.shift;
+            var cell = erase ? hit : prev;
+            if (erase)
+                DrawEraseGhost(t, cell);           // весь мульти-объект под курсором
+            else
+                DrawGhost(t, cell.x, cell.y, cell.z, erase: false); // футпринт мульти-блока
 
-                if ((e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && e.button == 0 && !e.alt)
+            if ((e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && e.button == 0 && !e.alt)
+            {
+                // Пауза кисти (BrushInterval): при зажатии блоки не сыплются очередью.
+                double now = EditorApplication.timeSinceStartup;
+                if (e.type == EventType.MouseDown || now - _lastBrushTime >= t.BrushInterval)
                 {
-                    // Пауза кисти (BrushInterval): при зажатии блоки не сыплются очередью.
-                    double now = EditorApplication.timeSinceStartup;
-                    if (e.type == EventType.MouseDown || now - _lastBrushTime >= t.BrushInterval)
-                    {
-                        _lastBrushTime = now;
-                        PlaceOrErase(t, cell.x, cell.y, cell.z, erase);
-                    }
-                    e.Use();
+                    _lastBrushTime = now;
+                    PlaceOrErase(t, cell.x, cell.y, cell.z, erase);
                 }
+                e.Use();
             }
-            else // Потолки/Полы: зажатая ЛКМ рисует бит, Shift+ЛКМ — стирает (как в остальных режимах)
-            {
-                byte bit = _mode == 2 ? Shared.World.Blocks.ChunkSection.BakeCeiling
-                                      : Shared.World.Blocks.ChunkSection.BakeInteriorFloor;
-                bool erase = e.shift;
-                Handles.color = erase ? new Color(1f, 0.3f, 0.2f)
-                                      : (_mode == 2 ? new Color(1f, 0.55f, 0.1f) : new Color(0.2f, 1f, 0.35f));
-                Handles.DrawWireCube(new Vector3(hit.x + 0.5f, hit.y + 0.5f, hit.z + 0.5f), Vector3.one);
+        }
 
-                if ((e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && e.button == 0 && !e.alt)
-                {
-                    t.SetBakeBit(hit.x, hit.y, hit.z, bit, on: !erase);
-                    e.Use();
-                }
+        // Бейк потолков/полов: зажатая ЛКМ рисует бит, Shift+ЛКМ — стирает.
+        private void BakeMode(BlockMapAuthoring t, Event e, Ray ray, bool ceiling)
+        {
+            if (!RaycastGrid(t, ray, 200f, out var hit, out _))
+                return;
+
+            byte bit = ceiling ? Shared.World.Blocks.ChunkSection.BakeCeiling
+                               : Shared.World.Blocks.ChunkSection.BakeInteriorFloor;
+            bool erase = e.shift;
+            Handles.color = erase ? new Color(1f, 0.3f, 0.2f)
+                                  : (ceiling ? new Color(1f, 0.55f, 0.1f) : new Color(0.2f, 1f, 0.35f));
+            Handles.DrawWireCube(new Vector3(hit.x + 0.5f, hit.y + 0.5f, hit.z + 0.5f), Vector3.one);
+
+            if ((e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && e.button == 0 && !e.alt)
+            {
+                t.SetBakeBit(hit.x, hit.y, hit.z, bit, on: !erase);
+                e.Use();
             }
         }
 

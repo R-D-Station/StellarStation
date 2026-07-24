@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using Shared.Messages.Interaction;
 using Shared.World.Items;
@@ -6,13 +7,39 @@ using Client.Net;
 
 namespace Client.UI.Inventory
 {
+    /// <summary>Тонкий менеджер слотов инвентаря: применяет <see cref="InventorySync"/> к <see cref="InventorySlotHud"/>-компонентам, роутит клики в drop.</summary>
     public sealed class InventoryHud : MonoBehaviour
     {
         [SerializeField] private InventorySlotHud[] _slots;
         [SerializeField] private ItemCatalog _catalog;
         [SerializeField] private NetworkRunner _runner;
 
-        private readonly InventorySlotHud[] _byIndex = new InventorySlotHud[InventorySlot.SlotCount];
+        private readonly Dictionary<int, InventorySlotHud> _byKey = new Dictionary<int, InventorySlotHud>();
+        private ushort _pullOverlayDefId;
+
+        private static int Key(SlotCategory cat, byte index) => ((int)cat << 8) | index;
+
+        private InventorySlotHud HandSlot(byte idx) => _byKey.TryGetValue(Key(SlotCategory.Hand, idx), out var s) ? s : null;
+
+        public void SetPullOverlay(ushort itemDefId)
+        {
+            _pullOverlayDefId = itemDefId;
+            ApplyPullOverlay();
+        }
+
+        public void ClearPullOverlay()
+        {
+            _pullOverlayDefId = 0;
+            var h0 = HandSlot(0); if (h0 != null) h0.SetEmpty();
+            var h1 = HandSlot(1); if (h1 != null) h1.SetEmpty();
+        }
+
+        private void ApplyPullOverlay()
+        {
+            if (_pullOverlayDefId == 0) return;
+            var h0 = HandSlot(0); if (h0 != null) h0.SetFilled(_pullOverlayDefId, 1, _catalog);
+            var h1 = HandSlot(1); if (h1 != null) h1.SetFilled(_pullOverlayDefId, 1, _catalog);
+        }
 
         private void Awake()
         {
@@ -22,7 +49,7 @@ namespace Client.UI.Inventory
                 var slot = _slots[i];
                 if (slot == null) continue;
                 slot.Clicked += OnSlotClicked;
-                if (slot.Slot < _byIndex.Length) _byIndex[slot.Slot] = slot;
+                _byKey[Key(slot.Category, slot.Index)] = slot;
             }
         }
 
@@ -33,6 +60,7 @@ namespace Client.UI.Inventory
                 if (_slots[i] != null) _slots[i].Clicked -= OnSlotClicked;
         }
 
+        /// <summary>Полный ре-рендер по слепку: всё пустое → занятые слоты из sync → подсветка ActiveHand.</summary>
         public void Apply(in InventorySync sync)
         {
             if (_slots != null)
@@ -43,19 +71,27 @@ namespace Client.UI.Inventory
             if (slots != null)
                 for (int i = 0; i < slots.Length; i++)
                 {
-                    byte idx = slots[i].SlotIndex;
-                    if (idx < _byIndex.Length && _byIndex[idx] != null)
-                        _byIndex[idx].SetFilled(in slots[i], _catalog);
+                    var rec = slots[i];
+                    if (_byKey.TryGetValue(Key(rec.Category, rec.Index), out var comp) && comp != null)
+                        comp.SetFilled(rec.ItemDefId, rec.StackCount, _catalog);
                 }
 
             if (_slots != null)
                 for (int i = 0; i < _slots.Length; i++)
-                    if (_slots[i] != null) _slots[i].SetHighlight(_slots[i].Slot == sync.ActiveHand);
+                {
+                    var slot = _slots[i];
+                    if (slot != null) slot.SetHighlight(slot.Category == SlotCategory.Hand && slot.Index == sync.ActiveHand);
+                }
+
+            ApplyPullOverlay();
         }
 
-        private void OnSlotClicked(byte slot)
+        // ЛКМ по слоту: рука → выброс на пол, worn-слот → снять в активную руку.
+        private void OnSlotClicked(SlotCategory cat, byte index)
         {
-            if (_runner != null) _runner.SendDrop(slot);
+            if (_runner == null) return;
+            if (cat == SlotCategory.Hand) _runner.SendDrop(cat, index);
+            else _runner.Unequip(cat, index);
         }
     }
 }

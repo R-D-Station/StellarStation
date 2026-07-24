@@ -21,6 +21,8 @@ namespace Client.Map
         [Tooltip("Верх перекрыт блоком сверху (бейк спавна) — кандидат на раскрытие.")]
         public bool TopCovered;
         public int TopCellY;
+        [Tooltip("Facing из state-байта на момент спавна (дебаг крепления/поворота).")]
+        public int Facing;
         public bool DoorOpen;
 
         [Header("Верх-грид (дебаг)")]
@@ -31,6 +33,7 @@ namespace Client.Map
         [System.NonSerialized] public GameObject PrefabKey; // ключ пула (null = куб из общего пула)
         [System.NonSerialized] public Renderer[] Renderers; // кэш для cut-away гейта
         [System.NonSerialized] public Animator DoorAnim;    // якорь двери (иначе null)
+        [System.NonSerialized] public Shared.World.Blocks.BlockBox[] DebugBoxes; // рантайм-коллизия блока (гизмо при выделении)
         [System.NonSerialized] private IBlockComponent[] _components; // render-компоненты префаба (кэш по GO, стабилен по пулу)
 
         private static readonly int DoorOpenTrigger = Animator.StringToHash("Open");
@@ -63,7 +66,24 @@ namespace Client.Map
             _alphaOverridden = false;
             DoorAnim = null;
             DoorOpen = false;
+            DebugBoxes = null;
         }
+
+#if UNITY_EDITOR
+        private void OnDrawGizmosSelected()
+        {
+            if (DebugBoxes == null)
+                return;
+            Gizmos.color = Color.red;
+            for (int i = 0; i < DebugBoxes.Length; i++)
+            {
+                var b = DebugBoxes[i];
+                Gizmos.DrawWireCube(
+                    new Vector3(X + (b.MinXf + b.MaxXf) * 0.5f, Y + (b.MinYf + b.MaxYf) * 0.5f, Z + (b.MinZf + b.MaxZf) * 0.5f),
+                    new Vector3(b.MaxXf - b.MinXf, b.MaxYf - b.MinYf, b.MaxZf - b.MinZf));
+            }
+        }
+#endif
 
         /// <summary>Разбудить render-компоненты префаба (после Bind + BottomOpen/TopCovered).</summary>
         public void SpawnComponents(in BlockContext ctx)

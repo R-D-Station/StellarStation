@@ -155,6 +155,25 @@ namespace Client.Map
             return a < 0f ? 0f : (a > 1f ? 1f : a);
         }
 
+        /// <summary>Zone-метка ячейки, засеявшей волну сюда (0 = не засеяно) — цель волны для потолка с беззонным верхом.</summary>
+        public ushort ZoneAt(int x, int z)
+        {
+            int lx = x - _originX, lz = z - _originZ;
+            if (lx < 0 || lz < 0 || lx >= _window || lz >= _window)
+                return 0;
+            return _seedZone[lz * _window + lx];
+        }
+
+        /// <summary>Y источника волны в ячейке (MinValue вне окна/не засеяно) — различает вертикальный/боковой стык.</summary>
+        public int SrcYAt(int x, int z)
+        {
+            int lx = x - _originX, lz = z - _originZ;
+            if (lx < 0 || lz < 0 || lx >= _window || lz >= _window)
+                return int.MinValue;
+            int idx = lz * _window + lx;
+            return _budget[idx] > 0f ? _srcY[idx] : int.MinValue;
+        }
+
         /// <summary>Альфа зонного канала: 0, если ячейка засеяна не под этой zone (иначе то же budget/vertStep-затухание).</summary>
         public float AlphaFor(int x, int y, int z, ushort zone)
         {

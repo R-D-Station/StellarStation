@@ -5,7 +5,6 @@
   "tickRate": 30,
   "connectionKey": "VGVzdF9zZXJ2ZXIx",
   "mapPath": "Map/block-station.smap",
-  "BlocksWorld": true,
   "EntityInterestZDepth": 6,
   "ZoneFadeDistance": 8,
   "ZoneFadeVertical": 1.5,

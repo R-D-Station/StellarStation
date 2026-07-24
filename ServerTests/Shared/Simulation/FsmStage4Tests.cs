@@ -1,6 +1,5 @@
 using Shared.Messages.Core;
 using Shared.Simulation;
-using Shared.World;
 
 namespace ServerTests.Shared.Simulation
 {
@@ -11,6 +10,18 @@ namespace ServerTests.Shared.Simulation
     /// </summary>
     public class FsmStage4Tests
     {
+        private static void FreeStep(ref float x, ref float y, IntentDirection dir, bool sprint = false, bool crawl = false,
+            float baseStep = MovementLogic.StepPerTick)
+        {
+            MovementLogic.GetAxes(dir, out int dx, out int dy);
+            if (dx == 0 && dy == 0) return;
+            float step = baseStep * (sprint ? MovementLogic.SprintMultiplier : 1f);
+            if (dx != 0 && dy != 0) step *= MovementLogic.InvSqrt2;
+            if (crawl) step *= MovementLogic.CrawlMultiplier;
+            x += dx * step;
+            y += dy * step;
+        }
+
         private static PlayerState Step(PlayerState s, IntentDirection dir, bool layToggle, ref StatusTimers t)
             => FsmLogic.Step(s, dir, layToggle, LayingReason.Voluntary, ref t);
 
@@ -48,12 +59,9 @@ namespace ServerTests.Shared.Simulation
             // Этап 4: лежащий двигается (полная скорость; краул ×0.7 — Этап 5).
             Assert.True(FsmLogic.MovementAllowed(PlayerState.Laying));
 
-            var map = new GridMap();
-            map.SetTile(0, 0, 0, Tile.Floor());
-            map.SetTile(0, 1, 0, Tile.Floor()); // путь на север свободен
 
             float x = 0.5f, y = 0.5f;
-            MovementLogic.Apply(map, 0, ref x, ref y, IntentDirection.North, sprint: false);
+            FreeStep(ref x, ref y, IntentDirection.North, sprint: false);
             Assert.True(y > 0.5f, $"лежащий должен двигаться, y={y}");
         }
     }

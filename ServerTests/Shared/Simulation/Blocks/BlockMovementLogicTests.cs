@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Shared.Messages.Core;
+using Shared.Simulation;
 using Shared.Simulation.Blocks;
 using Shared.World.Blocks;
 
@@ -52,7 +53,7 @@ namespace ServerTests.Shared.Simulation.Blocks
         private static void Run(BlockGrid g, ref BlockMoverState s, in BlockMoveInput input, int ticks)
         {
             for (int i = 0; i < ticks; i++)
-                BlockMovementLogic.Step(g, Shapes, ref s, in input);
+                BlockMovementLogic.Step(g, Shapes, ref s, in input, MovementLogic.StepPerTick);
         }
 
         // Одиночный прыжок на месте (Jump один тик, дальше None): возвращает апекс ног.
@@ -60,12 +61,12 @@ namespace ServerTests.Shared.Simulation.Blocks
         {
             float apex = s.Y;
             var jump = new BlockMoveInput(IntentDirection.None, jump: true);
-            BlockMovementLogic.Step(g, Shapes, ref s, in jump);
+            BlockMovementLogic.Step(g, Shapes, ref s, in jump, MovementLogic.StepPerTick);
             var none = new BlockMoveInput(IntentDirection.None);
             for (int i = 1; i < ticks; i++)
             {
                 if (s.Y > apex) apex = s.Y;
-                BlockMovementLogic.Step(g, Shapes, ref s, in none);
+                BlockMovementLogic.Step(g, Shapes, ref s, in none, MovementLogic.StepPerTick);
             }
             return apex > s.Y ? apex : s.Y;
         }
@@ -209,7 +210,7 @@ namespace ServerTests.Shared.Simulation.Blocks
             var none = new BlockMoveInput(IntentDirection.None);
             for (int i = 0; i < 400 && !s.Grounded; i++)
             {
-                BlockMovementLogic.Step(g, Shapes, ref s, in none);
+                BlockMovementLogic.Step(g, Shapes, ref s, in none, MovementLogic.StepPerTick);
                 if (s.VY < minVy) minVy = s.VY;
             }
 
@@ -255,6 +256,29 @@ namespace ServerTests.Shared.Simulation.Blocks
         }
 
         [Fact]
+        public void HalfBaseStep_HalvesHorizontalDelta()
+        {
+            var g1 = Room();
+            var g2 = Room();
+            var s1 = new BlockMoverState(0.5f, 1f, 0.5f);
+            var s2 = new BlockMoverState(0.5f, 1f, 0.5f);
+            var east = new BlockMoveInput(IntentDirection.East);
+
+            for (int i = 0; i < 20; i++)
+            {
+                BlockMovementLogic.Step(g1, Shapes, ref s1, in east, MovementLogic.StepPerTick);
+                BlockMovementLogic.Step(g2, Shapes, ref s2, in east, 0.5f * MovementLogic.StepPerTick);
+            }
+
+            float fullDelta = s1.X - 0.5f;
+            float halfDelta = s2.X - 0.5f;
+            Assert.True(fullDelta > 0f);
+            Assert.True(System.MathF.Abs(halfDelta - 0.5f * fullDelta) < 1e-5f, $"full={fullDelta}, half={halfDelta}");
+            Assert.Equal(0.5f, s1.Z, 5);
+            Assert.Equal(0.5f, s2.Z, 5);
+        }
+
+        [Fact]
         public void Replay_IsBitwiseDeterministic()
         {
             static BlockGrid Build()
@@ -279,13 +303,13 @@ namespace ServerTests.Shared.Simulation.Blocks
             for (int k = 0; k < 240; k++)
             {
                 var input = InputAt(k);
-                BlockMovementLogic.Step(g1, Shapes, ref s1, in input);
+                BlockMovementLogic.Step(g1, Shapes, ref s1, in input, MovementLogic.StepPerTick);
                 track.Add((s1.X, s1.Y, s1.Z, s1.VY, s1.Grounded));
             }
             for (int k = 0; k < 240; k++)
             {
                 var input = InputAt(k);
-                BlockMovementLogic.Step(g2, Shapes, ref s2, in input);
+                BlockMovementLogic.Step(g2, Shapes, ref s2, in input, MovementLogic.StepPerTick);
                 Assert.Equal(track[k], (s2.X, s2.Y, s2.Z, s2.VY, s2.Grounded)); // побитово, без допусков
             }
         }

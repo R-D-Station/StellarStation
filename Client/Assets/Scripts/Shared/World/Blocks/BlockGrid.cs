@@ -19,6 +19,7 @@ namespace Shared.World.Blocks
 
         private readonly Dictionary<long, ChunkSection> _sections = new();
         private readonly HashSet<long> _dirty = new();
+        private readonly List<ItemSpawn> _itemSpawns = new();
 
         /// <summary>Хук каскада обновлений соседей (сам каскад — фаза B+): координаты изменившегося блока.</summary>
         public event Action<int, int, int> BlockChanged;
@@ -224,6 +225,26 @@ namespace Shared.World.Blocks
             _dirty.Add(key);
             return true;
         }
+
+        public System.Collections.Generic.IReadOnlyList<ItemSpawn> ItemSpawns => _itemSpawns;
+
+        public void AddItemSpawn(in ItemSpawn spawn) => _itemSpawns.Add(spawn);
+
+        /// <summary>Стереть все спавны предмета в ячейке (ластик редактора). true — если что-то удалено.</summary>
+        public bool RemoveItemSpawnsAt(int x, int y, int z)
+        {
+            bool removed = false;
+            for (int i = _itemSpawns.Count - 1; i >= 0; i--)
+                if (_itemSpawns[i].X == x && _itemSpawns[i].Y == y && _itemSpawns[i].Z == z)
+                {
+                    _itemSpawns.RemoveAt(i);
+                    removed = true;
+                }
+            return removed;
+        }
+
+        // Прямой доступ к списку — только для сериализатора (обход IReadOnlyList-обёртки).
+        internal List<ItemSpawn> ItemSpawnList => _itemSpawns;
 
         /// <summary>Ключ секции, содержащей блок (для стрима/дельт).</summary>
         public static long KeyOfBlock(int x, int y, int z)

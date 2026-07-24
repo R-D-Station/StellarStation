@@ -4,11 +4,11 @@ using Shared.World.Items;
 
 namespace Shared.Messages.Interaction
 {
-    /// <summary>Выбросить предмет из слота (client→server): drop-at-feet — сервер роняет на floor(client.X/Y),
-    /// клиентские координаты не принимаются.</summary>
+    /// <summary>Выбросить предмет из слота (client→server): адрес (Category, Index), drop-at-feet на серверных координатах.</summary>
     public struct DropItem : INetMessage
     {
-        public byte SlotIndex;
+        public SlotCategory Category;
+        public byte Index;
 
         public MessageType Type => MessageType.DropItem;
 
@@ -16,7 +16,8 @@ namespace Shared.Messages.Interaction
         {
             using var ms = new MemoryStream();
             using var writer = new BinaryWriter(ms);
-            writer.Write(SlotIndex);
+            writer.Write((byte)Category);
+            writer.Write(Index);
             return ms.ToArray();
         }
 
@@ -25,17 +26,23 @@ namespace Shared.Messages.Interaction
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "DropItem data cannot be null");
 
-            const int expectedSize = 1; // SlotIndex(1)
+            const int expectedSize = 2;
             if (data.Length != expectedSize)
                 throw new ArgumentException($"Invalid data size: expected {expectedSize} bytes, got {data.Length} bytes", nameof(data));
 
             using var ms = new MemoryStream(data);
             using var reader = new BinaryReader(ms);
 
-            byte slotIndex = reader.ReadByte();
-            if (slotIndex >= InventorySlot.SlotCount)
-                throw new InvalidOperationException($"Invalid SlotIndex value: {slotIndex} (must be < {InventorySlot.SlotCount})");
-            SlotIndex = slotIndex;
+            byte cat = reader.ReadByte();
+            byte index = reader.ReadByte();
+
+            if (cat >= InventorySlot.CategoryCount)
+                throw new InvalidOperationException($"Invalid SlotCategory value: {cat}");
+            if (index >= InventorySlot.DefaultCount((SlotCategory)cat))
+                throw new InvalidOperationException($"Invalid slot Index {index} for category {cat}");
+
+            Category = (SlotCategory)cat;
+            Index = index;
 
             if (ms.Position != ms.Length)
                 throw new InvalidOperationException($"Unexpected extra data: {ms.Length - ms.Position} bytes remaining");

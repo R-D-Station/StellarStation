@@ -67,6 +67,21 @@ namespace Client.Map
 
         private const int RoofScanUp = 12;
 
+        private bool HasZonedDiagBelow(int x, int y, int z)
+        {
+            for (int dy = 1; dy <= 2; dy++)
+            {
+                int yy = y - dy;
+                if (_grid.GetZone(x, yy, z) != 0
+                    || _grid.GetZone(x + 1, yy, z) != 0 || _grid.GetZone(x - 1, yy, z) != 0
+                    || _grid.GetZone(x, yy, z + 1) != 0 || _grid.GetZone(x, yy, z - 1) != 0
+                    || _grid.GetZone(x + 1, yy, z + 1) != 0 || _grid.GetZone(x + 1, yy, z - 1) != 0
+                    || _grid.GetZone(x - 1, yy, z + 1) != 0 || _grid.GetZone(x - 1, yy, z - 1) != 0)
+                    return true;
+            }
+            return false;
+        }
+
         private bool HasRoofAbove(int x, int y, int z)
         {
             for (int dy = 2; dy <= RoofScanUp; dy++)
@@ -261,6 +276,8 @@ namespace Client.Map
                 var view = EnsureView(go);
                 view.Bind(x, y, z, baseY, prefab); // данные + кэш рендереров
                 view.BottomOpen = !HasSolidTop(x, y - 1, z);
+                view.Facing = Shared.World.Blocks.BlockState.GetFacing(_grid.GetState(x, y, z));
+                view.DebugBoxes = _shapes.GetBoxes(type, _grid.GetState(x, y, z));
                 int sizeY = def != null ? def.Size.y : 1;
                 view.TopCellY = y + sizeY;
                 view.TopCovered = def != null && def.TopMap != null
@@ -309,37 +326,10 @@ namespace Client.Map
 
             float refY = Mathf.Floor(py + 0.001f); // квантованный уровень ног — прыжок не мигает срезом
 
-            // Пасс 1: правило базы стека → карта выреза (с какого Y колонна «вскрыта»).
-            _cutOriginX = Mathf.FloorToInt(px) - CutRingRadius;
-            _cutOriginZ = Mathf.FloorToInt(pz) - CutRingRadius;
-            for (int i = 0; i < _cutStartY.Length; i++)
-                _cutStartY[i] = int.MaxValue;
-
-            foreach (var kv in _sections)
-            {
-                var visuals = kv.Value;
-                for (int i = 0; i < visuals.Count; i++)
-                {
-                    var v = visuals[i];
-                    if (!CutCandidate(v, eyeY, refY, px, pz))
-                        continue;
-                    int lx = v.X - _cutOriginX;
-                    int lz = v.Z - _cutOriginZ;
-                    if (lx < 0 || lz < 0 || lx >= CutWindow || lz >= CutWindow)
-                        continue;
-                    int idx = lz * CutWindow + lx;
-                    if (v.Y < _cutStartY[idx])
-                        _cutStartY[idx] = v.Y;
-                }
-            }
-
-            bool rings = _revealRings && _reveal != null;
-            if (rings)
-                _reveal.Recompute(_grid, _cutStartY, _cutOriginX, _cutOriginZ);
-
             // Зона игрока P: ячейка ног, фолбэк на клетку выше (ноги ровно на границе пола/воздуха);
             // 0 или тумблер выкл → эвристический путь ниже; недолгая потеря зоны (напр. в проёме двери) держит
             // последнюю известную ZoneGraceSec, чтобы не мигать в эвристику на каждый шаг через стык.
+            // Считается ДО пасса 1 — кандидатность колонок над зонными дверями/анкерами зависит от P.
             ushort playerZone = 0;
             if (_zoneCut && _zoneReveal != null)
             {
@@ -358,6 +348,35 @@ namespace Client.Map
                 }
             }
             bool zonal = playerZone != 0;
+
+            // Пасс 1: правило базы стека → карта выреза (с какого Y колонна «вскрыта»).
+            _cutOriginX = Mathf.FloorToInt(px) - CutRingRadius;
+            _cutOriginZ = Mathf.FloorToInt(pz) - CutRingRadius;
+            for (int i = 0; i < _cutStartY.Length; i++)
+                _cutStartY[i] = int.MaxValue;
+
+            foreach (var kv in _sections)
+            {
+                var visuals = kv.Value;
+                for (int i = 0; i < visuals.Count; i++)
+                {
+                    var v = visuals[i];
+                    if (!CutCandidate(v, eyeY, refY, px, pz, playerZone))
+                        continue;
+                    int lx = v.X - _cutOriginX;
+                    int lz = v.Z - _cutOriginZ;
+                    if (lx < 0 || lz < 0 || lx >= CutWindow || lz >= CutWindow)
+                        continue;
+                    int idx = lz * CutWindow + lx;
+                    if (v.Y < _cutStartY[idx])
+                        _cutStartY[idx] = v.Y;
+                }
+            }
+
+            bool rings = _revealRings && _reveal != null;
+            if (rings)
+                _reveal.Recompute(_grid, _cutStartY, _cutOriginX, _cutOriginZ);
+
             if (zonal)
                 SeedZoneJunctions(playerZone, (int)refY);
 
@@ -390,13 +409,23 @@ namespace Client.Map
                 ushort zp = _grid.GetZone(x, y, z + 1);
                 ushort zn = _grid.GetZone(x, y, z - 1);
 
-                // Ячейка смежна воздуху игрока P: полная видимость, кроме потолка своей же зоны над бейс-открытым низом
-                // (там — зонная волна стыков, не жёсткий 0, иначе шов режется по единице ячеек, а не по волне).
+                // Ячейка смежна воздуху игрока P: полная видимость, кроме потолка своей же зоны — зонная P-ячейка
+                // СНИЗУ (воздух ИЛИ проходимая дверь/анкер) значит «надо мной перекрытие»: зонная волна стыков, не жёсткий 0.
+                // bottomOpen тут НЕ критерий: у закрытой двери верх solid, но блок над ней — всё равно потолок.
+                // Стена над дверью (перемычка) — видима (решение пользователя). Фолбэк цели при беззонном above —
+                // ТОЛЬКО вертикальные стыки (srcY пятна выше блока), иначе боковые двери светят свой этаж.
                 if (below == p || above == p || xp == p || xn == p || zp == p || zn == p)
                 {
-                    if (y >= eyeY && below == p
-                        && (bottomOpenKnown ?? !HasSolidTop(x, y - 1, z)))
-                        return _zoneReveal.AlphaFor(x, y, z, above);
+                    if (y >= eyeY && below == p)
+                    {
+                        ushort belowType = _grid.GetBlock(x, y - 1, z);
+                        if (belowType != 0 && BlockCatalog.Get(belowType).Openable
+                            && BlockCatalog.Get(_grid.GetBlock(x, y, z)).Category == BlockCategory.Wall)
+                            return 1f;
+                        ushort target = above != 0 ? above
+                            : (_zoneReveal.SrcYAt(x, z) > y ? _zoneReveal.ZoneAt(x, z) : (ushort)0);
+                        return _zoneReveal.AlphaFor(x, y, z, target);
+                    }
                     return 1f;
                 }
 
@@ -416,32 +445,24 @@ namespace Client.Map
                 // Все 6 соседей беззонные — скелет нижнего этажа/эвристический фолбэк (6-связность не ловит диагонали).
                 if (y < eyeY)
                 {
-                    bool foreignBelow = false;
-                    for (int dy = 1; dy <= 2 && !foreignBelow; dy++)
+                    // Ниже глаз режем только ГЛУБЖЕ уровня ног (скелет/кромки нижних этажей при взгляде сверху);
+                    // блоки своего уровня (углы стен и т.п.) — всегда видимы, диагональный скан их не трогает.
+                    if (y < refY - 1f)
                     {
-                        int yy = y - dy;
-                        ushort c0 = _grid.GetZone(x, yy, z);
-                        ushort c1 = _grid.GetZone(x + 1, yy, z);
-                        ushort c2 = _grid.GetZone(x - 1, yy, z);
-                        ushort c3 = _grid.GetZone(x, yy, z + 1);
-                        ushort c4 = _grid.GetZone(x, yy, z - 1);
-                        ushort c5 = _grid.GetZone(x + 1, yy, z + 1);
-                        ushort c6 = _grid.GetZone(x + 1, yy, z - 1);
-                        ushort c7 = _grid.GetZone(x - 1, yy, z + 1);
-                        ushort c8 = _grid.GetZone(x - 1, yy, z - 1);
-                        if (c0 == p || c1 == p || c2 == p || c3 == p || c4 == p
-                            || c5 == p || c6 == p || c7 == p || c8 == p)
-                            return 1f; // диагонально-нижний скан глубины 2 — ловит углы/кромки потолка нижней комнаты
-                        foreignBelow = c0 != 0 || c1 != 0 || c2 != 0 || c3 != 0 || c4 != 0
-                                       || c5 != 0 || c6 != 0 || c7 != 0 || c8 != 0;
+                        if (HasZonedDiagBelow(x, y, z))
+                            return 0f;
+                        return HasRoofAbove(x, y, z) ? 0f : 1f;
                     }
-                    if (foreignBelow)
-                        return 0f;
-                    return (y < refY - 1f && HasRoofAbove(x, y, z)) ? 0f : 1f;
+                    return 1f;
                 }
                 bool boZ = bottomOpenKnown ?? !HasSolidTop(x, y - 1, z);
                 int sbZ = stackBase != int.MinValue ? stackBase : FindStackBase(x, y, z);
                 bool cutZ = sbZ >= refY + 2 || boZ || NeighborCutAtOrBelow(x, z, y);
+                // Угловая потолочная плита (внешний угол): гранных зонных соседей нет и кап стен её не ловит —
+                // диагонально-нижний воздух комнаты выдаёт «лежит на углу стен»; стены (Wall) не режем — углы высоких стен.
+                if (!cutZ && HasZonedDiagBelow(x, y, z)
+                    && BlockCatalog.Get(_grid.GetBlock(x, y, z)).Category != BlockCategory.Wall)
+                    cutZ = true;
                 return cutZ ? 0f : 1f;
             }
 
@@ -493,13 +514,15 @@ namespace Client.Map
             _zoneReveal.Spread();
         }
 
-        private bool CutCandidate(BlockView v, float eyeY, float refY, float px, float pz)
+        private bool CutCandidate(BlockView v, float eyeY, float refY, float px, float pz, ushort p)
         {
             if (v.Y < eyeY)
                 return false;
             if (Mathf.Max(Mathf.Abs(v.X + 0.5f - px), Mathf.Abs(v.Z + 0.5f - pz)) > CutRingRadius)
                 return false;
-            return v.BaseY >= refY + 2 || v.BottomOpen;
+            if (v.BaseY >= refY + 2 || v.BottomOpen)
+                return true;
+            return p != 0 && _grid.GetZone(v.X, v.Y - 1, v.Z) == p;
         }
 
         // Есть ли в 8 соседних колоннах вырез, начавшийся не выше y.

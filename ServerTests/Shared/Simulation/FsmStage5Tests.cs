@@ -1,7 +1,6 @@
 using Server.Network;
 using Shared.Messages.Core;
 using Shared.Simulation;
-using Shared.World;
 
 namespace ServerTests.Shared.Simulation
 {
@@ -12,6 +11,18 @@ namespace ServerTests.Shared.Simulation
     /// </summary>
     public class FsmStage5Tests
     {
+        private static void FreeStep(ref float x, ref float y, IntentDirection dir, bool sprint = false, bool crawl = false,
+            float baseStep = MovementLogic.StepPerTick)
+        {
+            MovementLogic.GetAxes(dir, out int dx, out int dy);
+            if (dx == 0 && dy == 0) return;
+            float step = baseStep * (sprint ? MovementLogic.SprintMultiplier : 1f);
+            if (dx != 0 && dy != 0) step *= MovementLogic.InvSqrt2;
+            if (crawl) step *= MovementLogic.CrawlMultiplier;
+            x += dx * step;
+            y += dy * step;
+        }
+
         // Эквивалент GameServer.ProcessStatus (приватный): один тик декремента таймеров.
         private static void ProcessStatusTick(ClientConnection c)
         {
@@ -62,15 +73,12 @@ namespace ServerTests.Shared.Simulation
         [Fact]
         public void Crawl_MovesAtSeventyPercentOfWalk()
         {
-            var map = new GridMap();
-            map.SetTile(0, 0, 0, Tile.Floor());
-            map.SetTile(0, 1, 0, Tile.Floor()); // путь на север свободен
 
             float xW = 0.5f, yW = 0.5f;
-            MovementLogic.Apply(map, 0, ref xW, ref yW, IntentDirection.North, sprint: false, crawl: false);
+            FreeStep(ref xW, ref yW, IntentDirection.North, sprint: false, crawl: false);
 
             float xC = 0.5f, yC = 0.5f;
-            MovementLogic.Apply(map, 0, ref xC, ref yC, IntentDirection.North, sprint: false, crawl: true);
+            FreeStep(ref xC, ref yC, IntentDirection.North, sprint: false, crawl: true);
 
             float walk = yW - 0.5f;
             float crawl = yC - 0.5f;

@@ -15,13 +15,14 @@ namespace ServerTests.Server.Network
             Port = 0,
             MaxPlayers = 4,
             TickRate = 30,
-            ConnectionKey = "t"
+            ConnectionKey = "t",
+            MapPath = ""
         };
 
         [Fact]
         public void Spawn_RegistersInEntities_ReturnsUniquePositiveIds()
         {
-            var server = new GameServer(Config(), new GridMap());
+            var server = new GameServer(Config());
             Assert.Equal(0, server.EntityCount);
 
             int a = server.SpawnGroundItem(10, 1, 5, 5, 0);
@@ -35,7 +36,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Despawn_RemovesItem_ReturnsTrue()
         {
-            var server = new GameServer(Config(), new GridMap());
+            var server = new GameServer(Config());
             int id = server.SpawnGroundItem(10, 1, 5, 5, 0);
             Assert.Equal(1, server.EntityCount);
 
@@ -46,7 +47,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Despawn_UnknownId_ReturnsFalse_NoChange()
         {
-            var server = new GameServer(Config(), new GridMap());
+            var server = new GameServer(Config());
             server.SpawnGroundItem(10, 1, 5, 5, 0);
 
             Assert.False(server.DespawnGroundItem(9999));
@@ -56,7 +57,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void Despawn_Twice_SecondReturnsFalse()
         {
-            var server = new GameServer(Config(), new GridMap());
+            var server = new GameServer(Config());
             int id = server.SpawnGroundItem(10, 1, 5, 5, 0);
 
             Assert.True(server.DespawnGroundItem(id));
@@ -66,7 +67,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void GroundItemsInInterest_IncludesSameCell_ExcludesFarXY_AndFarZ()
         {
-            var server = new GameServer(Config(), new GridMap());
+            var server = new GameServer(Config());
             int near = server.SpawnGroundItem(1, 1, 10, 10, 0);
             server.SpawnGroundItem(2, 1, 100000, 100000, 0); // далеко по XY
             server.SpawnGroundItem(3, 1, 10, 10, 1000);      // далеко по Z

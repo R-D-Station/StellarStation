@@ -5,8 +5,8 @@ using Server.Network;
 
 namespace ServerTests.Server.Network
 {
-    /// <summary>ProcessInteractions/ResolveAndDispatchInteraction: адресный клик по лестнице С СОСЕДНЕЙ клетки
-    /// (range-check + StairHandler читает Special целевого тайла). Вне дальности / нет Special / нет сущности — тихий дроп.</summary>
+    /// <summary>ProcessInteractions/ResolveAndDispatchInteraction: range-check адресного клика + тихий дроп
+    /// (вне дальности / нет обработчика / нет сущности).</summary>
     public class ProcessInteractionsTests
     {
         private static SVars Config() => new SVars
@@ -15,7 +15,8 @@ namespace ServerTests.Server.Network
             Port = 0,
             MaxPlayers = 4,
             TickRate = 30,
-            ConnectionKey = "t"
+            ConnectionKey = "t",
+            MapPath = ""
         };
 
         private static ClientConnection Client(float x, float y, int z)
@@ -33,45 +34,9 @@ namespace ServerTests.Server.Network
         };
 
         [Fact]
-        public void AdjacentStairClick_InReach_ChangesZ_LandsOnWalkablePair()
-        {
-            var map = new GridMap();
-            map.SetTile(5, 5, 0, new Tile { Special = TileSpecial.StairUp, StructureType = 1, Support = true }); // низ: ladder-структура
-            map.SetTile(5, 5, 1, Tile.Floor()); // площадка сверху walkable → высадка на парный тайл
-            var server = new GameServer(Config(), map);
-
-            var client = Client(6.5f, 5.5f, 0); // E-сосед лестницы (chebyshev=1) на этаже 0
-            server.ResolveAndDispatchInteraction(client, TileClick(5, 5, 0));
-
-            Assert.Equal(1, client.Z);
-            Assert.Equal(5.5f, client.X);
-            Assert.Equal(5.5f, client.Y);
-        }
-
-        [Fact]
-        public void AdjacentStairClick_BlockedPair_LandsOnWalkableNeighbor()
-        {
-            var map = new GridMap();
-            map.SetTile(5, 5, 0, new Tile { Special = TileSpecial.StairUp, StructureType = 1, Support = true });
-            map.SetTile(5, 5, 1, new Tile { Special = TileSpecial.StairDown, StructureType = 1, Support = true }); // верх непроходим
-            map.SetTile(5, 6, 1, Tile.Floor()); // N-сосед целевого этажа walkable
-            var server = new GameServer(Config(), map);
-
-            var client = Client(4.5f, 5.5f, 0); // W-сосед лестницы (chebyshev=1)
-            server.ResolveAndDispatchInteraction(client, TileClick(5, 5, 0));
-
-            Assert.Equal(1, client.Z);
-            Assert.Equal(5.5f, client.X); // nx=5
-            Assert.Equal(6.5f, client.Y); // ny=6 (N-высадка)
-        }
-
-        [Fact]
         public void StairClick_OutOfReach_NoChange()
         {
-            var map = new GridMap();
-            map.SetTile(5, 5, 0, new Tile { Special = TileSpecial.StairUp });
-            map.SetTile(5, 5, 1, Tile.Floor());
-            var server = new GameServer(Config(), map);
+            var server = new GameServer(Config());
 
             var client = Client(0.5f, 0.5f, 0); // далеко (chebyshev=5)
             server.ResolveAndDispatchInteraction(client, TileClick(5, 5, 0));
@@ -84,9 +49,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void TileClick_NoSpecial_SilentDrop()
         {
-            var map = new GridMap();
-            map.SetTile(5, 6, 0, Tile.Floor()); // сосед — обычный пол, без Special
-            var server = new GameServer(Config(), map);
+            var server = new GameServer(Config());
 
             var client = Client(5.5f, 5.5f, 0);
             server.ResolveAndDispatchInteraction(client, TileClick(5, 6, 0));
@@ -99,7 +62,7 @@ namespace ServerTests.Server.Network
         [Fact]
         public void EntityClick_UnknownNetId_SilentDrop()
         {
-            var server = new GameServer(Config(), new GridMap());
+            var server = new GameServer(Config());
             var client = Client(5.5f, 5.5f, 0);
             var intent = new InteractIntent
             {

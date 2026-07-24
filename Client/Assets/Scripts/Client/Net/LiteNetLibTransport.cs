@@ -18,14 +18,13 @@ namespace Client.Net
         public event Action<WorldSnapshot> OnWorldSnapshot;
         public event Action<MoveIntent> OnMoveIntentReceived;
         public event Action<LoginResponse> OnLoginResponse;
-        public event Action<MapDataMessage> OnMapData;
-        public event Action<TileUpdate> OnTileUpdate;
         public event Action<PlayerJoined> OnPlayerJoined;
         public event Action<PlayerLeft> OnPlayerLeft;
-        public event Action<ChunkData> OnChunkData;
-        public event Action<ChunkUnload> OnChunkUnload;
         public event Action<ItemSnapshot> OnItemSnapshot;
         public event Action<InventorySync> OnInventorySync;
+        public event Action<ContainerSync> OnContainerSync;
+        public event Action<PullSync> OnPullSync;
+        public event Action<ContainSync> OnContainSync;
         public event Action<BlockChunkData> OnBlockChunkData;
         public event Action<BlockSectionGone> OnBlockSectionGone;
         public event Action<BlockUpdateBatch> OnBlockUpdateBatch;
@@ -44,14 +43,13 @@ namespace Client.Net
             { MessageType.MoveIntent, () => new MoveIntent() },
             { MessageType.WorldSnapshot, () => new WorldSnapshot() },
             { MessageType.LoginResponse, () => new LoginResponse() },
-            { MessageType.MapData, () => new MapDataMessage() },
-            { MessageType.TileUpdate, () => new TileUpdate() },
             { MessageType.PlayerJoined, () => new PlayerJoined() },
             { MessageType.PlayerLeft, () => new PlayerLeft() },
-            { MessageType.MapChunk, () => new ChunkData() },
-            { MessageType.MapChunkUnload, () => new ChunkUnload() },
             { MessageType.ItemSnapshot, () => new ItemSnapshot() },
             { MessageType.InventorySync, () => new InventorySync() },
+            { MessageType.ContainerSync, () => new ContainerSync() },
+            { MessageType.PullSync, () => new PullSync() },
+            { MessageType.ContainSync, () => new ContainSync() },
             { MessageType.BlockChunkData, () => new BlockChunkData() },
             { MessageType.BlockSectionGone, () => new BlockSectionGone() },
             { MessageType.BlockUpdateBatch, () => new BlockUpdateBatch() },
@@ -136,14 +134,6 @@ namespace Client.Net
                     OnLoginResponse?.Invoke(login);
                     break;
 
-                case MapDataMessage map:
-                    OnMapData?.Invoke(map);
-                    break;
-
-                case TileUpdate tu:
-                    OnTileUpdate?.Invoke(tu);
-                    break;
-
                 case PlayerJoined pj:
                     OnPlayerJoined?.Invoke(pj);
                     break;
@@ -152,20 +142,24 @@ namespace Client.Net
                     OnPlayerLeft?.Invoke(pl);
                     break;
 
-                case ChunkData cd:
-                    OnChunkData?.Invoke(cd);
-                    break;
-
-                case ChunkUnload cu:
-                    OnChunkUnload?.Invoke(cu);
-                    break;
-
                 case ItemSnapshot s:
                     OnItemSnapshot?.Invoke(s);
                     break;
 
                 case InventorySync inv:
                     OnInventorySync?.Invoke(inv);
+                    break;
+
+                case ContainerSync cs:
+                    OnContainerSync?.Invoke(cs);
+                    break;
+
+                case PullSync ps:
+                    OnPullSync?.Invoke(ps);
+                    break;
+
+                case ContainSync cs:
+                    OnContainSync?.Invoke(cs);
                     break;
 
                 case BlockChunkData bc:

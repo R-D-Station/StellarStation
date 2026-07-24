@@ -18,18 +18,17 @@ namespace ServerTests.Shared.Messages.Player
         }
 
         [Fact]
-        public void LoginResponse_SerializedSize_IsFifteenBytes()
+        public void LoginResponse_SerializedSize_IsFourteenBytes()
         {
             var data = new LoginResponse
             {
-                NetId = 1, TickRate = 30, BlocksWorld = true, ShapesMode = 1,
+                NetId = 1, TickRate = 30, ShapesMode = 1,
                 ZoneFadeDistance = 6.5f, ZoneFadeVertical = 2f
             }.Serialize();
-            Assert.Equal(15, data.Length);
+            Assert.Equal(14, data.Length);
 
             var deserialized = new LoginResponse();
             deserialized.Deserialize(data);
-            Assert.True(deserialized.BlocksWorld);
             Assert.Equal(1, deserialized.ShapesMode);
             Assert.Equal(6.5f, deserialized.ZoneFadeDistance);
             Assert.Equal(2f, deserialized.ZoneFadeVertical);
