@@ -13,4 +13,7 @@ MonoBehaviour:
   m_Name: ItemCatalog
   m_EditorClassIdentifier: Assembly-CSharp::Client.Items.ItemCatalog
   _definitions:
+  - {fileID: 11400000, guid: b959698defdc096419854eaabd89ae9d, type: 2}
   - {fileID: 11400000, guid: b48c4dae53fba0541b3f19010acbd98d, type: 2}
+  - {fileID: 11400000, guid: 6287e40a2e887aa4c83a46fdf739958b, type: 2}
+  - {fileID: 11400000, guid: 912a05f8676637c419dfedc9c8b7c9bc, type: 2}

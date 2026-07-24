@@ -80,6 +80,10 @@ namespace Client.Net.Prediction
             _blockShapes = shapes;
         }
 
+        public void SetDynamicObstacles(IDynamicObstacles items) => _itemObstacles = items;
+
+        private IDynamicObstacles _itemObstacles;
+
         /// <summary>Применить ввод локально (предсказание) и запомнить для переигровки. Нить FSM+движение
         /// зеркалит GameServer.ProcessIntents/ApplyClientIntent байт-в-байт (детерминизм — иначе rubber-band).</summary>
         public void ApplyLocal(uint sequence, IntentDirection dir, bool sprint, bool layToggle, bool jump = false)
@@ -112,7 +116,7 @@ namespace Client.Net.Prediction
                 sprint: sprint,
                 jump: canMove && jump,
                 crawl: _state == PlayerState.Laying);
-            BlockMovementLogic.Step(_blockGrid, _blockShapes, ref _mover, in input);
+            BlockMovementLogic.Step(_blockGrid, _blockShapes, ref _mover, in input, _baseStep, _itemObstacles);
             X = _mover.X;
             Y = _mover.Y;
             if (canMove)
@@ -142,7 +146,7 @@ namespace Client.Net.Prediction
                 _mover.Y = serverY;
                 _mover.Z = serverZ;
                 _mover.VY = serverVY;
-                _mover.Grounded = BlockMovementLogic.IsGrounded(_blockGrid, _blockShapes, serverX, serverY, serverZ, serverVY);
+                _mover.Grounded = BlockMovementLogic.IsGrounded(_blockGrid, _blockShapes, serverX, serverY, serverZ, serverVY, _itemObstacles);
             }
 
             // Отбрасываем подтверждённое. _pending упорядочен по возрастанию Sequence (append в ApplyLocal с

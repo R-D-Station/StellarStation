@@ -27,6 +27,19 @@ namespace ServerTests.Server.Network
         }
 
         [Fact]
+        public void HalfScale_BelowBase_NotClampedByMinValue()
+        {
+            var c = new ClientConnection(null!, 1);
+            Assert.Equal(MovementLogic.StepPerTick, c.Speed.CurrentValue, 6);
+
+            c.AddSpeedScale(0.5f);
+            Assert.Equal(MovementLogic.StepPerTick * 0.5f, c.Speed.CurrentValue, 6);
+
+            c.RemoveSpeedScale(0.5f);
+            Assert.Equal(MovementLogic.StepPerTick, c.Speed.CurrentValue, 6);
+        }
+
+        [Fact]
         public void AddSpeedScale_ScalesEffectiveStep_RemoveReverts()
         {
             var map = Corridor();
@@ -47,6 +60,38 @@ namespace ServerTests.Server.Network
             Assert.True(System.MathF.Abs(scaledDelta - 1.5f * baseDelta) < 1e-5f, $"base={baseDelta}, scaled={scaledDelta}");
 
             // Снятие модификатора → возврат к StepPerTick.
+            c.RemoveSpeedScale(1.5f);
+            Assert.Equal(MovementLogic.StepPerTick, c.Speed.CurrentValue, 6);
+        }
+
+        [Fact]
+        public void AddSpeedScale_ScalesBlockStep_RemoveReverts()
+        {
+            var g = new global::Shared.World.Blocks.BlockGrid();
+            global::Shared.World.Blocks.DevBlockWorld.Build(g);
+            var shapes = global::Shared.World.Blocks.DevBlockWorld.Shapes;
+            float sx = global::Shared.World.Blocks.DevBlockWorld.SpawnX;
+            float sy = global::Shared.World.Blocks.DevBlockWorld.SpawnY;
+            float sz = global::Shared.World.Blocks.DevBlockWorld.SpawnZ;
+            var east = new global::Shared.Simulation.Blocks.BlockMoveInput(IntentDirection.East);
+
+            var c = new ClientConnection(null!, 1);
+
+            var sBase = new global::Shared.Simulation.Blocks.BlockMoverState(sx, sy, sz);
+            for (int i = 0; i < 10; i++)
+                global::Shared.Simulation.Blocks.BlockMovementLogic.Step(g, shapes, ref sBase, in east, c.Speed.CurrentValue);
+            float baseDelta = sBase.X - sx;
+            Assert.True(baseDelta > 0f);
+
+            c.AddSpeedScale(1.5f);
+            Assert.Equal(MovementLogic.StepPerTick * 1.5f, c.Speed.CurrentValue, 6);
+
+            var sScaled = new global::Shared.Simulation.Blocks.BlockMoverState(sx, sy, sz);
+            for (int i = 0; i < 10; i++)
+                global::Shared.Simulation.Blocks.BlockMovementLogic.Step(g, shapes, ref sScaled, in east, c.Speed.CurrentValue);
+            float scaledDelta = sScaled.X - sx;
+            Assert.True(System.MathF.Abs(scaledDelta - 1.5f * baseDelta) < 1e-5f, $"base={baseDelta}, scaled={scaledDelta}");
+
             c.RemoveSpeedScale(1.5f);
             Assert.Equal(MovementLogic.StepPerTick, c.Speed.CurrentValue, 6);
         }

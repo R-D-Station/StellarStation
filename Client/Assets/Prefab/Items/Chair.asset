@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 23c63ac8186cba34fa32d06bc3092b02, type: 3}
-  m_Name: ItemDefinition
+  m_Name: Chair
   m_EditorClassIdentifier: Assembly-CSharp::Client.Items.ItemDefinition
   ItemDefId: 1
   DisplayName: "\u0421\u0442\u0443\u043B \u0432\u0435\u0440\u0433\u0438\u043B\u0438\u044F"
@@ -18,3 +18,8 @@ MonoBehaviour:
   _renderScale: 1
   _equippable: 0
   _equipSlot: 0
+  _parent: {fileID: 0}
+  _slotSpan: 0
+  _maxStack: 0
+  _isContainer: 0
+  _maxContents: 0

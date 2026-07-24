@@ -16,14 +16,67 @@ namespace Client.Items
         [Tooltip("Спрайт наземного предмета.")]
         public Sprite Sprite;
 
+        [Tooltip("Спрайт открытого контейнера в мире; пусто → рисуем закрытый.")]
+        public Sprite OpenSprite;
+
+        [Tooltip("Кастомный префаб окна контейнера; пусто → дефолтный из ContainerWindows.")]
+        public Client.UI.Windows.UiWindow WindowPrefab;
+
         // Размер предмета как ДОЛЯ тайла (1 = целый тайл); мировой размер = RenderScale·TileSize. Инспектор показывает %↔юниты (EditorCoder).
         [SerializeField] private float _renderScale = 1f;
         public float RenderScale => _renderScale;
 
         // !Equippable — предмет идёт только в руки; EquipSlot валиден, только пока Equippable=true (см. ItemCatalogCodegen).
         [SerializeField] private bool _equippable;
-        [SerializeField] private SlotCategory _equipSlot;
+        [SerializeField] private SlotCategory _equipSlot = SlotCategory.Inherit;
         public bool Equippable => _equippable;
         public SlotCategory EquipSlot => _equipSlot;
+
+        [SerializeField] private ItemDefinition _parent;
+        public ItemDefinition Parent => _parent;
+
+        [SerializeField] private byte _slotSpan;
+        public byte SlotSpan => _slotSpan;
+
+        [SerializeField] private byte _maxStack;
+        public byte MaxStack => _maxStack;
+
+        [SerializeField] private bool _isContainer;
+        public bool IsContainer => _isContainer;
+
+        [SerializeField] private byte _maxContents;
+        public byte MaxContents => _maxContents;
+
+        [SerializeField] private bool _hasCollision;
+        public bool HasCollision => _hasCollision;
+
+        [SerializeField] private bool _pullable;
+        public bool Pullable => _pullable;
+
+        [SerializeField] private ushort[] _tags;
+        public ushort[] Tags => _tags;
+
+        [SerializeField] private ContainerFilterMode _filterMode;
+        public ContainerFilterMode FilterMode => _filterMode;
+
+        [SerializeField] private ItemDefinition[] _filterItems;
+        public ItemDefinition[] FilterItems => _filterItems;
+
+        [SerializeField] private ushort[] _filterTags;
+        public ushort[] FilterTags => _filterTags;
+
+        [SerializeField] private ContainerMode _containerMode;
+        public ContainerMode ContainerMode => _containerMode;
+
+        [SerializeField] private float _suckRadius = 1.5f;
+        public float SuckRadius => _suckRadius;
+
+        [SerializeField] private ushort _renderLayer;
+        public ushort RenderLayer => _renderLayer;
+
+        [SerializeField] private bool _wornVisible;
+        [SerializeField] private Sprite[] _wornSprites;
+        public bool WornVisible => _wornVisible;
+        public Sprite[] WornSprites => _wornSprites;
     }
 }

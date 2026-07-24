@@ -66,10 +66,44 @@ namespace Client.Net.View
 
         public int NetId { get; private set; }
 
+        private SpriteRenderer _wornOverlay;
+        private Sprite[] _wornSprites;
+        public ushort WornDefId { get; private set; }
+
         public void Init(int netId)
         {
             NetId = netId;
             if (_spriteRenderer == null) _spriteRenderer = GetComponent<SpriteRenderer>();
+            CreateWornOverlay();
+        }
+
+        private void CreateWornOverlay()
+        {
+            if (_spriteRenderer == null || _wornOverlay != null) return;
+            var go = new GameObject("WornOverlay");
+            go.transform.SetParent(_spriteRenderer.transform, false);
+            go.transform.localPosition = Vector3.zero;
+            go.transform.localRotation = Quaternion.identity;
+            go.transform.localScale = Vector3.one;
+            _wornOverlay = go.AddComponent<SpriteRenderer>();
+            _wornOverlay.sortingLayerID = _spriteRenderer.sortingLayerID;
+            _wornOverlay.sortingOrder = _spriteRenderer.sortingOrder + 1;
+            _wornOverlay.enabled = false;
+        }
+
+        public void SetWorn(ushort defId, Sprite[] sprites)
+        {
+            WornDefId = defId;
+            _wornSprites = (sprites != null && sprites.Length >= 4) ? sprites : null;
+            UpdateWornOverlay(_lastFacing < 4 ? (Direction)_lastFacing : Direction.South);
+        }
+
+        private void UpdateWornOverlay(Direction dir)
+        {
+            if (_wornOverlay == null) return;
+            bool show = _wornSprites != null && !_culled;
+            _wornOverlay.sprite = show ? _wornSprites[(int)dir] : null;
+            _wornOverlay.enabled = show;
         }
 
         public void Receive(in EntitySnapshot snap, float now)
@@ -90,6 +124,7 @@ namespace Client.Net.View
             for (int i = 0; i < _allRenderers.Length; i++)
                 if (_allRenderers[i] != null)
                     _allRenderers[i].enabled = !culled;
+            UpdateWornOverlay(_lastFacing < 4 ? (Direction)_lastFacing : Direction.South);
         }
 
         /// <summary>Блок-мир (B2): снапшот уже в осях Unity (Y — высота) — позиция берётся 1:1. Ставит NetworkRunner.</summary>
@@ -141,6 +176,7 @@ namespace Client.Net.View
             _lastFacing = facing;
             _lastState = state;
             _lastReason = reason;
+            UpdateWornOverlay((Direction)facing);
         }
 
         // Спрайт по (State, Reason, Direction) для всех 6 PlayerState. Пустой слот → фолбэк в Stand-набор;

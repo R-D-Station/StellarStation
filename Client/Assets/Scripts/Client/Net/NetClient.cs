@@ -22,6 +22,9 @@ namespace Client.Net
         public event Action<ChunkUnload> OnChunkUnload;
         public event Action<ItemSnapshot> OnItemSnapshot;
         public event Action<InventorySync> OnInventorySync;
+        public event Action<ContainerSync> OnContainerSync;
+        public event Action<PullSync> OnPullSync;
+        public event Action<ContainSync> OnContainSync;
         public event Action<BlockChunkData> OnBlockChunkData;
         public event Action<BlockSectionGone> OnBlockSectionGone;
         public event Action<BlockUpdateBatch> OnBlockUpdateBatch;
@@ -45,6 +48,9 @@ namespace Client.Net
             _transport.OnChunkUnload += m => OnChunkUnload?.Invoke(m);
             _transport.OnItemSnapshot += s => OnItemSnapshot?.Invoke(s);
             _transport.OnInventorySync += s => OnInventorySync?.Invoke(s);
+            _transport.OnContainerSync += s => OnContainerSync?.Invoke(s);
+            _transport.OnPullSync += s => OnPullSync?.Invoke(s);
+            _transport.OnContainSync += s => OnContainSync?.Invoke(s);
             _transport.OnBlockChunkData += m => OnBlockChunkData?.Invoke(m);
             _transport.OnBlockSectionGone += m => OnBlockSectionGone?.Invoke(m);
             _transport.OnBlockUpdateBatch += m => OnBlockUpdateBatch?.Invoke(m);
@@ -98,5 +104,15 @@ namespace Client.Net
 
         /// <summary>Переместить предмет между слотами инвентаря (4.5).</summary>
         public void SendMoveSlot(SlotCategory fromCategory, byte fromIndex, SlotCategory toCategory, byte toIndex) => _transport.Send(new MoveSlotRequest { FromCategory = fromCategory, FromIndex = fromIndex, ToCategory = toCategory, ToIndex = toIndex });
+
+        public void SendOpenContainer(int netId) => _transport.Send(new OpenContainer { NetId = netId });
+
+        public void SendCloseContainer(int netId) => _transport.Send(new CloseContainer { NetId = netId });
+
+        public void SendPutInContainer(int netId) => _transport.Send(new PutInContainer { NetId = netId });
+
+        public void SendTakeFromContainer(int netId, ushort index) => _transport.Send(new TakeFromContainer { NetId = netId, Index = index });
+
+        public void SendPullItem(int netId) => _transport.Send(new PullItem { NetId = netId });
     }
 }

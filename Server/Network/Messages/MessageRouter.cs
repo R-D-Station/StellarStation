@@ -31,6 +31,11 @@ namespace Server.Network.Messages
             new DropItemHandler(),
             new SwapHandHandler(),
             new MoveSlotHandler(),
+            new OpenContainerHandler(),
+            new CloseContainerHandler(),
+            new PutInContainerHandler(),
+            new TakeFromContainerHandler(),
+            new PullItemHandler(),
         });
 
         public IClientMessageHandler? Resolve(ushort typeId) => typeId < _table.Length ? _table[typeId] : null;

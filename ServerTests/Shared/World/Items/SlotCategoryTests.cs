@@ -19,15 +19,16 @@ namespace ServerTests.Shared.World.Items
         [InlineData(SlotCategory.Boot, 2)]
         [InlineData(SlotCategory.Jumpsuit, 1)]
         [InlineData(SlotCategory.Suit, 1)]
+        [InlineData(SlotCategory.Uniform, 1)]
         public void DefaultCount_MatchesPhase1Table(SlotCategory cat, int expected)
         {
             Assert.Equal((byte)expected, InventorySlot.DefaultCount(cat));
         }
 
         [Fact]
-        public void CategoryCount_Is14()
+        public void CategoryCount_Is15()
         {
-            Assert.Equal(14, InventorySlot.CategoryCount);
+            Assert.Equal(15, InventorySlot.CategoryCount);
         }
 
         [Fact]
@@ -38,6 +39,8 @@ namespace ServerTests.Shared.World.Items
             Assert.False(InventorySlot.IsValid(SlotCategory.Hand, 2));
             Assert.True(InventorySlot.IsValid(SlotCategory.Backpack, 0));
             Assert.False(InventorySlot.IsValid(SlotCategory.Backpack, 1));
+            Assert.True(InventorySlot.IsValid(SlotCategory.Uniform, 0));
+            Assert.False(InventorySlot.IsValid(SlotCategory.Uniform, 1));
         }
 
         [Fact]

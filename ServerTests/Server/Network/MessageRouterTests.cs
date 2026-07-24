@@ -16,6 +16,11 @@ namespace ServerTests.Server.Network
             MessageType.DropItem,
             MessageType.SwapHand,
             MessageType.MoveSlot,
+            MessageType.OpenContainer,
+            MessageType.CloseContainer,
+            MessageType.PutInContainer,
+            MessageType.TakeFromContainer,
+            MessageType.PullItem,
         };
 
         [Fact]

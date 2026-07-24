@@ -7,16 +7,24 @@ namespace Server.Network
         public int NetId { get; }
         public ushort ItemDefId { get; set; }
         public byte StackCount { get; set; }
-        public int CellX { get; set; }
-        public int CellY { get; set; }
-        public int Z { get; set; }
+        public float CellX { get; private set; }
+        public float CellY { get; private set; }
+        public float Z { get; private set; }
         public byte Placement { get; set; }
 
         // IWorldEntity: float-позиция = ячейка (для InInterest). CellX/CellY, чтобы не путать с float X/Y интерфейса.
         public float X => CellX;
         public float Y => CellY;
+        int IWorldEntity.Z => (int)System.MathF.Floor(Z);
 
-        public GroundItemEntity(int netId, ushort itemDefId, byte stackCount, int cellX, int cellY, int z, byte placement = 0)
+        internal void MoveTo(float x, float y, float z)
+        {
+            CellX = x;
+            CellY = y;
+            Z = z;
+        }
+
+        public GroundItemEntity(int netId, ushort itemDefId, byte stackCount, float cellX, float cellY, float z, byte placement = 0)
         {
             NetId = netId;
             ItemDefId = itemDefId;

@@ -13,6 +13,7 @@ using Client.Gameplay.Entities;
 using Client.Gameplay.Camera;
 using Client.Gameplay.Interaction;
 using Client.UI.Inventory;
+using Client.UI.Container;
 using Client.UI.Labels;
 using Shared.Simulation;
 using Shared.World;
@@ -30,6 +31,8 @@ namespace Client.Net
         [SerializeField] private ItemView _itemViewPrefab;
         [Tooltip("Каталог предметов: спрайт/метаданные по ItemDefId.")]
         [SerializeField] private ItemCatalog _itemCatalog;
+        [Tooltip("Реестр слоёв отрисовки: sortingOrder по RenderLayer предмета. Пусто — sortingOrder не трогаем.")]
+        [SerializeField] private RenderLayerCatalog _renderLayers;
 
         [Tooltip("Частота тиков. Дефолт до логина; затем перезаписывается серверным LoginResponse.TickRate.")]
         [SerializeField] private int _tickRate = 30;
@@ -51,8 +54,12 @@ namespace Client.Net
         [Header("Инвентарь (4.5)")]
         [Tooltip("HUD 6 слотов инвентаря. Пусто — приём InventorySync работает, но не отображается.")]
         [SerializeField] private InventoryHud _inventoryHud;
+        [Tooltip("Сервис окон контейнеров")]
+        [SerializeField] private ContainerWindows _containerWindows;
         [Tooltip("Пул экранных надписей — локальный хинт «Руки заняты» при попытке подбора без раунд-трипа.")]
         [SerializeField] private LabelManager _labels;
+        [Tooltip("Материал обводки предмета под курсором (шейдер Station/SpriteOutline). Пусто — без обводки.")]
+        [SerializeField] private Material _itemOutlineMaterial;
 
         private NetClient _net;
         private PlayerControl _controls;
@@ -75,8 +82,18 @@ namespace Client.Net
         private readonly HashSet<int> _seenItemIds = new HashSet<int>();
         private readonly List<int> _itemsToRemove = new List<int>();
 
+        private readonly Shared.Simulation.Blocks.DynamicObstacleSet _itemObstacles = new Shared.Simulation.Blocks.DynamicObstacleSet();
+
+        private int _itemSpawnSeq;
+        private int _hoveredItemNetId = -1;
+        private Vector2 _lastHoverMouse = new Vector2(float.MinValue, float.MinValue);
+        private float _lastHoverPlayerX = float.MinValue;
+        private float _lastHoverPlayerY = float.MinValue;
+        private readonly List<ItemView> _seqRenormBuffer = new List<ItemView>();
+
         private byte _activeHand;
         private readonly bool[] _handOccupied = new bool[InventorySlot.HandCount];
+        private SlotRecord[] _lastSlots;
 
         // Хинт «Руки заняты»: ручной тайм-аут (CursorHint по умолчанию — Lifetime=∞, само-возврат не сработает).
         private PooledLabel _handsFullHandle;
@@ -115,6 +132,9 @@ namespace Client.Net
             _net.OnChunkUnload += OnChunkUnload;
             _net.OnItemSnapshot += OnItemSnapshot;
             _net.OnInventorySync += OnInventorySync;
+            _net.OnContainerSync += OnContainerSync;
+            _net.OnPullSync += OnPullSync;
+            _net.OnContainSync += OnContainSync;
 
             _controls = new PlayerControl();
 
@@ -252,7 +272,7 @@ namespace Client.Net
                 _mapRenderer.UpdateCeilingReveal(_predictor.X, _predictor.Y);
 
             if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame)
-                _net.SendUse();
+                HandleUseOrContainer();
 
             // Инвентарь (4.5): Q — выбросить из активной руки; X — сменить руку. Request-only, без предсказания;
             // подсветка идёт по эхо сервера (InventorySync.ActiveHand), не по локальному флипу.
@@ -260,6 +280,8 @@ namespace Client.Net
                 _net.SendDrop(SlotCategory.Hand, _activeHand);
             if (Keyboard.current != null && Keyboard.current.xKey.wasPressedThisFrame)
                 _net.SendSwapHand((byte)(_activeHand == 0 ? 1 : 0));
+            if (Keyboard.current != null && Keyboard.current.fKey.wasPressedThisFrame)
+                HandleEquipToggle();
 
             HandleInteractionInput();
 
@@ -268,6 +290,29 @@ namespace Client.Net
             {
                 _labels?.Dismiss(_handsFullHandle);
                 _handsFullHandle = null;
+            }
+
+            if (Mouse.current != null && _predictor.IsInitialized)
+            {
+                Vector2 mp = Mouse.current.position.ReadValue();
+                float ppx = _predictor.X, ppy = _predictor.Y;
+                if ((mp - _lastHoverMouse).sqrMagnitude > 0.01f
+                    || Mathf.Abs(ppx - _lastHoverPlayerX) > 0.001f
+                    || Mathf.Abs(ppy - _lastHoverPlayerY) > 0.001f)
+                {
+                    _lastHoverMouse = mp;
+                    _lastHoverPlayerX = ppx;
+                    _lastHoverPlayerY = ppy;
+                    int hovered = TryPickItemPixel(mp, out int hid) ? hid : -1;
+                    if (hovered != _hoveredItemNetId)
+                    {
+                        if (_hoveredItemNetId != -1 && _itemViews.TryGetValue(_hoveredItemNetId, out var oldView) && oldView != null)
+                            oldView.SetHovered(false);
+                        if (hovered != -1 && _itemViews.TryGetValue(hovered, out var newView) && newView != null)
+                            newView.SetHovered(true);
+                        _hoveredItemNetId = hovered;
+                    }
+                }
             }
 
             _hoverHint?.Tick(this);
@@ -287,6 +332,8 @@ namespace Client.Net
             // ближайшим тиком и погаснет о гейт Grounded.
             bool jump = _jumpPending;
             _jumpPending = false;
+
+            if (_containedNetId != 0) return;
 
             // Decouple send-vs-step: молчим только в полном покое (Stand + нет ввода/toggle) И на опоре — в воздухе
             // интент обязателен каждый тик (вариант A: серверная гравитация без вводов реконсилилась бы снапом).
@@ -333,11 +380,29 @@ namespace Client.Net
         /// <summary>Камера обзора для world-anchored надписей (LabelManager): та же ленивая ClickCamera (резолв Camera.main).</summary>
         public UnityEngine.Camera ViewCamera => ClickCamera;
 
+        private void HandleUseOrContainer()
+        {
+            if (_predictor.IsInitialized && Mouse.current != null
+                && TryPickItemPixel(Mouse.current.position.ReadValue(), out int netId)
+                && _itemViews.TryGetValue(netId, out var view) && view != null
+                && _itemCatalog != null)
+            {
+                var def = _itemCatalog.For(view.ItemDefId);
+                if (def != null && def.IsContainer)
+                {
+                    if (def.ContainerMode == Shared.World.Items.ContainerMode.SS14) { _net.SendOpenContainer(netId); return; }
+                    if (_containerWindows != null) { _containerWindows.Toggle(netId, view.ItemDefId); return; }
+                }
+            }
+            _net.SendUse();
+        }
+
         /// <summary>Клик мыши → адресная интеракция (в Update, не в Tick): request-only, без предсказания. Экран→ЦЕЛЫЙ
         /// тайл по камере на плоскости этажа игрока (строго PlayerPredictor.Z); опц. пик сущности, иначе цель-тайл.</summary>
         private void HandleInteractionInput()
         {
             if (!_predictor.IsInitialized || Mouse.current == null) return;
+            if (UnityEngine.EventSystems.EventSystem.current != null && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
 
             bool primary = Mouse.current.leftButton.wasPressedThisFrame;
             bool alt = Mouse.current.rightButton.wasPressedThisFrame;
@@ -349,9 +414,15 @@ namespace Client.Net
             // Pickup (4.5): ЛКМ по наземному предмету — ПРЕДМЕТ приоритетнее игрока на тайле. PickupItem не несёт
             // хенда на проводе — сервер кладёт в СВОЙ ActiveHand, поэтому гейтим по занятости именно активной руки
             // (без раунд-трипа); иначе шлём PickupItem вместо обычной интеракции.
-            if (primary && TryPickItem(tileX, tileY, pz, out int itemNetId))
+            if (primary && TryPickItemPixel(screen, out int itemNetId))
             {
-                if (IsHandOccupied(_activeHand))
+                if (_itemViews.TryGetValue(itemNetId, out var itemView) && itemView != null
+                    && _itemCatalog != null && _itemCatalog.For(itemView.ItemDefId)?.Pullable == true)
+                {
+                    _net.SendPullItem(itemNetId);
+                    return;
+                }
+                if (IsHandOccupied(_activeHand) || _pulledNetId != 0)
                     ShowHandsFullHint(screen);
                 else
                     _net.SendPickup(itemNetId);
@@ -448,27 +519,51 @@ namespace Client.Net
             return false;
         }
 
-        /// <summary>Наземный предмет на тайле (tx,ty,z) по его вьюхе; первый подходящий — в itemNetId. Пикается ДО
-        /// TryPickEntity (предмет приоритетнее игрока на том же тайле).</summary>
-        private bool TryPickItem(int tx, int ty, int z, out int itemNetId)
+        private bool TryPickItemPixel(Vector2 screenPos, out int itemNetId)
         {
+            itemNetId = -1;
+            if (!_predictor.IsInitialized) return false;
+            var cam = ClickCamera;
+            if (cam == null) return false;
+            Ray ray = cam.ScreenPointToRay(screenPos);
+            int pz = BlocksWorld ? Mathf.FloorToInt(_predictor.Y) : _predictor.Z;
+            int bestOrder = int.MinValue;
+            float bestDist = float.MaxValue;
             foreach (var kv in _itemViews)
             {
                 var view = kv.Value;
                 if (view == null) continue;
                 Vector3 p = view.transform.position;
-                // Блок-мир: floor(y) ± 1 этаж, см. TryPickEntity — та же формула-паритет с серверным reach.
-                bool match = BlocksWorld
-                    ? Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.Abs(Mathf.FloorToInt(p.y) - z) <= 1
-                    : Mathf.FloorToInt(p.x) == tx && Mathf.FloorToInt(p.z) == ty && Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == z;
-                if (match)
+                bool zOk = BlocksWorld
+                    ? Mathf.Abs(Mathf.FloorToInt(p.y) - pz) <= 1
+                    : Mathf.RoundToInt(p.y / RenderConfig.FloorHeight) == pz;
+                if (!zOk) continue;
+                if (!view.HitTestPixel(ray, out float dist)) continue;
+                int order = view.SortingOrder;
+                if (order > bestOrder || (order == bestOrder && dist < bestDist))
                 {
+                    bestOrder = order;
+                    bestDist = dist;
                     itemNetId = kv.Key;
-                    return true;
                 }
             }
-            itemNetId = -1;
-            return false;
+            return itemNetId != -1;
+        }
+
+        private int NextItemSpawnSeq()
+        {
+            if (_itemSpawnSeq >= 1000)
+            {
+                _seqRenormBuffer.Clear();
+                foreach (var kv in _itemViews)
+                    if (kv.Value != null) _seqRenormBuffer.Add(kv.Value);
+                _seqRenormBuffer.Sort((a, b) => a.SortingOrder.CompareTo(b.SortingOrder));
+                for (int i = 0; i < _seqRenormBuffer.Count; i++)
+                    _seqRenormBuffer[i].SetSpawnSeq(i);
+                _itemSpawnSeq = _seqRenormBuffer.Count;
+                _seqRenormBuffer.Clear();
+            }
+            return _itemSpawnSeq++;
         }
 
         private void OnLoginResponse(LoginResponse login)
@@ -494,6 +589,7 @@ namespace Client.Net
                     : Shared.World.Blocks.DevBlockWorld.Shapes;
                 _blockShapes = baseShapes;
                 _predictor.SetBlockWorld(_streamWorld, new Client.Map.ShapesWithUnknown(baseShapes));
+                _predictor.SetDynamicObstacles(_itemObstacles);
                 _blockRenderer = gameObject.AddComponent<Client.Map.BlockRenderer>();
                 _blockRenderer.Init(_blockGrid, baseShapes);
                 _blockRenderer.SetZoneFade(login.ZoneFadeDistance, login.ZoneFadeVertical);
@@ -650,7 +746,10 @@ namespace Client.Net
                         _localView.Init(e.NetId);
                         _views[e.NetId] = _localView;
                         if (_camera != null) _camera.SetTarget(_localView.transform);
+                        if (_containedNetId != 0) _localView.SetCulled(true);
                     }
+                    if (_localView.WornDefId != e.WornUniformDefId)
+                        _localView.SetWorn(e.WornUniformDefId, WornSpritesOf(e.WornUniformDefId));
                     continue;
                 }
 
@@ -661,6 +760,8 @@ namespace Client.Net
                     _views.Add(e.NetId, view);
                 }
                 view.Receive(e, now);
+                if (view.WornDefId != e.WornUniformDefId)
+                    view.SetWorn(e.WornUniformDefId, WornSpritesOf(e.WornUniformDefId));
             }
 
             // Backstop despawn: чужая сущность пропала из снапшота → снять её вьюху. «Нет в снапшоте» теперь означает
@@ -688,16 +789,26 @@ namespace Client.Net
         {
             if (_itemViewPrefab == null || snap.Items == null) return; // префаб не назначен — тихо пропускаем (без NRE)
 
+            _itemObstacles.Clear();
             _seenItemIds.Clear();
             for (int i = 0; i < snap.Items.Length; i++)
             {
                 var item = snap.Items[i];
                 _seenItemIds.Add(item.NetId);
 
+                if (ItemCatalogData.TryGet(item.ItemDefId, out var proto) && proto.HasCollision)
+                {
+                    var box = proto.CollisionBox;
+                    _itemObstacles.Add(item.X, item.Z + box.MinYf, item.Y, (box.MaxXf - box.MinXf) * 0.5f, box.MaxYf - box.MinYf);
+                }
+
                 if (!_itemViews.TryGetValue(item.NetId, out var view))
                 {
                     view = Instantiate(_itemViewPrefab, transform);
                     view.Init(item.NetId);
+                    view.SetRenderLayers(_renderLayers);
+                    view.SetOutlineMaterial(_itemOutlineMaterial);
+                    view.SetSpawnSeq(NextItemSpawnSeq());
                     _itemViews.Add(item.NetId, view);
                 }
                 view.Apply(in item, _itemCatalog);
@@ -716,12 +827,15 @@ namespace Client.Net
                     Destroy(view.gameObject);
                     _itemViews.Remove(_itemsToRemove[i]);
                 }
+                if (_itemsToRemove[i] == _hoveredItemNetId) _hoveredItemNetId = -1;
+                _containerWindows?.OnItemGone(_itemsToRemove[i]);
             }
         }
 
         private void OnInventorySync(InventorySync sync)
         {
             _activeHand = sync.ActiveHand;
+            _lastSlots = sync.Slots;
 
             System.Array.Clear(_handOccupied, 0, _handOccupied.Length);
             var slots = sync.Slots;
@@ -733,11 +847,75 @@ namespace Client.Net
             if (_inventoryHud != null) _inventoryHud.Apply(in sync);
         }
 
+        private void OnContainerSync(ContainerSync sync)
+        {
+            _containerWindows?.OnSync(in sync);
+        }
+
+        private int _pulledNetId;
+
+        private void OnPullSync(PullSync sync)
+        {
+            _pulledNetId = sync.PulledNetId;
+            if (_inventoryHud == null) return;
+            if (sync.PulledNetId != 0) _inventoryHud.SetPullOverlay(sync.ItemDefId);
+            else _inventoryHud.ClearPullOverlay();
+        }
+
+        private int _containedNetId;
+
+        private void OnContainSync(ContainSync sync)
+        {
+            _containedNetId = sync.ContainerNetId;
+            if (_localView != null) _localView.SetCulled(_containedNetId != 0);
+        }
+
+        private void HandleEquipToggle()
+        {
+            if (_lastSlots == null) return;
+
+            for (int i = 0; i < _lastSlots.Length; i++)
+            {
+                var rec = _lastSlots[i];
+                if (rec.Category != SlotCategory.Hand || rec.Index != _activeHand) continue;
+                if (ItemCatalogData.TryGet(rec.ItemDefId, out var proto)
+                    && proto.Equippable && IsWornCategory(proto.EquipSlot))
+                    _net.SendMoveSlot(SlotCategory.Hand, _activeHand, proto.EquipSlot, 0);
+                return;
+            }
+
+            for (int i = 0; i < _lastSlots.Length; i++)
+            {
+                var rec = _lastSlots[i];
+                if (rec.Category == SlotCategory.Hand) continue;
+                _net.SendMoveSlot(rec.Category, rec.Index, SlotCategory.Hand, _activeHand);
+                return;
+            }
+        }
+
+        private static bool IsWornCategory(SlotCategory c)
+            => c != SlotCategory.None && c != SlotCategory.Hand && c != SlotCategory.Inherit;
+
+        private Sprite[] WornSpritesOf(ushort defId)
+        {
+            if (defId == 0 || _itemCatalog == null) return null;
+            var def = _itemCatalog.For(defId);
+            return (def != null && def.WornVisible) ? def.WornSprites : null;
+        }
+
         public byte ActiveHand => _activeHand;
 
         private bool IsHandOccupied(byte hand) => hand < _handOccupied.Length && _handOccupied[hand];
 
         /// <summary>Запрос drop-at-feet предмета из (category,index) — для UI/HUD, вне клавиш Q.</summary>
         public void SendDrop(SlotCategory category, byte index) => _net.SendDrop(category, index);
+
+        public void SendPutInContainer(int netId) => _net.SendPutInContainer(netId);
+
+        public void SendTakeFromContainer(int netId, ushort index) => _net.SendTakeFromContainer(netId, index);
+
+        public void SendOpenContainer(int netId) => _net.SendOpenContainer(netId);
+
+        public void SendCloseContainer(int netId) => _net.SendCloseContainer(netId);
     }
 }

@@ -10,6 +10,7 @@ using Shared.World;
 using Shared.World.Items;
 using Server.Network.Interaction;
 using Server.Network.Messages;
+using Server.Items;
 
 namespace Server.Network;
 
@@ -48,9 +49,14 @@ public class GameServer
     private readonly StairHandler _stairHandler = new();
     private readonly IInteractionHandler[] _interactionHandlers;
     private readonly MessageRouter _router = MessageRouter.CreateDefault();
+    private readonly GroundItemWorld _groundItems;
+    private readonly ServerInventorySystem _inventory;
+    private readonly ServerContainerSystem _containers;
+    private readonly ServerPullSystem _pull;
 
     // Переиспользуемые буферы горячего broadcast-пути (ноль аллокаций при установившемся числе клиентов).
     private EntitySnapshot[] _broadcastEntities = Array.Empty<EntitySnapshot>();
+    private bool[] _broadcastContained = Array.Empty<bool>();
     private EntitySnapshot[] _perClientEntities = Array.Empty<EntitySnapshot>(); // entity-PVS: отфильтрованный набор recipient'а (ресайз только при росте)
     private readonly MemoryStream _broadcastPayload = new();
     private readonly BinaryWriter _broadcastPayloadWriter;
@@ -114,6 +120,13 @@ public class GameServer
         _config = config;
         _map = map ?? new GridMap(); // пустая карта = мир без коллизии
         (_spawnX, _spawnY, _spawnZ) = FindSpawn(_map);
+        _clients = new Dictionary<NetPeer, ClientConnection>();
+        _mainThreadActions = new ConcurrentQueue<Action>();
+        _broadcastPayloadWriter = new BinaryWriter(_broadcastPayload);
+        _groundItems = new GroundItemWorld(_entities, _netIdAllocator, _clients);
+        _inventory = new ServerInventorySystem(this, _groundItems, _clients, _entities, _config, _map);
+        _containers = new ServerContainerSystem(this, _inventory, _entities, _clients);
+        _pull = new ServerPullSystem(this, _inventory, _groundItems, _entities, _clients);
         if (config.BlocksWorld)
         {
             (BlockWorld, bool fromFile) = Services.BlockWorldSource.Load(config.MapPath);
@@ -148,18 +161,9 @@ public class GameServer
                     Console.WriteLine($"[Zones] КОНФЛИКТ: зона {conflict.ZoneId} — номера этажей {string.Join(", ", conflict.Floors)}");
             }
 
-            var mapItems = BlockWorld.ItemSpawns;
-            for (int i = 0; i < mapItems.Count; i++)
-            {
-                int restY = Shared.World.Blocks.ItemGroundSnap.SnapDown(BlockWorld, BlockShapes, mapItems[i].X, mapItems[i].Y, mapItems[i].Z);
-                SpawnGroundItem(mapItems[i].DefId, mapItems[i].Stack, mapItems[i].X, mapItems[i].Z, restY); // легаси-раскладка SpawnGroundItem: cellY=план(Z), z=высота(Y)
-            }
-            Console.WriteLine($"[Map] spawned {mapItems.Count} map items");
+            _groundItems.SpawnMapItems(BlockWorld, BlockShapes);
         }
         Console.WriteLine($"[Map] Spawn at ({_spawnX}, {_spawnY}, z{_spawnZ})");
-        _clients = new Dictionary<NetPeer, ClientConnection>();
-        _mainThreadActions = new ConcurrentQueue<Action>();
-        _broadcastPayloadWriter = new BinaryWriter(_broadcastPayload);
         _interactionHandlers = interactionHandlers ?? InteractionRegistry.Default();
     }
 
@@ -235,35 +239,15 @@ public class GameServer
         {
             // Held-предметы НЕ в _entities (физически вынесены на pickup) → это ЕДИНСТВЕННЫЙ путь их вернуть в мир,
             // иначе утечка NetId. СИНХРОННО, ДО _entities.Remove(client.PlayerNetId) — как в GameLoop, drop-on-floor.
-            DropAllHeldOnDisconnect(client);
+            _inventory.DropAllHeldOnDisconnect(client);
+            _containers.OnClientDisconnect(client);
+            _pull.OnClientDisconnect(client);
 
             _clients.Remove(peer);
             _entities.Remove(client.PlayerNetId);
             Console.WriteLine($"[Server] Client #{client.ConnectionId} disconnected: {disconnectInfo.Reason}");
 
             _mainThreadActions.Enqueue(() => OnClientDisconnected?.Invoke(client));
-        }
-    }
-
-    /// <summary>Роняет ВСЕ held-предметы клиента на floor(X/Y,Z) при дисконнекте (SS13 drop-on-floor). Тайл не
-    /// проверяется на Walkable — роняем «под ноги» безусловно (иначе орфан NetId при дисконнекте над не-walkable).</summary>
-    private void DropAllHeldOnDisconnect(ClientConnection client)
-    {
-        int cx = (int)MathF.Floor(client.X);
-        int cy = (int)MathF.Floor(client.Y);
-        int z = client.Z;
-        if (_config.BlocksWorld) z = Shared.World.Blocks.ItemGroundSnap.SnapDown(BlockWorld!, BlockShapes, cx, z, cy);
-
-        for (int c = 0; c < client.Slots.Length; c++)
-        {
-            var arr = client.Slots[c];
-            for (int i = 0; i < arr.Length; i++)
-            {
-                var h = arr[i];
-                if (h.NetId == 0) continue;
-                SpawnGroundItemWithId(h.NetId, h.ItemDefId, h.StackCount, cx, cy, z);
-                arr[i] = default;
-            }
         }
     }
 
@@ -310,11 +294,15 @@ public class GameServer
                 action();
             }
 
+            _groundItems.RebuildObstacles();
             ProcessIntents();
             ProcessInteractions();
-            ProcessPickups();
-            ProcessDrops();
-            ProcessSlotOps();
+            _inventory.ProcessPickups();
+            _inventory.ProcessDrops();
+            _inventory.ProcessSlotOps();
+            _containers.ProcessContainerOps();
+            _pull.ProcessPullOps();
+            _pull.ProcessFollow();
             ProcessUses();
             if (!_config.BlocksWorld) ProcessFalls(); // тайл-падения; в блок-мире гравитация внутри Step
             ProcessStatus();
@@ -397,6 +385,12 @@ public class GameServer
     /// БАЙТ-В-БАЙТ как в клиентском PlayerPredictor (ApplyLocal/Reconcile). Менять — только синхронно с ним.</summary>
     private void ApplyClientIntent(ClientConnection client, MoveIntent intent, bool hasIntent)
     {
+        if (client.ContainedInNetId != 0)
+        {
+            if (hasIntent) client.LastProcessedSequence = intent.Sequence;
+            return;
+        }
+
         var dir = hasIntent ? intent.Direction : IntentDirection.None;
 
         // reason — текущая причина лежания: KnockDown() ставит KnockedDown заранее (prev уже Laying), свежий
@@ -417,7 +411,7 @@ public class GameServer
                 sprint: hasIntent && intent.Sprint,
                 jump: canMove && hasIntent && intent.Jump,
                 crawl: client.State == PlayerState.Laying);
-            Shared.Simulation.Blocks.BlockMovementLogic.Step(BlockWorld!, BlockShapes, ref client.Mover, in input);
+            Shared.Simulation.Blocks.BlockMovementLogic.Step(BlockWorld!, BlockShapes, ref client.Mover, in input, client.Speed.CurrentValue, _groundItems.Obstacles);
             // Зеркало в legacy-поля (тайл-раскладка): X=X, Y=глубина плана (Mover.Z), Z=целый блок высоты (Mover.Y).
             client.X = client.Mover.X;
             client.Y = client.Mover.Z;
@@ -471,162 +465,18 @@ public class GameServer
         }
     }
 
-    /// <summary>Дренирует очередь pickup-запросов каждого клиента (после ProcessIntents — дальность от свежей позиции).</summary>
-    private void ProcessPickups()
+    public Func<ushort, ItemProto?> ProtoLookup
     {
-        const int maxPerTick = 32;
-        foreach (var client in _clients.Values)
+        get => _inventory.ProtoLookup;
+        set
         {
-            int applied = 0;
-            while (applied < maxPerTick && client.PickupQueue.TryDequeue(out var msg))
-            {
-                HandlePickup(client, in msg);
-                applied++;
-            }
-            if (applied == maxPerTick && !client.PickupQueue.IsEmpty)
-            {
-                int dropped = 0;
-                while (client.PickupQueue.TryDequeue(out _)) dropped++;
-                Console.WriteLine($"[Server] pickup flood #{client.ConnectionId}: applied {applied}, dropped {dropped}");
-            }
+            _inventory.ProtoLookup = value;
+            _groundItems.ProtoLookup = value;
         }
-    }
-
-    /// <summary>Дренирует очередь drop-запросов каждого клиента.</summary>
-    private void ProcessDrops()
-    {
-        const int maxPerTick = 32;
-        foreach (var client in _clients.Values)
-        {
-            int applied = 0;
-            while (applied < maxPerTick && client.DropQueue.TryDequeue(out var msg))
-            {
-                HandleDrop(client, in msg);
-                applied++;
-            }
-            if (applied == maxPerTick && !client.DropQueue.IsEmpty)
-            {
-                int dropped = 0;
-                while (client.DropQueue.TryDequeue(out _)) dropped++;
-                Console.WriteLine($"[Server] drop flood #{client.ConnectionId}: applied {applied}, dropped {dropped}");
-            }
-        }
-    }
-
-    /// <summary>Дренирует очереди SwapHand/MoveSlot каждого клиента (без range-check — операции над своим инвентарём).</summary>
-    private void ProcessSlotOps()
-    {
-        const int maxPerTick = 32;
-        foreach (var client in _clients.Values)
-        {
-            int applied = 0;
-            while (applied < maxPerTick && client.SwapQueue.TryDequeue(out var msg))
-            {
-                HandleSwapHand(client, in msg);
-                applied++;
-            }
-            if (applied == maxPerTick && !client.SwapQueue.IsEmpty)
-            {
-                int dropped = 0;
-                while (client.SwapQueue.TryDequeue(out _)) dropped++;
-                Console.WriteLine($"[Server] swap-hand flood #{client.ConnectionId}: applied {applied}, dropped {dropped}");
-            }
-
-            applied = 0;
-            while (applied < maxPerTick && client.MoveSlotQueue.TryDequeue(out var msg))
-            {
-                HandleMoveSlot(client, in msg);
-                applied++;
-            }
-            if (applied == maxPerTick && !client.MoveSlotQueue.IsEmpty)
-            {
-                int dropped = 0;
-                while (client.MoveSlotQueue.TryDequeue(out _)) dropped++;
-                Console.WriteLine($"[Server] move-slot flood #{client.ConnectionId}: applied {applied}, dropped {dropped}");
-            }
-        }
-    }
-
-    /// <summary>Whole-stack pickup: Ground→Held в активную руку клиента. Атомарный порядок гонок — см. commit note:
-    /// цель найдена и это GroundItemEntity → InReach от ЯЧЕЙКИ ПРЕДМЕТА (анти-телеграб) → активная рука свободна
-    /// (return ДО мутации, тихий no-op) → despawn (проигравший гонки за один NetId получает false → return, БЕЗ
-    /// утечки) → только теперь в слот, ТЕМ ЖЕ NetId → InventorySync владельцу.</summary>
-    private void HandlePickup(ClientConnection client, in PickupItem msg)
-    {
-        if (!_entities.TryGetValue(msg.TargetNetId, out var e)) return;
-        if (e is not GroundItemEntity gi) return;
-
-        int px = (int)MathF.Floor(client.X);
-        int py = (int)MathF.Floor(client.Y);
-        if (!Reachable(px, py, client.Z, gi.CellX, gi.CellY, gi.Z)) return;
-
-        if (client.Slots[(int)SlotCategory.Hand][client.ActiveHand].NetId != 0) return;
-
-        if (!DespawnGroundItem(msg.TargetNetId)) return; // проиграл гонку двух pickup за один NetId в один тик
-
-        client.Slots[(int)SlotCategory.Hand][client.ActiveHand] = new HeldItem { NetId = gi.NetId, ItemDefId = gi.ItemDefId, StackCount = gi.StackCount };
-        SendInventorySyncToOwner(client);
-    }
-
-    /// <summary>Drop-at-feet: Held→Ground на СЕРВЕРНОЙ позиции клиента (floor(X/Y), Z) — клиентские координаты
-    /// не принимаются (анти-телепорт). Тайл-мир: не-Walkable тайл под ногами — отклонить (нет висящих сирот).
-    /// Блок-мир: тайл-гейт пропущен (_map пуст, авторитет — BlockWorld) — дроп-в-ноги как при дисконнекте.</summary>
-    private void HandleDrop(ClientConnection client, in DropItem msg)
-    {
-        var slot = client.Slots[(int)msg.Category];
-        if (msg.Index >= slot.Length) return;
-        var h = slot[msg.Index];
-        if (h.NetId == 0) return;
-
-        int cx = (int)MathF.Floor(client.X);
-        int cy = (int)MathF.Floor(client.Y);
-        int z = client.Z;
-        if (!_config.BlocksWorld && !_map.GetTile(cx, cy, z).Walkable) return;
-        if (_config.BlocksWorld) z = Shared.World.Blocks.ItemGroundSnap.SnapDown(BlockWorld!, BlockShapes, cx, z, cy);
-
-        SpawnGroundItemWithId(h.NetId, h.ItemDefId, h.StackCount, cx, cy, z);
-        slot[msg.Index] = default;
-        SendInventorySyncToOwner(client);
-    }
-
-    /// <summary>Смена активной руки — без перемещения предметов, чисто серверный флаг.</summary>
-    private void HandleSwapHand(ClientConnection client, in SwapHandRequest msg)
-    {
-        if (client.ActiveHand == msg.Hand) return; // no-op: без bump version/send (как pickup/drop/move раньше мутации)
-        client.ActiveHand = msg.Hand; // Deserialize уже гарантирует < 2
-        SendInventorySyncToOwner(client);
-    }
-
-    /// <summary>Перемещение предмета между слотами: занятый dest — fail (без авто-swap в MVP). w_class-гейт
-    /// (по типу слота) ОТЛОЖЕН — в 4.5a любой предмет идёт в любой слот.</summary>
-    private void HandleMoveSlot(ClientConnection client, in MoveSlotRequest msg)
-    {
-        var from = client.Slots[(int)msg.FromCategory];
-        var to = client.Slots[(int)msg.ToCategory];
-        if (msg.FromIndex >= from.Length || msg.ToIndex >= to.Length) return;
-
-        var h = from[msg.FromIndex];
-        if (h.NetId == 0) return;
-        if (to[msg.ToIndex].NetId != 0) return;
-        if (!CanEquip(h.ItemDefId, msg.ToCategory)) return;
-
-        to[msg.ToIndex] = h;
-        from[msg.FromIndex] = default;
-        SendInventorySyncToOwner(client);
-    }
-
-    /// <summary>Категория экипировки предмета по DefId (инъектируется тестами; дефолт — ItemCatalogData).</summary>
-    public Func<ushort, SlotCategory?> EquipLookup = defId => ItemCatalogData.TryGetEquipSlot(defId, out var c) ? c : (SlotCategory?)null;
-
-    private bool CanEquip(ushort itemDefId, SlotCategory toCategory)
-    {
-        if (toCategory == SlotCategory.Hand) return true;
-        var eq = EquipLookup(itemDefId);
-        return eq.HasValue && eq.Value == toCategory;
     }
 
     // Тайл-мир: тот же этаж + chebyshev. Блок-мир: ±1 ячейка по высоте (паритет с клиентским пикером ±1).
-    private bool Reachable(int px, int py, int pz, int tx, int ty, int tz)
+    internal bool Reachable(int px, int py, int pz, int tx, int ty, int tz)
         => _config.BlocksWorld
             ? InteractionRules.InReachBlocks(px, py, pz, tx, ty, tz)
             : InteractionRules.InReach(px, py, pz, tx, ty, tz);
@@ -787,6 +637,12 @@ public class GameServer
         return (spawnTileX + 0.5f, spawnTileY + 0.5f, spawnZ);
     }
 
+    private static ushort WornDefOf(ClientConnection c)
+    {
+        int u = (int)Shared.World.Items.SlotCategory.Uniform;
+        return u < c.Slots.Length && c.Slots[u].Length > 0 ? c.Slots[u][0].ItemDefId : (ushort)0;
+    }
+
     /// <summary>Рассылает снапшот мира каждому клиенту (со своим LastProcessedInput для reconciliation).</summary>
     private void BroadcastWorldSnapshot()
     {
@@ -798,11 +654,14 @@ public class GameServer
         // (верхняя граница), фактический count — число игроков. Ресайз — только при росте (без shrink-churn).
         if (_broadcastEntities.Length < _entities.Count)
             _broadcastEntities = new EntitySnapshot[_entities.Count];
+        if (_broadcastContained.Length < _entities.Count)
+            _broadcastContained = new bool[_entities.Count];
 
         int count = 0;
         foreach (var entity in _entities.Values)
         {
             if (entity is not ClientConnection c) continue;
+            _broadcastContained[count] = c.ContainedInNetId != 0;
             _broadcastEntities[count++] = new EntitySnapshot
             {
                 NetId = c.PlayerNetId,
@@ -813,7 +672,8 @@ public class GameServer
                 State = (byte)c.State,
                 Reason = (byte)c.CurrentLayingReason,
                 Speed = c.Speed.CurrentValue,
-                VY = _config.BlocksWorld ? c.Mover.VY : 0f
+                VY = _config.BlocksWorld ? c.Mover.VY : 0f,
+                WornUniformDefId = WornDefOf(c)
             };
         }
 
@@ -831,7 +691,9 @@ public class GameServer
             int k = 0;
             for (int e = 0; e < count; e++)
             {
-                if (_broadcastEntities[e].NetId == client.PlayerNetId
+                bool self = _broadcastEntities[e].NetId == client.PlayerNetId;
+                if (!self && _broadcastContained[e]) continue;
+                if (self
                     || (_config.BlocksWorld
                         ? InInterestBlocks(client.X, client.Y, client.Z, in _broadcastEntities[e], interestR, interestZ)
                         : InInterest(client.X, client.Y, client.Z, in _broadcastEntities[e], interestR, interestZ)))
@@ -869,93 +731,19 @@ public class GameServer
         }
     }
 
-    /// <summary>Спавн наземного предмета: аллокация NetId + регистрация в общем реестре. ТОЛЬКО на GameLoop-потоке. Возвращает NetId.</summary>
-    public int SpawnGroundItem(ushort itemDefId, byte stackCount, int cellX, int cellY, int z, byte placement = 0)
-    {
-        int id = _netIdAllocator.Allocate();
-        _entities[id] = new GroundItemEntity(id, itemDefId, stackCount, cellX, cellY, z, placement);
-        return id;
-    }
+    public int SpawnGroundItem(ushort itemDefId, byte stackCount, float cellX, float cellY, float z, byte placement = 0)
+        => _groundItems.SpawnGroundItem(itemDefId, stackCount, cellX, cellY, z, placement);
 
-    /// <summary>Спавн наземного предмета с ЗАДАННЫМ NetId (переиспользование identity при drop/disconnect) — НЕ
-    /// аллоцирует новый id. ТОЛЬКО на GameLoop-потоке.</summary>
-    public void SpawnGroundItemWithId(int netId, ushort itemDefId, byte stackCount, int cellX, int cellY, int z, byte placement = 0)
-    {
-        if (_entities.ContainsKey(netId))
-            throw new InvalidOperationException($"NetId {netId} already lives in _entities — double drop/spawn?");
-        _entities[netId] = new GroundItemEntity(netId, itemDefId, stackCount, cellX, cellY, z, placement);
-    }
+    public void SpawnGroundItemWithId(int netId, ushort itemDefId, byte stackCount, float cellX, float cellY, float z, byte placement = 0)
+        => _groundItems.SpawnGroundItemWithId(netId, itemDefId, stackCount, cellX, cellY, z, placement);
 
-    /// <summary>Снять наземный предмет из реестра по NetId. ТОЛЬКО на GameLoop-потоке. false — нет такого предмета
-    /// ИЛИ это не GroundItemEntity (игрока не трогаем).</summary>
-    public bool DespawnGroundItem(int netId)
-    {
-        if (_entities.TryGetValue(netId, out var e) && e is GroundItemEntity)
-            return _entities.Remove(netId);
-        return false;
-    }
+    public bool DespawnGroundItem(int netId) => _groundItems.DespawnGroundItem(netId);
 
-    /// <summary>Ищет предмет по NetId в любом местоположении: сперва Ground (_entities), затем Held (Slots всех
-    /// клиентов). Forward-compat к destroy-by-NetId/Inside (4.5 не эмитит/не принимает Inside). Аллоцирует (не горячий путь).</summary>
     public bool TryFindItemAnyLocation(int netId, out ItemLocationKind location, out ushort itemDefId, out byte stackCount)
-    {
-        if (_entities.TryGetValue(netId, out var e) && e is GroundItemEntity gi)
-        {
-            location = ItemLocationKind.Ground;
-            itemDefId = gi.ItemDefId;
-            stackCount = gi.StackCount;
-            return true;
-        }
+        => _groundItems.TryFindItemAnyLocation(netId, out location, out itemDefId, out stackCount);
 
-        foreach (var client in _clients.Values)
-        {
-            for (int c = 0; c < client.Slots.Length; c++)
-            {
-                var arr = client.Slots[c];
-                for (int i = 0; i < arr.Length; i++)
-                {
-                    if (arr[i].NetId != netId) continue;
-                    location = ItemLocationKind.Held;
-                    itemDefId = arr[i].ItemDefId;
-                    stackCount = arr[i].StackCount;
-                    return true;
-                }
-            }
-        }
-
-        location = default;
-        itemDefId = 0;
-        stackCount = 0;
-        return false;
-    }
-
-    /// <summary>Наземные предметы в зоне интереса позиции (cx,cy,cz) — та же выборка (is GroundItemEntity + InInterest),
-    /// что рассылает BroadcastItemSnapshot. Аллоцирует (НЕ горячий путь): для тестов и запросов (range-check подбора 4.4b/4.5).</summary>
     public List<ItemInstance> GroundItemsInInterest(float cx, float cy, int cz)
-    {
-        float r = SVars.Instance.EntityInterestRadius;
-        int zDepth = SVars.Instance.EntityInterestZDepth;
-        var result = new List<ItemInstance>();
-        foreach (var entity in _entities.Values)
-        {
-            if (entity is not GroundItemEntity gi) continue;
-            var probe = new EntitySnapshot { X = gi.X, Y = gi.Y, Z = gi.Z };
-            if (InInterest(cx, cy, cz, in probe, r, zDepth))
-                result.Add(ToInstance(gi));
-        }
-        return result;
-    }
-
-    private static ItemInstance ToInstance(GroundItemEntity gi) => new ItemInstance
-    {
-        NetId = gi.NetId,
-        ItemDefId = gi.ItemDefId,
-        StackCount = gi.StackCount,
-        X = gi.CellX,
-        Y = gi.CellY,
-        Z = gi.Z,
-        Placement = gi.Placement
-    };
+        => _groundItems.GroundItemsInInterest(cx, cy, cz);
 
     /// <summary>Рассылает наземные предметы в интересе каждого клиента ОТДЕЛЬНЫМ ItemSnapshot-потоком (Sequenced), НЕ смешивая
     /// с player-WorldSnapshot. Нет предметов / клиент их не видит — не шлём (без wire-шума). Zero-alloc: переиспользуемые буферы.</summary>
@@ -971,7 +759,11 @@ public class GameServer
         int count = 0;
         foreach (var entity in _entities.Values)
             if (entity is GroundItemEntity gi)
-                _broadcastItems[count++] = ToInstance(gi);
+            {
+                var inst = GroundItemWorld.ToInstance(gi);
+                inst.Open = _containers.IsWorldOpen(inst.NetId) ? (byte)1 : (byte)0;
+                _broadcastItems[count++] = inst;
+            }
 
         if (_perClientItems.Length < count)
             _perClientItems = new ItemInstance[count];
@@ -1294,36 +1086,7 @@ public class GameServer
         SendToClient(client, new MapDataMessage { Map = _map });
     }
 
-    /// <summary>Полный слепок инвентаря владельцу (OWNER-ONLY — НИКОГДА не в foreach(_clients)), ReliableOrdered через SendToClient.</summary>
-    public void SendInventorySyncToOwner(ClientConnection owner)
-    {
-        int occupied = 0;
-        for (int c = 0; c < owner.Slots.Length; c++)
-        {
-            var arr = owner.Slots[c];
-            for (int i = 0; i < arr.Length; i++)
-                if (arr[i].NetId != 0) occupied++;
-        }
-
-        var records = new SlotRecord[occupied];
-        int k = 0;
-        for (int c = 0; c < owner.Slots.Length; c++)
-        {
-            var arr = owner.Slots[c];
-            for (byte i = 0; i < arr.Length; i++)
-            {
-                var h = arr[i];
-                if (h.NetId == 0) continue;
-                records[k++] = new SlotRecord { Category = (SlotCategory)c, Index = i, ItemDefId = h.ItemDefId, StackCount = h.StackCount };
-            }
-        }
-
-        SendToClient(owner, new InventorySync
-        {
-            ActiveHand = owner.ActiveHand,
-            Slots = records
-        });
-    }
+    public void SendInventorySyncToOwner(ClientConnection owner) => _inventory.SendInventorySyncToOwner(owner);
 
     /// <summary>Догнать новоприбывшего клиента текущими открытыми дверями (карта статична, двери — рантайм).</summary>
     public void SendOpenDoors(ClientConnection client)

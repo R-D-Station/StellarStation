@@ -26,6 +26,9 @@ namespace Client.Net
         public event Action<ChunkUnload> OnChunkUnload;
         public event Action<ItemSnapshot> OnItemSnapshot;
         public event Action<InventorySync> OnInventorySync;
+        public event Action<ContainerSync> OnContainerSync;
+        public event Action<PullSync> OnPullSync;
+        public event Action<ContainSync> OnContainSync;
         public event Action<BlockChunkData> OnBlockChunkData;
         public event Action<BlockSectionGone> OnBlockSectionGone;
         public event Action<BlockUpdateBatch> OnBlockUpdateBatch;
@@ -52,6 +55,9 @@ namespace Client.Net
             { MessageType.MapChunkUnload, () => new ChunkUnload() },
             { MessageType.ItemSnapshot, () => new ItemSnapshot() },
             { MessageType.InventorySync, () => new InventorySync() },
+            { MessageType.ContainerSync, () => new ContainerSync() },
+            { MessageType.PullSync, () => new PullSync() },
+            { MessageType.ContainSync, () => new ContainSync() },
             { MessageType.BlockChunkData, () => new BlockChunkData() },
             { MessageType.BlockSectionGone, () => new BlockSectionGone() },
             { MessageType.BlockUpdateBatch, () => new BlockUpdateBatch() },
@@ -166,6 +172,18 @@ namespace Client.Net
 
                 case InventorySync inv:
                     OnInventorySync?.Invoke(inv);
+                    break;
+
+                case ContainerSync cs:
+                    OnContainerSync?.Invoke(cs);
+                    break;
+
+                case PullSync ps:
+                    OnPullSync?.Invoke(ps);
+                    break;
+
+                case ContainSync cs:
+                    OnContainSync?.Invoke(cs);
                     break;
 
                 case BlockChunkData bc:

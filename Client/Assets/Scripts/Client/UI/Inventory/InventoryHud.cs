@@ -15,8 +15,31 @@ namespace Client.UI.Inventory
         [SerializeField] private NetworkRunner _runner;
 
         private readonly Dictionary<int, InventorySlotHud> _byKey = new Dictionary<int, InventorySlotHud>();
+        private ushort _pullOverlayDefId;
 
         private static int Key(SlotCategory cat, byte index) => ((int)cat << 8) | index;
+
+        private InventorySlotHud HandSlot(byte idx) => _byKey.TryGetValue(Key(SlotCategory.Hand, idx), out var s) ? s : null;
+
+        public void SetPullOverlay(ushort itemDefId)
+        {
+            _pullOverlayDefId = itemDefId;
+            ApplyPullOverlay();
+        }
+
+        public void ClearPullOverlay()
+        {
+            _pullOverlayDefId = 0;
+            var h0 = HandSlot(0); if (h0 != null) h0.SetEmpty();
+            var h1 = HandSlot(1); if (h1 != null) h1.SetEmpty();
+        }
+
+        private void ApplyPullOverlay()
+        {
+            if (_pullOverlayDefId == 0) return;
+            var h0 = HandSlot(0); if (h0 != null) h0.SetFilled(_pullOverlayDefId, 1, _catalog);
+            var h1 = HandSlot(1); if (h1 != null) h1.SetFilled(_pullOverlayDefId, 1, _catalog);
+        }
 
         private void Awake()
         {
@@ -59,6 +82,8 @@ namespace Client.UI.Inventory
                     var slot = _slots[i];
                     if (slot != null) slot.SetHighlight(slot.Category == SlotCategory.Hand && slot.Index == sync.ActiveHand);
                 }
+
+            ApplyPullOverlay();
         }
 
         private void OnSlotClicked(SlotCategory cat, byte index)

@@ -34,6 +34,14 @@ public enum MessageType : ushort
     InventorySync = 203, // server→client, OWNER-ONLY: полный слепок 6 слотов инвентаря
     SwapHand = 204,      // client→server: сменить активную руку
     MoveSlot = 205,      // client→server: переместить предмет между слотами
+    OpenContainer = 206,     // client→server: открыть контейнер (по NetId)
+    CloseContainer = 207,    // client→server: закрыть контейнер
+    PutInContainer = 208,    // client→server: положить предмет активной руки в контейнер
+    TakeFromContainer = 209, // client→server: взять предмет из контейнера в активную руку
+    ContainerSync = 210,     // server→client, VIEWER-ONLY: слепок содержимого открытого контейнера
+    PullItem = 211,          // client→server: тоггл тяги наземного предмета (взять/отпустить)
+    PullSync = 212,          // server→client, OWNER-ONLY: состояние тяги (PulledNetId+ItemDefId; 0/0 = release) для HUD
+    ContainSync = 213,       // server→client, OWNER-ONLY: заперт ли игрок в SS14-ящике (ContainerNetId; 0 = свободен) — заморозка ввода + скрытие своего спрайта
 
     // Chat (300-399)
     ChatMessage = 300,

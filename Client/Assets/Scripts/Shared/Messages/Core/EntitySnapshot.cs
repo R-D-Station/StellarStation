@@ -17,11 +17,12 @@ namespace Shared.Messages.Core
         public byte Reason; // причина лежания (Shared.Simulation.LayingReason): Voluntary/KnockedDown
         public float Speed; // эффективная скорость/тик (= ClientConnection.Speed.CurrentValue); предиктор берёт baseStep отсюда
         public float VY;   // вертикальная скорость (блоков/тик) — сид реконсиляции падения/прыжка (B2)
+        public ushort WornUniformDefId;
 
         public MessageType Type => MessageType.EntitySnapshot;
 
         /// <summary>Фиксированный размер сериализованной сущности в байтах (length-prefix в WorldSnapshot).</summary>
-        public const int SerializedSize = 27;
+        public const int SerializedSize = 29;
 
         public byte[] Serialize()
         {
@@ -43,6 +44,7 @@ namespace Shared.Messages.Core
             writer.Write(Reason);
             writer.Write(Speed);
             writer.Write(VY);
+            writer.Write(WornUniformDefId);
         }
 
         /// <summary>Прочитать SerializedSize байт сущности НАПРЯМУЮ из reader (zero-alloc: без byte[]/вложенного
@@ -85,6 +87,8 @@ namespace Shared.Messages.Core
                 throw new InvalidOperationException("VY is invalid (NaN or Infinity)");
             e.VY = vy;
 
+            e.WornUniformDefId = r.ReadUInt16();
+
             return e;
         }
 
@@ -93,8 +97,8 @@ namespace Shared.Messages.Core
             if (data == null)
                 throw new ArgumentNullException(nameof(data), "EntitySnapshot data cannot be null");
 
-            // NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) + State(1) + Reason(1) + Speed(4) + VY(4) = 27 байт
-            const int expectedSize = 27;
+            // NetId(4) + X(4) + Y(4) + Z(4) + Facing(1) + State(1) + Reason(1) + Speed(4) + VY(4) + WornUniformDefId(2) = 29 байт
+            const int expectedSize = 29;
 
             if (data.Length != expectedSize)
                 throw new ArgumentException($"Invalid data size: expected {expectedSize} bytes, got {data.Length} bytes", nameof(data));

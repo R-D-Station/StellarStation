@@ -6,13 +6,13 @@ using Shared.World.Items;
 namespace Shared.Messages.Core
 {
     /// <summary>Снапшот наземных предметов в интересе клиента — ОТДЕЛЬНЫЙ PVS-поток (НЕ смешан с player-WorldSnapshot).</summary>
-    // Формат: [count i32][count × 19б]. Per-item: NetId(4)+ItemDefId(2)+X(4)+Y(4)+Z(4)+StackCount(1). Placement на проводе НЕ идёт (MVP).
+    // Формат: [count i32][count × 20б]. Per-item: NetId(4)+ItemDefId(2)+X(f32)+Y(f32)+Z(f32)+StackCount(1)+Open(1). Placement на проводе НЕ идёт (MVP).
     public struct ItemSnapshot : INetMessage
     {
         public ItemInstance[] Items;
 
-        /// <summary>Размер одного предмета на проводе: NetId(4)+ItemDefId(2)+X(4)+Y(4)+Z(4)+StackCount(1).</summary>
-        public const int PerItemSize = 19;
+        /// <summary>Размер одного предмета на проводе: NetId(4)+ItemDefId(2)+X(f32)+Y(f32)+Z(f32)+StackCount(1)+Open(1).</summary>
+        public const int PerItemSize = 20;
 
         private const int MaxItems = 10000; // анти-DoS: кап числа ДО аллокации (как WorldSnapshot)
 
@@ -42,6 +42,7 @@ namespace Shared.Messages.Core
             writer.Write(it.Y);          // 4
             writer.Write(it.Z);          // 4
             writer.Write(it.StackCount); // 1
+            writer.Write(it.Open);       // 1
         }
 
         public void Deserialize(byte[] data)
@@ -82,15 +83,33 @@ namespace Shared.Messages.Core
             }
         }
 
-        private static ItemInstance ReadItem(BinaryReader reader) => new ItemInstance
+        private static ItemInstance ReadItem(BinaryReader reader)
         {
-            NetId = reader.ReadInt32(),
-            ItemDefId = reader.ReadUInt16(),
-            X = reader.ReadInt32(),
-            Y = reader.ReadInt32(),
-            Z = reader.ReadInt32(),
-            StackCount = reader.ReadByte(),
-            Placement = 0 // на проводе не идёт (MVP)
-        };
+            var it = new ItemInstance
+            {
+                NetId = reader.ReadInt32(),
+                ItemDefId = reader.ReadUInt16()
+            };
+
+            float x = reader.ReadSingle();
+            if (float.IsNaN(x) || float.IsInfinity(x))
+                throw new InvalidOperationException("X coordinate is invalid (NaN or Infinity)");
+            it.X = x;
+
+            float y = reader.ReadSingle();
+            if (float.IsNaN(y) || float.IsInfinity(y))
+                throw new InvalidOperationException("Y coordinate is invalid (NaN or Infinity)");
+            it.Y = y;
+
+            float z = reader.ReadSingle();
+            if (float.IsNaN(z) || float.IsInfinity(z))
+                throw new InvalidOperationException("Z coordinate is invalid (NaN or Infinity)");
+            it.Z = z;
+
+            it.StackCount = reader.ReadByte();
+            it.Open = reader.ReadByte();
+            it.Placement = 0; // на проводе не идёт (MVP)
+            return it;
+        }
     }
 }

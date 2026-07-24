@@ -110,6 +110,23 @@ namespace ServerTests.Shared.Messages.Core
         }
 
         [Fact]
+        public void EntitySnapshot_WornUniformDefId_RoundTrips()
+        {
+            var original = new EntitySnapshot { NetId = 5, Speed = 0.1f, WornUniformDefId = 4242 };
+
+            var back = new EntitySnapshot();
+            back.Deserialize(original.Serialize());
+            Assert.Equal((ushort)4242, back.WornUniformDefId);
+
+            using var ms = new MemoryStream();
+            using (var w = new BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+                original.WriteTo(w);
+            ms.Position = 0;
+            using var r = new BinaryReader(ms);
+            Assert.Equal((ushort)4242, EntitySnapshot.ReadFrom(r).WornUniformDefId);
+        }
+
+        [Fact]
         public void Deserialize_NullData_ThrowsArgumentNullException()
         {
             var snapshot = new EntitySnapshot();
@@ -194,7 +211,8 @@ namespace ServerTests.Shared.Messages.Core
             writer.Write(state);
             writer.Write(reason);
             writer.Write(speed);
-            writer.Write(vz); // 27 байт: иначе length-check (27) сработает раньше NaN-check
+            writer.Write(vz);
+            writer.Write((ushort)0); // 29 байт: иначе length-check (29) сработает раньше NaN-check
 
             return ms.ToArray();
         }

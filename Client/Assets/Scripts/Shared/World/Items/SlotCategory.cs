@@ -17,6 +17,8 @@ namespace Shared.World.Items
         Boot,
         Jumpsuit,
         Suit,
-        Uniform
+        Uniform,
+        None,
+        Inherit
     }
 }

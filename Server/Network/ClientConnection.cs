@@ -40,7 +40,7 @@ namespace Server.Network
 
         // Авторитетная скорость игрока (тайлы/тик); эффективная Speed.CurrentValue едет в EntitySnapshot.Speed →
         // предиктор берёт её как baseStep (клиент НЕ реконструирует и НЕ мутирует скорость локально).
-        public AdvancedValue Speed = new AdvancedValue(MovementLogic.StepPerTick);
+        public AdvancedValue Speed = new AdvancedValue(MovementLogic.StepPerTick, minValue: 0.01f);
 
         // Блок-мир (B2): кинематика игрока в осях Unity (Y — высота, VY, Grounded); legacy-поля X/Y/Z выше
         // зеркалятся из неё каждый тик (X=X, Y=Mover.Z план, Z=floor(Mover.Y)).
@@ -104,6 +104,17 @@ namespace Server.Network
         public readonly ConcurrentQueue<DropItem> DropQueue = new();
         public readonly ConcurrentQueue<SwapHandRequest> SwapQueue = new();
         public readonly ConcurrentQueue<MoveSlotRequest> MoveSlotQueue = new();
+
+        public readonly HashSet<int> OpenContainers = new();
+        public readonly ConcurrentQueue<OpenContainer> OpenContainerQueue = new();
+        public readonly ConcurrentQueue<CloseContainer> CloseContainerQueue = new();
+        public readonly ConcurrentQueue<PutInContainer> PutInContainerQueue = new();
+        public readonly ConcurrentQueue<TakeFromContainer> TakeFromContainerQueue = new();
+
+        public int PulledNetId;
+        public readonly ConcurrentQueue<PullItem> PullQueue = new();
+
+        public int ContainedInNetId;
 
         // Стриминг карты (2.3a). SentChunks — ключи уже отправленных клиенту чанков (упаковка = GridMap-ключ).
         // ChunkLastInRangeTick — последний серверный тик, когда чанк был в радиусе (таймер выгрузки: долго вне

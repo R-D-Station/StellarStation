@@ -34,6 +34,12 @@ namespace Client.Net
         /// <summary>Полный слепок инвентаря владельца (server→client, OWNER-ONLY, 4.5).</summary>
         event Action<InventorySync> OnInventorySync;
 
+        event Action<ContainerSync> OnContainerSync;
+
+        event Action<PullSync> OnPullSync;
+
+        event Action<ContainSync> OnContainSync;
+
         /// <summary>Блочный стрим (фаза C): секция / секция ушла / пакет дельт (server→client).</summary>
         event Action<BlockChunkData> OnBlockChunkData;
         event Action<BlockSectionGone> OnBlockSectionGone;

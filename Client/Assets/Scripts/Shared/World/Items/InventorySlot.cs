@@ -3,7 +3,7 @@ namespace Shared.World.Items
     /// <summary>Раскладка слотов по категориям (Фаза 1, фикс-таблица); известна обеим сторонам, по проводу не шлётся.</summary>
     public static class InventorySlot
     {
-        public const int CategoryCount = 14;
+        public const int CategoryCount = 15;
         public const byte HandCount = 2;
 
         /// <summary>Кол-во слотов категории (0 — категория выключена/резерв, напр. <see cref="SlotCategory.Uniform"/>).</summary>
@@ -23,6 +23,7 @@ namespace Shared.World.Items
             SlotCategory.Boot => 2,
             SlotCategory.Jumpsuit => 1,
             SlotCategory.Suit => 1,
+            SlotCategory.Uniform => 1,
             _ => 0
         };
 
