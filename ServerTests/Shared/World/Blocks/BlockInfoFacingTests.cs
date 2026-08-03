@@ -47,7 +47,7 @@ namespace ServerTests.Shared.World.Blocks
         {
             var info = PlateAtZPlus();
             byte state = BlockState.WithFacing(0, 2);
-            var b = info.GetBoxes(BlockState.GetPart(state), BlockState.GetFacing(state), BlockState.GetOpen(state))[0];
+            var b = info.GetBoxes(0, BlockState.GetFacing(state), BlockState.GetOpen(state))[0];
             Assert.Equal((0, 1), (b.MinZ, b.MaxZ));
         }
     }

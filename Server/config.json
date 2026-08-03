@@ -8,4 +8,13 @@
   "EntityInterestZDepth": 6,
   "ZoneFadeDistance": 8,
   "ZoneFadeVertical": 1.5,
+  "DebugLiftEnabled": false,
+  "DebugLiftX": 111.0,
+  "DebugLiftZ": 39.0,
+  "DebugLiftFromY": 1.0,
+  "DebugLiftToY": 3.0,
+  "DebugLiftSpeed": 0.05,
+  "DebugLiftHalfW": 1.0,
+  "DebugLiftHeight": 0.25,
+  "DebugLiftPauseTicks": 60
 }

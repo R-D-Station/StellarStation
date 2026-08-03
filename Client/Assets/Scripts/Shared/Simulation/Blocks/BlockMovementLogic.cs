@@ -11,6 +11,10 @@ namespace Shared.Simulation.Blocks
         {
             float height = input.Crawl ? BlockMovementConfig.CrawlHeight : BlockMovementConfig.StandHeight;
 
+            // Контракт тика: боксы в dyn уже сдвинуты на текущий тик (позиция = f(tick)), их DeltaY — сдвиг ЭТОГО тика; carry довозит пассажира.
+            if (dyn != null && dyn.HasMovingBoxes)
+                CarryOnMovingBox(grid, shapes, ref s, height, dyn);
+
             MovementLogic.GetAxes(input.Dir, out int dx, out int dz);
             if (dx != 0 || dz != 0)
             {
@@ -62,7 +66,7 @@ namespace Shared.Simulation.Blocks
                 for (int bz = FloorToInt(minZ); bz <= bz1; bz++)
                     for (int by = FloorToInt(y); by <= by1; by++)
                     {
-                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz));
+                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz), grid, bx, by, bz);
                         for (int i = 0; i < boxes.Length; i++)
                         {
                             ref readonly var b = ref boxes[i];
@@ -73,6 +77,47 @@ namespace Shared.Simulation.Blocks
                         }
                     }
             return false;
+        }
+
+        private static void CarryOnMovingBox(IBlockSampler grid, IBlockShapes shapes, ref BlockMoverState s, float height, IDynamicObstacles dyn)
+        {
+            float minX = s.X - BlockMovementConfig.HalfWidth, maxX = s.X + BlockMovementConfig.HalfWidth;
+            float minZ = s.Z - BlockMovementConfig.HalfWidth, maxZ = s.Z + BlockMovementConfig.HalfWidth;
+
+            bool found = false;
+            float bestTop = float.MinValue;
+            float bestDelta = 0f;
+            for (int i = 0; i < dyn.Count; i++)
+            {
+                float delta = dyn.GetDeltaY(i);
+                if (delta == 0f)
+                    continue;
+                dyn.Get(i, out float dminX, out _, out float dminZ, out float dmaxX, out float dmaxY, out float dmaxZ);
+                if (minX < dmaxX && maxX > dminX &&
+                    minZ < dmaxZ && maxZ > dminZ &&
+                    Math.Abs(dmaxY - delta - s.Y) <= BlockMovementConfig.Epsilon &&
+                    dmaxY > bestTop)
+                {
+                    found = true;
+                    bestTop = dmaxY;
+                    bestDelta = delta;
+                }
+            }
+
+            if (!found)
+                return;
+
+            float carry = bestDelta;
+            if (carry > 0f)
+            {
+                float head = s.Y + height;
+                float ceil = LowestBottomAbove(grid, shapes, s.X, s.Z, from: head, to: head + carry, dyn);
+                if (ceil < head + carry)
+                    carry = Math.Max(0f, ceil - head);
+            }
+
+            s.Y += carry;
+            s.VY = 0f;
         }
 
         // Ход по одной оси плана; у препятствия — попытка автошага (только с опоры).
@@ -110,6 +155,16 @@ namespace Shared.Simulation.Blocks
                 float floor = HighestTopBelow(grid, shapes, s.X, s.Z, from: s.Y, to: target, dyn);
                 if (floor >= target)
                 {
+                    // Приземление может ПОДНЯТЬ игрока (пол уехал вверх за тик) — тогда клампим потолком,
+                    // как CarryOnMovingBox, иначе кабина вбивает голову в блоки над ней.
+                    if (floor > s.Y)
+                    {
+                        float head = s.Y + height;
+                        float push = floor - s.Y;
+                        float ceil = LowestBottomAbove(grid, shapes, s.X, s.Z, head, head + push, dyn);
+                        if (ceil < head + push)
+                            floor = s.Y + Math.Max(0f, ceil - head);
+                    }
                     s.Y = floor;
                     s.VY = 0f;
                     s.Grounded = true;
@@ -148,7 +203,7 @@ namespace Shared.Simulation.Blocks
                 for (int bz = FloorToInt(minZ); bz <= bz1; bz++)
                     for (int by = FloorToInt(y); by <= by1; by++)
                     {
-                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz));
+                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz), grid, bx, by, bz);
                         for (int i = 0; i < boxes.Length; i++)
                         {
                             ref readonly var b = ref boxes[i];
@@ -185,7 +240,7 @@ namespace Shared.Simulation.Blocks
                 for (int bz = FloorToInt(minZ); bz <= bz1; bz++)
                     for (int by = FloorToInt(y); by <= by1; by++)
                     {
-                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz));
+                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz), grid, bx, by, bz);
                         for (int i = 0; i < boxes.Length; i++)
                         {
                             ref readonly var b = ref boxes[i];
@@ -230,7 +285,7 @@ namespace Shared.Simulation.Blocks
                 for (int bz = FloorToInt(minZ); bz <= bz1; bz++)
                     for (int by = FloorToInt(to) - 1; by <= by1; by++)
                     {
-                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz));
+                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz), grid, bx, by, bz);
                         for (int i = 0; i < boxes.Length; i++)
                         {
                             ref readonly var b = ref boxes[i];
@@ -251,8 +306,11 @@ namespace Shared.Simulation.Blocks
                     if (minX < dmaxX && maxX > dminX &&
                         minZ < dmaxZ && maxZ > dminZ)
                     {
+                        // top уже сдвинут за ЭТОТ тик, а from — положение игрока ДО тика: сравнивать их
+                        // напрямую нельзя, иначе едущая вверх кабина обгоняет ноги и не ловит их больше никогда.
                         float top = dmaxY;
-                        if (top <= from + BlockMovementConfig.Epsilon && top >= to && top > best)
+                        float delta = dyn.GetDeltaY(i);
+                        if (top - delta <= from + BlockMovementConfig.Epsilon && top >= to && top > best)
                             best = top;
                     }
                 }
@@ -271,7 +329,7 @@ namespace Shared.Simulation.Blocks
                 for (int bz = FloorToInt(minZ); bz <= bz1; bz++)
                     for (int by = FloorToInt(from); by <= by1; by++)
                     {
-                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz));
+                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz), grid, bx, by, bz);
                         for (int i = 0; i < boxes.Length; i++)
                         {
                             ref readonly var b = ref boxes[i];
@@ -311,7 +369,7 @@ namespace Shared.Simulation.Blocks
                 for (int bz = FloorToInt(minZ); bz <= bz1; bz++)
                     for (int by = FloorToInt(y) - 1; by <= by1; by++)
                     {
-                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz));
+                        var boxes = shapes.GetBoxes(grid.GetBlock(bx, by, bz), grid.GetState(bx, by, bz), grid, bx, by, bz);
                         for (int i = 0; i < boxes.Length; i++)
                         {
                             ref readonly var b = ref boxes[i];

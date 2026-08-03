@@ -4,11 +4,11 @@ using System.Linq;
 
 namespace Shared.World.Blocks
 {
-    /// <summary>Бинарная сериализация BlockGrid — формат .smap v13, append-only поверх v10/v11/v12 (bake→zone→seeds→item-спавны), детерминированный порядок → побайтовая стабильность.</summary>
+    /// <summary>Бинарная сериализация BlockGrid — формат .smap v14, append-only поверх v10/v11/v12/v13 (bake→zone→seeds→item-спавны), детерминированный порядок → побайтовая стабильность.</summary>
     public static class BlockMapSerializer
     {
         public const int Magic = MapSerializer.Magic; // 'SMAP' — общее семейство форматов карт
-        public const ushort Version = 13;
+        public const ushort Version = 15;
         public const ushort MinVersion = 10;
 
         private const byte EncodingPalette = 0;
@@ -97,6 +97,7 @@ namespace Shared.World.Blocks
             }
 
             var zone = s.Zone;
+            w.Write(s.DefaultZone);
             w.Write((ushort)zone.Count);
             foreach (var kv in zone.OrderBy(p => p.Key))
             {
@@ -113,6 +114,14 @@ namespace Shared.World.Blocks
                 w.Write(kv.Value.Rank);
                 w.Write(kv.Value.Floor);
             }
+
+            var structs = s.Struct;
+            w.Write((ushort)structs.Count);
+            foreach (var kv in structs.OrderBy(p => p.Key))
+            {
+                w.Write((ushort)kv.Key);
+                w.Write(kv.Value);
+            }
         }
 
         public static BlockGrid Read(Stream stream)
@@ -128,6 +137,7 @@ namespace Shared.World.Blocks
                 throw new InvalidDataException($"Тайловый формат v{version}: конвертация в блочный мир не поддерживается.");
             if (version > Version)
                 throw new InvalidDataException($"Unsupported block map version {version} (expected {MinVersion}..{Version}).");
+            _lastLoadedVersion = version;
 
             byte gridCount = r.ReadByte();
             if (gridCount != 1)
@@ -135,6 +145,8 @@ namespace Shared.World.Blocks
             r.ReadByte(); // gridId — до фазы E всегда 0, значение не используется
 
             var grid = new BlockGrid();
+            _migrateMoved = 0;
+            _migrateSkipped = 0;
             int sectionCount = r.ReadInt32();
             for (int i = 0; i < sectionCount; i++)
             {
@@ -216,9 +228,12 @@ namespace Shared.World.Blocks
 
             Dictionary<int, ushort> zone = null;
             Dictionary<int, FloorSeed> seeds = null;
+            ushort defaultZone = 0;
             if (version >= 12)
             {
                 zone = new Dictionary<int, ushort>();
+                if (version >= 14)
+                    defaultZone = r.ReadUInt16();
                 ushort zoneCount = r.ReadUInt16();
                 for (int i = 0; i < zoneCount; i++)
                 {
@@ -238,7 +253,90 @@ namespace Shared.World.Blocks
                 }
             }
 
-            return ChunkSection.FromData(palette, indices, raw, states, bake, zone, seeds);
+            Dictionary<int, ushort> structs;
+            if (version >= 15)
+            {
+                structs = new Dictionary<int, ushort>();
+                ushort structCount = r.ReadUInt16();
+                for (int i = 0; i < structCount; i++)
+                {
+                    ushort li = r.ReadUInt16();
+                    structs[li] = r.ReadUInt16();
+                }
+            }
+            else
+            {
+                structs = MigratePartBits(states, palette, indices, raw);
+            }
+
+            return ChunkSection.FromData(palette, indices, raw, states, bake, zone, seeds, defaultZone, structs);
+        }
+
+        private static int _migrateMoved;
+        private static int _migrateSkipped;
+
+        /// <summary>Счётчики последней миграции v&lt;15 (перенесено частей / пропущено — неизвестный либо одиночный тип).</summary>
+        public static (int Moved, int Skipped) LastMigrationStats => (_migrateMoved, _migrateSkipped);
+
+        private static ushort _lastLoadedVersion;
+
+        /// <summary>Версия формата ПОСЛЕДНЕЙ прочитанной карты (0 — ещё ничего не читали); печатает потребитель.</summary>
+        public static ushort LastLoadedVersion => _lastLoadedVersion;
+
+        // Миграция v<15: номер части жил в state-битах 5-6 (СТАРАЯ раскладка — константы локальны намеренно,
+        // BlockState их больше не знает). Часть → мировое смещение до якоря → запись слоя; part-биты обнуляются.
+        private static Dictionary<int, ushort> MigratePartBits(Dictionary<int, byte> states, BlockPalette? palette, byte[]? indices, ushort[]? raw)
+        {
+            const int legacyPartShift = 5;
+            const byte legacyPartMask = 0b11 << legacyPartShift;
+
+            var result = new Dictionary<int, ushort>();
+            var lis = new List<int>(states.Keys);
+            lis.Sort();
+            foreach (int li in lis)
+            {
+                byte st = states[li];
+                int part = (st & legacyPartMask) >> legacyPartShift;
+                if (part == 0)
+                    continue;
+
+                // Сначала валидация, потом мутация: иначе у неизвестного/одиночного типа биты стёрты, а записи нет.
+                ushort type = TypeAt(li, palette, indices, raw);
+                var info = BlockCatalog.Get(type);
+                if (info.PartCount <= 1)
+                {
+                    _migrateSkipped++;
+                    continue;
+                }
+
+                int facing = (st >> 3) & 0b11;
+                MultiBlock.PartWorldOffset(part, info.SizeX, info.SizeZ, facing, out int dx, out int dy, out int dz);
+                if (!MultiBlock.OffsetInRange(dx, dy, dz))
+                {
+                    _migrateSkipped++;
+                    continue;
+                }
+
+                states[li] = (byte)(st & ~legacyPartMask);
+                result[li] = (ushort)MultiBlock.PackOffset(dx, dy, dz);
+                _migrateMoved++;
+            }
+
+            foreach (int li in lis)
+                if (states[li] == 0)
+                    states.Remove(li);
+            return result;
+        }
+
+        private static ushort TypeAt(int localIndex, BlockPalette? palette, byte[]? indices, ushort[]? raw)
+        {
+            if (raw != null)
+                return raw[localIndex];
+            if (palette == null || indices == null)
+                return 0;
+            var types = palette.Types;
+            int slot = indices[localIndex];
+            return slot >= 0 && slot < types.Count ? types[slot] : (ushort)0;
         }
 
         public static void SaveToFile(string path, BlockGrid grid)

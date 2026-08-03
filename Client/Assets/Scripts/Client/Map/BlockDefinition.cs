@@ -34,6 +34,9 @@ namespace Client.Map
         public CollisionBox[] TriggerBoxes = System.Array.Empty<CollisionBox>();
         [Tooltip("Задержка автозакрытия (сек) после выхода игрока из триггера.")]
         public float DoorCloseDelay = 1f;
+        [Tooltip("Шлюз: не открывается сам при большом перепаде давления.")]
+        [SerializeField] private bool _isAirlock;
+        public bool IsAirlock => _isAirlock;
 
         [Tooltip("Число стадий (0 = не деконструируется). Рецепты/инструменты — будущий контент.")]
         public byte DeconstructStages = 0;
@@ -43,8 +46,17 @@ namespace Client.Map
         [Tooltip("Куда крепится (порядок = приоритет). Wall → блок поворачивается ОТ стены лицом в комнату.")]
         public AttachSurface[] AttachTo = System.Array.Empty<AttachSurface>();
 
-        [Tooltip("Габарит объекта в блоках (X — ширина, Y — высота, Z — глубина). Оси 1..2, частей ≤ 4 (ёмкость part-бит). Дверь = 2×2×1.")]
+        [Tooltip("Габарит объекта в блоках (X — ширина, Y — высота, Z — глубина). Оси 1..16. Дверь = 2×2×1.")]
         public Vector3Int Size = Vector3Int.one;
+
+        public bool IsLiftPart = false;
+        public LiftPartKind LiftKind = LiftPartKind.Rail;
+        public Vector3Int LiftModule = new Vector3Int(5, 5, 5);
+        public byte LiftFloorStep = 5;
+        public float LiftSpeed = 3f;
+        public float LiftDwellSec = 1f;
+        public float LiftDoorLeadSec = 0.5f;
+        public CollisionBox[] LiftCabinBoxes = System.Array.Empty<CollisionBox>();
 
         public BlockConnectionData Connection = new BlockConnectionData();
 

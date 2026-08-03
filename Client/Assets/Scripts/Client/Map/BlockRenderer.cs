@@ -7,7 +7,7 @@ using Client.UI.Labels;
 namespace Client.Map
 {
     /// <summary>Рендер блок-мира: пуленый визуал на блок (префаб/куб) посекционно + cut-away поверх слоя.</summary>
-    public sealed class BlockRenderer : MonoBehaviour
+    public sealed class BlockRenderer : MonoBehaviour, Client.Lifts.ICellAlphaSource
     {
         /// <summary>Радиус кольца скрытия потолка вокруг игрока (блоков, chebyshev по плану).</summary>
         private const int CutRingRadius = 10;
@@ -46,6 +46,15 @@ namespace Client.Map
         private float _lastEyeX = float.MinValue, _lastEyeY, _lastEyeZ;
         private bool _cutDirty;
 
+        // Снимок ПОСЛЕДНЕГО ПОЛНОГО прохода cut-away — по нему считается альфа движущихся объектов (кабина лифта),
+        // у которых нет своей BlockView в _sections. Валидность взводится в КОНЦЕ полного прохода: ранний выход
+        // по порогу движения означает «снимок ещё актуален» (_lastEye* обновляются только при полном проходе),
+        // а НЕ «протух» — иначе стоящий игрок, глядящий на приезжающий лифт, видел бы кабину сквозь перекрытие.
+        private bool _cutValid;
+        private bool _snapZonal, _snapRings;
+        private ushort _snapZone;
+        private float _snapEyeY, _snapRefY, _snapPx, _snapPz;
+
         // Карта выреза (пасс 1): минимальный Y скрытого блока в каждой колонне окна вокруг игрока.
         // Пасс 2 обрезает по ней стены (8-смежность — ловит углы). MaxValue = в колонне выреза нет.
         private const int CutWindow = CutRingRadius * 2 + 1;
@@ -67,16 +76,22 @@ namespace Client.Map
 
         private const int RoofScanUp = 12;
 
+        private ushort ZoneAtCell(int x, int y, int z)
+        {
+            ushort z0 = _grid.GetZone(x, y, z);
+            return z0 == Shared.World.Blocks.ZoneFlood.ExteriorZoneId ? (ushort)0 : z0;
+        }
+
         private bool HasZonedDiagBelow(int x, int y, int z)
         {
             for (int dy = 1; dy <= 2; dy++)
             {
                 int yy = y - dy;
-                if (_grid.GetZone(x, yy, z) != 0
-                    || _grid.GetZone(x + 1, yy, z) != 0 || _grid.GetZone(x - 1, yy, z) != 0
-                    || _grid.GetZone(x, yy, z + 1) != 0 || _grid.GetZone(x, yy, z - 1) != 0
-                    || _grid.GetZone(x + 1, yy, z + 1) != 0 || _grid.GetZone(x + 1, yy, z - 1) != 0
-                    || _grid.GetZone(x - 1, yy, z + 1) != 0 || _grid.GetZone(x - 1, yy, z - 1) != 0)
+                if (ZoneAtCell(x, yy, z) != 0
+                    || ZoneAtCell(x + 1, yy, z) != 0 || ZoneAtCell(x - 1, yy, z) != 0
+                    || ZoneAtCell(x, yy, z + 1) != 0 || ZoneAtCell(x, yy, z - 1) != 0
+                    || ZoneAtCell(x + 1, yy, z + 1) != 0 || ZoneAtCell(x + 1, yy, z - 1) != 0
+                    || ZoneAtCell(x - 1, yy, z + 1) != 0 || ZoneAtCell(x - 1, yy, z - 1) != 0)
                     return true;
             }
             return false;
@@ -92,7 +107,7 @@ namespace Client.Map
 
         private bool HasSolidTop(int x, int y, int z)
         {
-            var boxes = _shapes.GetBoxes(_grid.GetBlock(x, y, z), _grid.GetState(x, y, z));
+            var boxes = _shapes.GetBoxes(_grid.GetBlock(x, y, z), _grid.GetState(x, y, z), _grid, x, y, z);
             for (int i = 0; i < boxes.Length; i++)
                 if (boxes[i].MaxYf >= 0.999f)
                     return true;
@@ -200,10 +215,10 @@ namespace Client.Map
         /// <summary>Дельта «изменился только Open» у двери: тоггл аниматора на живом инстансе без пересборки секции.</summary>
         public void ApplyDoorState(int x, int y, int z, ushort type, byte state)
         {
-            var info = BlockCatalog.Get(type);
-            Shared.World.Blocks.MultiBlock.AnchorOf(x, y, z, Shared.World.Blocks.BlockState.GetPart(state),
-                info.SizeX, info.SizeZ, Shared.World.Blocks.BlockState.GetFacing(state),
-                out int ax, out int ay, out int az);
+            if (!_grid.AnchorOf(x, y, z, out int ax, out int ay, out int az))
+            {
+                ax = x; ay = y; az = z;
+            }
 
             BlockGrid.UnpackKey(BlockGrid.KeyOfBlock(ax, ay, az), out int cx, out int cy, out int cz);
             if (!_sections.TryGetValue(BlockGrid.Key(cx, cy, cz), out var visuals))
@@ -255,7 +270,7 @@ namespace Client.Map
                 if (def != null && def.Size.x * def.Size.y * def.Size.z > 1)
                 {
                     byte st = _grid.GetState(x, y, z);
-                    if (Shared.World.Blocks.BlockState.GetPart(st) != 0)
+                    if (_grid.TryGetStructOffset(x, y, z, out _, out _, out _))
                         return;
                     int facing = Shared.World.Blocks.BlockState.GetFacing(st);
                     pos = MultiBlockVisual.FootprintBottomCenter(x, y, z, def.Size.x, def.Size.z, facing)
@@ -277,7 +292,7 @@ namespace Client.Map
                 view.Bind(x, y, z, baseY, prefab); // данные + кэш рендереров
                 view.BottomOpen = !HasSolidTop(x, y - 1, z);
                 view.Facing = Shared.World.Blocks.BlockState.GetFacing(_grid.GetState(x, y, z));
-                view.DebugBoxes = _shapes.GetBoxes(type, _grid.GetState(x, y, z));
+                view.DebugBoxes = _shapes.GetBoxes(type, _grid.GetState(x, y, z), _grid, x, y, z);
                 int sizeY = def != null ? def.Size.y : 1;
                 view.TopCellY = y + sizeY;
                 view.TopCovered = def != null && def.TopMap != null
@@ -291,7 +306,7 @@ namespace Client.Map
                 return;
             }
 
-            var boxes = _shapes.GetBoxes(type, _grid.GetState(x, y, z));
+            var boxes = _shapes.GetBoxes(type, _grid.GetState(x, y, z), _grid, x, y, z);
             float t = 0.35f + 0.5f * ((type * 0.6180339887f) % 1f); // оттенок по типу
             for (int i = 0; i < boxes.Length; i++)
             {
@@ -337,6 +352,8 @@ namespace Client.Map
                 playerZone = _grid.GetZone(fx, fy, fz);
                 if (playerZone == 0)
                     playerZone = _grid.GetZone(fx, fy + 1, fz);
+                if (playerZone == 0)
+                    playerZone = InheritNeighborZone(fx, fy, fz);
                 if (playerZone != 0)
                 {
                     _lastPlayerZone = playerZone;
@@ -348,6 +365,18 @@ namespace Client.Map
                 }
             }
             bool zonal = playerZone != 0;
+
+            if (playerZone == Shared.World.Blocks.ZoneFlood.ExteriorZoneId)
+            {
+                _cutValid = false;
+                foreach (var kv in _sections)
+                {
+                    var vis = kv.Value;
+                    for (int i = 0; i < vis.Count; i++)
+                        vis[i].SetAlpha(1f, 0f);
+                }
+                return;
+            }
 
             // Пасс 1: правило базы стека → карта выреза (с какого Y колонна «вскрыта»).
             _cutOriginX = Mathf.FloorToInt(px) - CutRingRadius;
@@ -394,6 +423,57 @@ namespace Client.Map
                     v.SetAlpha(a, tu);
                 }
             }
+
+            _snapZonal = zonal;
+            _snapZone = playerZone;
+            _snapEyeY = eyeY;
+            _snapRefY = refY;
+            _snapPx = px;
+            _snapPz = pz;
+            _snapRings = rings;
+            _cutValid = true;
+        }
+
+        /// <summary>Альфа cut-away для движущегося объекта без своей вьюхи (кабина лифта): MAX по клеткам его
+        /// футпринта, от пола до визуальной высоты. Решение целиком в чистом <c>LiftVisibilityGate</c> —
+        /// здесь только опрос сетки и подстановка снимка прохода.</summary>
+        public float MovingObjectAlpha(float anchorX, float anchorZ, int planW, int planD,
+            float y, float visualHeight, int maxRows)
+        {
+            Client.Lifts.LiftVisibilityGate.ColumnRange(anchorX, anchorZ, planW, planD,
+                out int x0, out int x1, out int z0, out int z1);
+            Client.Lifts.LiftVisibilityGate.RowRange(y, visualHeight, maxRows, out int rowLo, out int rowHi);
+            return Client.Lifts.LiftVisibilityGate.Combine(_grid, this, _cutValid, x0, x1, z0, z1, rowLo, rowHi);
+        }
+
+        /// <summary>Контекст для render-компонентов объекта, которого НЕТ в секциях (кабина лифта):
+        /// те же сервисы, что получают вьюхи сетки, — второго источника у них быть не должно.</summary>
+        public BlockContext ContextFor(int x, int y, int z, ushort type)
+            => new BlockContext(x, y, z, type, _grid, _shapes, _labels);
+
+        float Client.Lifts.ICellAlphaSource.AlphaAt(int x, int y, int z)
+            => CutAlphaAt(x, y, z, null, int.MinValue,
+                _snapZonal, _snapZone, _snapEyeY, _snapRefY, _snapPx, _snapPz, _snapRings);
+
+        private ushort InheritNeighborZone(int x, int y, int z)
+        {
+            ushort xp = _grid.GetZone(x + 1, y, z);
+            ushort xn = _grid.GetZone(x - 1, y, z);
+            ushort zp = _grid.GetZone(x, y, z + 1);
+            ushort zn = _grid.GetZone(x, y, z - 1);
+            ushort yp = _grid.GetZone(x, y + 1, z);
+            ushort yn = _grid.GetZone(x, y - 1, z);
+            if (_lastPlayerZone != 0 &&
+                (xp == _lastPlayerZone || xn == _lastPlayerZone || zp == _lastPlayerZone
+                 || zn == _lastPlayerZone || yp == _lastPlayerZone || yn == _lastPlayerZone))
+                return _lastPlayerZone;
+            if (xp != 0) return xp;
+            if (xn != 0) return xn;
+            if (zp != 0) return zp;
+            if (zn != 0) return zn;
+            if (yp != 0) return yp;
+            if (yn != 0) return yn;
+            return 0;
         }
 
         // Единая ячеечная альфа cut-away — и для вьюх (пасс 2), и для CutAlphaAt(TopCellY) при раскрытии перекрытого верха.
@@ -402,12 +482,12 @@ namespace Client.Map
         {
             if (zonal)
             {
-                ushort below = _grid.GetZone(x, y - 1, z);
-                ushort above = _grid.GetZone(x, y + 1, z);
-                ushort xp = _grid.GetZone(x + 1, y, z);
-                ushort xn = _grid.GetZone(x - 1, y, z);
-                ushort zp = _grid.GetZone(x, y, z + 1);
-                ushort zn = _grid.GetZone(x, y, z - 1);
+                ushort below = ZoneAtCell(x, y - 1, z);
+                ushort above = ZoneAtCell(x, y + 1, z);
+                ushort xp = ZoneAtCell(x + 1, y, z);
+                ushort xn = ZoneAtCell(x - 1, y, z);
+                ushort zp = ZoneAtCell(x, y, z + 1);
+                ushort zn = ZoneAtCell(x, y, z - 1);
 
                 // Ячейка смежна воздуху игрока P: полная видимость, кроме потолка своей же зоны — зонная P-ячейка
                 // СНИЗУ (воздух ИЛИ проходимая дверь/анкер) значит «надо мной перекрытие»: зонная волна стыков, не жёсткий 0.
@@ -473,6 +553,9 @@ namespace Client.Map
             bool bottomOpen = bottomOpenKnown ?? !HasSolidTop(x, y - 1, z);
             int sb = stackBase != int.MinValue ? stackBase : FindStackBase(x, y, z);
             bool cut = sb >= refY + 2 || bottomOpen || NeighborCutAtOrBelow(x, z, y);
+            if (!cut && HasZonedDiagBelow(x, y, z)
+                && BlockCatalog.Get(_grid.GetBlock(x, y, z)).Category != BlockCategory.Wall)
+                cut = true;
             return !cut ? 1f : (rings ? _reveal.Alpha(x, y, z) : 0f);
         }
 
@@ -489,12 +572,12 @@ namespace Client.Map
                     int x = _cutOriginX + lx, z = _cutOriginZ + lz;
                     for (int y = y0; y <= y1; y++)
                     {
-                        if (_grid.GetZone(x, y, z) != p)
+                        if (ZoneAtCell(x, y, z) != p)
                             continue;
                         for (int d = 0; d < 6; d++)
                         {
                             int nx = x + JDirX[d], ny = y + JDirY[d], nz = z + JDirZ[d];
-                            ushort nzone = _grid.GetZone(nx, ny, nz);
+                            ushort nzone = ZoneAtCell(nx, ny, nz);
                             if (nzone != 0)
                             {
                                 if (nzone != p)
@@ -505,7 +588,7 @@ namespace Client.Map
                             if (gate == 0 || !BlockCatalog.Get(gate).Openable)
                                 continue;
                             int bx = x + JDirX[d] * 2, by = y + JDirY[d] * 2, bz = z + JDirZ[d] * 2;
-                            ushort q = _grid.GetZone(bx, by, bz);
+                            ushort q = ZoneAtCell(bx, by, bz);
                             if (q != 0 && q != p)
                                 _zoneReveal.Seed(bx, bz, by, q);
                         }
@@ -522,7 +605,7 @@ namespace Client.Map
                 return false;
             if (v.BaseY >= refY + 2 || v.BottomOpen)
                 return true;
-            return p != 0 && _grid.GetZone(v.X, v.Y - 1, v.Z) == p;
+            return p != 0 && ZoneAtCell(v.X, v.Y - 1, v.Z) == p;
         }
 
         // Есть ли в 8 соседних колоннах вырез, начавшийся не выше y.

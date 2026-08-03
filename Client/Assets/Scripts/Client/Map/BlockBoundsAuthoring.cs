@@ -1,4 +1,5 @@
 using UnityEngine;
+using Shared.World.Blocks;
 
 namespace Client.Map
 {
@@ -6,7 +7,7 @@ namespace Client.Map
     public sealed class BlockBoundsAuthoring : MonoBehaviour
     {
         /// <summary>Какой набор боксов правят хендлы в сцене.</summary>
-        public enum BoxSet { Collision, Open, Trigger }
+        public enum BoxSet { Collision, Open, Trigger, Cabin }
 
         [Tooltip("Редактируемый тип блока.")]
         public BlockDefinition Target;
@@ -16,6 +17,7 @@ namespace Client.Map
         private static readonly Color Closed = new Color(0.2f, 1f, 0.4f, 0.9f);
         private static readonly Color Opened = new Color(0.3f, 0.8f, 1f, 0.8f);
         private static readonly Color Trigger = new Color(1f, 0.8f, 0.2f, 0.8f);
+        private static readonly Color Cabin = new Color(0.9f, 0.4f, 1f, 0.85f);
 
         /// <summary>Сдвиг object-space [0..Size] → локальные координаты префаба: пивот = центр низа футпринта.</summary>
         public static Vector3 PivotOffset(Vector3Int size) => new Vector3(size.x * 0.5f, 0f, size.z * 0.5f);
@@ -29,6 +31,7 @@ namespace Client.Map
         {
             BoxSet.Open => Target.CollisionBoxesOpen,
             BoxSet.Trigger => Target.TriggerBoxes,
+            BoxSet.Cabin => Target.LiftCabinBoxes,
             _ => Target.CollisionBoxes
         };
 
@@ -37,31 +40,45 @@ namespace Client.Map
         {
             BoxSet.Open => Opened,
             BoxSet.Trigger => Trigger,
+            BoxSet.Cabin => Cabin,
             _ => Closed
         };
+
+        public static bool HasCabinSet(BlockDefinition def)
+            => def != null && def.IsLiftPart && def.LiftKind == LiftPartKind.Cabin;
+
+        public static Vector3Int ObjectExtent(BlockDefinition def, BoxSet set)
+        {
+            if (def == null)
+                return Vector3Int.one;
+            return set == BoxSet.Cabin && HasCabinSet(def) ? def.LiftModule : def.Size;
+        }
 
         private void OnDrawGizmos()
         {
             Gizmos.matrix = transform.localToWorldMatrix;
-            var size = Target != null ? Target.Size : Vector3Int.one;
+            var extent = ObjectExtent(Target, Editing);
 
             // Якорная часть (part 0) — блок [0..1]³, ориентир origin/поворота.
             Gizmos.color = new Color(1f, 1f, 1f, 0.25f);
-            Gizmos.DrawWireCube(ObjectToLocal(new Vector3(0.5f, 0.5f, 0.5f), size), Vector3.one);
+            Gizmos.DrawWireCube(ObjectToLocal(new Vector3(0.5f, 0.5f, 0.5f), extent), Vector3.one);
 
-            if (size.x * size.y * size.z > 1)
+            if (extent.x * extent.y * extent.z > 1)
             {
                 Gizmos.color = new Color(0.4f, 0.7f, 1f, 0.35f);
-                Gizmos.DrawWireCube(new Vector3(0f, size.y * 0.5f, 0f), new Vector3(size.x, size.y, size.z));
+                Gizmos.DrawWireCube(new Vector3(0f, extent.y * 0.5f, 0f), new Vector3(extent.x, extent.y, extent.z));
             }
 
             if (Target == null)
                 return;
 
-            // Все три набора цветом (правит хендлами только выбранный — в редакторе).
+            // Все наборы цветом (правит хендлами только выбранный — в редакторе).
+            var size = Target.Size;
             DrawSet(Target.CollisionBoxes, Closed, size);
             DrawSet(Target.CollisionBoxesOpen, Opened, size);
             DrawSet(Target.TriggerBoxes, Trigger, size);
+            if (HasCabinSet(Target))
+                DrawSet(Target.LiftCabinBoxes, Cabin, Target.LiftModule);
         }
 
         private static void DrawSet(BlockDefinition.CollisionBox[] boxes, Color color, Vector3Int size)

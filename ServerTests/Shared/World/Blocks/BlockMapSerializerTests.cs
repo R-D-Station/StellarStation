@@ -112,15 +112,18 @@ namespace ServerTests.Shared.World.Blocks
         [Fact]
         public void RoundTrip_MultiBlockDoor2x1x2()
         {
-            // Дверь 2×1×2: 4 позиции одного типа, part-биты различают четверти, Open — общий (сервер зовёт для всех).
+            // Дверь 2×2: 4 позиции одного типа; принадлежность — слой смещений до якоря (v15), Open/facing — в state.
+            // Тип обязан быть МУЛЬТИ в каталоге: FromData отбрасывает записи слоя у одиночных типов (инвариант слоя).
             var g = new BlockGrid();
-            const ushort doorType = 50;
-            var parts = new (int x, int z, int part)[] { (10, 0, 0), (11, 0, 1), (10, 1, 2), (11, 1, 3) };
+            const ushort doorType = TestStructCatalog.Door2x2;
+            var parts = new (int dx, int dy)[] { (0, 0), (1, 0), (0, 1), (1, 1) };
 
             foreach (var p in parts)
             {
-                g.SetBlock(p.x, 5, p.z, doorType);
-                g.SetState(p.x, 5, p.z, BlockState.WithPart(BlockState.WithFacing(BlockState.Open, 1), p.part));
+                g.SetBlock(10 + p.dx, 5 + p.dy, 0, doorType);
+                g.SetState(10 + p.dx, 5 + p.dy, 0, BlockState.WithFacing(BlockState.Open, 1));
+                if (p.dx != 0 || p.dy != 0)
+                    g.SetStructOffset(10 + p.dx, 5 + p.dy, 0, p.dx, p.dy, 0);
             }
 
             using var ms = new MemoryStream();
@@ -130,11 +133,19 @@ namespace ServerTests.Shared.World.Blocks
 
             foreach (var p in parts)
             {
-                Assert.Equal(doorType, loaded.GetBlock(p.x, 5, p.z));
-                byte st = loaded.GetState(p.x, 5, p.z);
+                int x = 10 + p.dx, y = 5 + p.dy;
+                Assert.Equal(doorType, loaded.GetBlock(x, y, 0));
+                byte st = loaded.GetState(x, y, 0);
                 Assert.NotEqual(0, st & BlockState.Open);
                 Assert.Equal(1, BlockState.GetFacing(st));
-                Assert.Equal(p.part, BlockState.GetPart(st));
+
+                bool anchor = p.dx == 0 && p.dy == 0;
+                Assert.Equal(!anchor, loaded.TryGetStructOffset(x, y, 0, out int dx, out int dy, out _));
+                if (!anchor)
+                {
+                    Assert.Equal(p.dx, dx);
+                    Assert.Equal(p.dy, dy);
+                }
             }
         }
 

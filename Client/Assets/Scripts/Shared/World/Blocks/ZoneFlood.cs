@@ -6,13 +6,17 @@ namespace Shared.World.Blocks
     public interface IZoneClassifier
     {
         bool IsSolid(ushort type);
+
+        /// <summary>Солидность КОНКРЕТНОЙ клетки мульти-блока; дефолт игнорирует координаты (тестовые классификаторы — тип-уровень).</summary>
+        bool IsSolid(BlockGrid grid, ushort type, int x, int y, int z) => IsSolid(type);
+
         bool IsDoor(ushort type);
         bool IsFloorAnchor(ushort type);
         bool IsDivider(ushort type);
         bool IsMergeMarker(ushort type);
     }
 
-    /// <summary>Боевой классификатор поверх <see cref="BlockCatalog"/>: солид = коллизия и не открывается.</summary>
+    /// <summary>Боевой классификатор поверх <see cref="BlockCatalog"/>: солид = коллизия части и не открывается.</summary>
     public sealed class CatalogZoneClassifier : IZoneClassifier
     {
         public static readonly CatalogZoneClassifier Instance = new CatalogZoneClassifier();
@@ -21,6 +25,15 @@ namespace Shared.World.Blocks
         {
             var info = BlockCatalog.Get(type);
             return info.HasCollision && !info.Openable;
+        }
+
+        public bool IsSolid(BlockGrid grid, ushort type, int x, int y, int z)
+        {
+            var info = BlockCatalog.Get(type);
+            if (info.Openable) return false;
+            int part = MultiBlock.PartAt(grid, info.SizeX, info.SizeY, info.SizeZ,
+                                         BlockState.GetFacing(grid.GetState(x, y, z)), x, y, z);
+            return part >= 0 && info.PartHasCollision(part);
         }
 
         public bool IsDoor(ushort type) => BlockCatalog.Get(type).Openable;
@@ -61,17 +74,28 @@ namespace Shared.World.Blocks
         public readonly List<int> Floors = new();
     }
 
-    /// <summary>Итог <see cref="ZoneFlood.Recompute"/>: вычисленные зоны + стыки-двери + конфликты сидов.</summary>
+    /// <summary>Засеянная зона имеет открытый путь наружу (дыра в космос без двери) — диагностика авторинга.</summary>
+    public sealed class ZoneLeak
+    {
+        public ushort ZoneId;
+        public BlockCoord Cell;
+    }
+
+    /// <summary>Итог <see cref="ZoneFlood.Recompute"/>: вычисленные зоны + стыки-двери + конфликты сидов + утечки наружу.</summary>
     public sealed class ZoneFloodResult
     {
         public readonly List<ZoneRecord> Zones = new();
         public readonly List<ZoneJunction> Junctions = new();
         public readonly List<ZoneConflict> Conflicts = new();
+        public readonly List<ZoneLeak> Leaks = new();
     }
 
     /// <summary>Детерминированный полный пересчёт зон-этажей по проходимым регионам (двери-ворота через union-find).</summary>
     public static class ZoneFlood
     {
+        /// <summary>Зона «улицы»/космоса: регионы, касающиеся границы прогруза. Отличает «снаружи» от zone==0 («зоны нет»).</summary>
+        public const ushort ExteriorZoneId = 0xFFFF;
+
         private const byte KindWall = 0;
         private const byte KindPassable = 1;
         private const byte KindGate = 2;
@@ -93,6 +117,8 @@ namespace Shared.World.Blocks
 
             var cellRegion = new Dictionary<long, int>();
             var regionCells = new List<List<BlockCoord>>();
+            var regionOutside = new List<bool>();
+            var regionOutsideCell = new List<BlockCoord>();
             var bfs = new Queue<BlockCoord>();
 
             foreach (long key in sectionKeys)
@@ -111,6 +137,8 @@ namespace Shared.World.Blocks
                     int id = regionCells.Count;
                     var cells = new List<BlockCoord>();
                     regionCells.Add(cells);
+                    regionOutside.Add(false);
+                    regionOutsideCell.Add(default);
                     cellRegion[CellKey(x, y, z)] = id;
                     bfs.Enqueue(new BlockCoord(x, y, z));
                     while (bfs.Count > 0)
@@ -123,7 +151,13 @@ namespace Shared.World.Blocks
                             long nk = CellKey(nx, ny, nz);
                             if (cellRegion.ContainsKey(nk))
                                 continue;
-                            if (Classify(grid, classifier, nx, ny, nz) != KindPassable)
+                            byte kind = Classify(grid, classifier, nx, ny, nz, out bool outside);
+                            if (outside && !regionOutside[id])
+                            {
+                                regionOutside[id] = true;
+                                regionOutsideCell[id] = c;
+                            }
+                            if (kind != KindPassable)
                                 continue;
                             cellRegion[nk] = id;
                             bfs.Enqueue(new BlockCoord(nx, ny, nz));
@@ -245,6 +279,10 @@ namespace Shared.World.Blocks
                 return floors;
             }
 
+            var rootOutside = new bool[n];
+            for (int i = 0; i < n; i++)
+                rootOutside[i] = regionOutside[i];
+
             // Фикспойнт: слияние через одну дверь меняет floor-набор корня → следующий проход может слить ещё дверь.
             var isJunction = new bool[gateCells.Count];
             var roots = new List<int>();
@@ -263,6 +301,16 @@ namespace Shared.World.Blocks
                             roots.Add(root);
                     }
                     if (roots.Count < 2)
+                        continue;
+
+                    bool anyOutside = false;
+                    foreach (int root in roots)
+                        if (rootOutside[root])
+                        {
+                            anyOutside = true;
+                            break;
+                        }
+                    if (anyOutside)
                         continue;
 
                     gateFloors.Clear();
@@ -298,8 +346,15 @@ namespace Shared.World.Blocks
                 if (Find(i) == i && FloorsOfRoot(i).Count > 0)
                     rootOrder.Add(i);
             ushort nextId = 1;
-            foreach (int root in rootOrder)
-                zoneOfRoot[root] = nextId++;
+            for (int i = 0; i < rootOrder.Count; i++)
+            {
+                if (nextId >= ExteriorZoneId)
+                {
+                    rootOrder.RemoveRange(i, rootOrder.Count - i);
+                    break;
+                }
+                zoneOfRoot[rootOrder[i]] = nextId++;
+            }
 
             foreach (int root in rootOrder)
             {
@@ -331,7 +386,11 @@ namespace Shared.World.Blocks
             for (int i = 0; i < n; i++)
             {
                 if (!zoneOfRoot.TryGetValue(Find(i), out ushort zid))
-                    continue;
+                {
+                    if (!regionOutside[i])
+                        continue;
+                    zid = ExteriorZoneId;
+                }
                 var cells = regionCells[i];
                 for (int c = 0; c < cells.Count; c++)
                     grid.SetZone(cells[c].X, cells[c].Y, cells[c].Z, zid);
@@ -355,31 +414,39 @@ namespace Shared.World.Blocks
                 }
                 else if (gateZones.Count == 1)
                 {
+                    bool exterior = false;
+                    foreach (int r in gateRegions[g])
+                        if (regionOutside[r])
+                        {
+                            exterior = true;
+                            break;
+                        }
+                    if (exterior)
+                        continue;
+
                     var cells = gateCells[g];
                     for (int c = 0; c < cells.Count; c++)
                         grid.SetZone(cells[c].X, cells[c].Y, cells[c].Z, gateZones[0]);
                 }
             }
 
+            for (int i = 0; i < regionCells.Count; i++)
+            {
+                if (!regionOutside[i] || !zoneOfRoot.TryGetValue(Find(i), out ushort leakZone))
+                    continue;
+                result.Leaks.Add(new ZoneLeak { ZoneId = leakZone, Cell = regionOutsideCell[i] });
+            }
+
+            foreach (long key in sectionKeys)
+                grid.Sections[key].CompactZones();
+
             return result;
         }
 
         private static void ClearZones(BlockGrid grid, List<long> sectionKeys)
         {
-            var lis = new List<int>();
             foreach (long key in sectionKeys)
-            {
-                var s = grid.Sections[key];
-                if (s.Zone.Count == 0)
-                    continue;
-                lis.Clear();
-                lis.AddRange(s.Zone.Keys);
-                BlockGrid.UnpackKey(key, out int cx, out int cy, out int cz);
-                foreach (int li in lis)
-                    grid.SetZone(cx * ChunkSection.Size + (li & 15),
-                                 cy * ChunkSection.Size + ((li >> 4) & 15),
-                                 cz * ChunkSection.Size + ((li >> 8) & 15), 0);
-            }
+                grid.Sections[key].ResetZones();
         }
 
         private static int RegionOfSeed(Dictionary<long, int> cellRegion, int x, int y, int z)
@@ -392,18 +459,28 @@ namespace Shared.World.Blocks
             return -1;
         }
 
-        // Приоритет: bake-биты (ручная разметка редактора) перебивают категорию блока — Divider/Merge проверяются раньше.
         private static byte Classify(BlockGrid grid, IZoneClassifier cls, int x, int y, int z)
+            => Classify(grid, cls, x, y, z, out _);
+
+        // Приоритет: bake-биты (ручная разметка редактора) перебивают категорию блока — Divider/Merge проверяются раньше.
+        // outside — клетка за границей мира (нет секции), т.е. «космос»: результат классификации тот же KindWall.
+        private static byte Classify(BlockGrid grid, IZoneClassifier cls, int x, int y, int z, out bool outside)
         {
+            outside = false;
             if (!BlockGrid.InBounds(y))
                 return KindWall;
             ushort t = grid.GetBlock(x, y, z);
-            if (t == 0)
-                return HasSection(grid, x, y, z) ? KindPassable : KindWall; // за границей мира (нет секции) флуд не течёт
+            if (t == 0 && !HasSection(grid, x, y, z))
+            {
+                outside = true;
+                return KindWall; // за границей мира (нет секции) флуд не течёт
+            }
             byte bake = grid.GetBake(x, y, z);
             if ((bake & ChunkSection.BakeDivider) != 0)
                 return KindWall;
             if ((bake & ChunkSection.BakeMerge) != 0)
+                return KindPassable;
+            if (t == 0)
                 return KindPassable;
             if (cls.IsDivider(t))
                 return KindWall;
@@ -411,7 +488,7 @@ namespace Shared.World.Blocks
                 return KindPassable;
             if (cls.IsDoor(t))
                 return KindGate;
-            if (cls.IsSolid(t))
+            if (cls.IsSolid(grid, t, x, y, z))
                 return KindWall;
             return KindPassable;
         }

@@ -19,25 +19,17 @@ namespace ServerTests.Server.Network
 
         private readonly SVars _config;
         private GameServer? _server;
-        private readonly int _testPort;
-        private static int _portCounter = 8850;
-        private static readonly object _portLock = new object();
+        private int _testPort;
 
         public PullFollowTests()
         {
-            lock (_portLock)
-            {
-                _testPort = _portCounter++;
-                if (_testPort > 9050) _portCounter = 8850;
-            }
-
             _config = new SVars
             {
                 Ip = "127.0.0.1",
-                Port = _testPort,
+                Port = 0,
                 MaxPlayers = 10,
                 TickRate = 30,
-                ConnectionKey = $"FollowTest_{_testPort}",
+                ConnectionKey = "FollowTest",
                 MapPath = ""
             };
         }
@@ -45,14 +37,13 @@ namespace ServerTests.Server.Network
         public void Dispose()
         {
             _server?.Stop();
-            Thread.Sleep(50);
         }
 
         private GameServer StartServer()
         {
             _server = new GameServer(_config);
             _server.Start();
-            Thread.Sleep(50);
+            _testPort = _server.BoundPort;
             _server.ProtoLookup = defId => defId == CrateDef
                 ? new ItemProto(CrateDef, SlotCategory.None, false, 1, 1, false, 0, true, BlockBox.Full, true)
                 : new ItemProto(defId, SlotCategory.None, false, 1, 1, false, 0);
@@ -70,9 +61,11 @@ namespace ServerTests.Server.Network
             clientListener.PeerConnectedEvent += peer => { connectedPeer = peer; connected = true; };
 
             clientManager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
-            for (int i = 0; i < 100 && !connected; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
-
-            if (connectedPeer == null)
+            try
+            {
+                TestWait.Until(() => connectedPeer != null, () => clientManager.PollEvents(), what: "peer connected");
+            }
+            catch (TimeoutException)
             {
                 clientManager.Stop();
                 throw new Exception($"Failed to connect to server on port {_testPort}");
@@ -94,8 +87,7 @@ namespace ServerTests.Server.Network
                 catch (Exception e) { error = e; }
                 finally { Volatile.Write(ref completed, true); }
             });
-            for (int i = 0; i < 500 && !Volatile.Read(ref completed); i++) Thread.Sleep(10);
-            if (!Volatile.Read(ref completed)) throw new TimeoutException("GameLoop did not run the queued action");
+            TestWait.Until(() => Volatile.Read(ref completed), TestWait.DefaultTimeoutMs, "GameLoop ran queued action");
             if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
         }
 
@@ -300,7 +292,7 @@ namespace ServerTests.Server.Network
             ClientConnection? realClient = null;
             server.OnClientConnected += c => { realClient ??= c; };
             var peer = CreateConnectedPeer();
-            for (int i = 0; i < 200 && realClient == null; i++) Thread.Sleep(10);
+            TestWait.Until(() => realClient != null, what: "server accepted client");
             Assert.NotNull(realClient);
 
             int netId = 0;

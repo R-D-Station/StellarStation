@@ -19,32 +19,24 @@ namespace ServerTests.Server.Services
         private readonly GameServer _server;
         private readonly PlayerManager _playerManager;
         private readonly int _testPort;
-        private static int _portCounter = 7790;
-        private static readonly object _portLock = new object();
         private readonly List<NetManager> _clientManagers = new();
 
         public PlayerManagerTests()
         {
-            lock (_portLock)
-            {
-                _testPort = _portCounter++;
-                if (_testPort > 7900) _portCounter = 7790;
-            }
-
             _config = new SVars
             {
                 Ip = "127.0.0.1",
-                Port = _testPort,
+                Port = 0,
                 MaxPlayers = 10,
                 TickRate = 30,
-                ConnectionKey = $"TestKey_{_testPort}",
+                ConnectionKey = "TestKey",
                 MapPath = ""
             };
 
             _server = new GameServer(_config);
             _playerManager = new PlayerManager(_server);
             _server.Start();
-            Thread.Sleep(200);
+            _testPort = _server.BoundPort;
         }
 
         public void Dispose()
@@ -56,7 +48,6 @@ namespace ServerTests.Server.Services
             _clientManagers.Clear();
 
             _server?.Stop();
-            Thread.Sleep(200);
         }
 
         [Fact]
@@ -76,7 +67,7 @@ namespace ServerTests.Server.Services
         public void OnClientConnected_WhenClientConnects_AddsPlayerToList()
         {
             var clientManager = CreateAndConnectClient();
-            Thread.Sleep(100);
+            TestWait.Until(() => _playerManager.GetAllPlayers().Count == 1, what: "player registered");
 
             var players = _playerManager.GetAllPlayers();
             Assert.Single(players);
@@ -86,12 +77,12 @@ namespace ServerTests.Server.Services
         public void OnClientDisconnected_WhenClientDisconnects_RemovesPlayerFromList()
         {
             var clientManager = CreateAndConnectClient();
-            Thread.Sleep(100);
+            TestWait.Until(() => _playerManager.GetAllPlayers().Count == 1, what: "player registered");
             Assert.Single(_playerManager.GetAllPlayers());
 
             clientManager.Stop();
             _clientManagers.Remove(clientManager);
-            Thread.Sleep(100);
+            TestWait.Until(() => _playerManager.GetAllPlayers().Count == 0, what: "player removed on disconnect");
 
             Assert.Empty(_playerManager.GetAllPlayers());
         }
@@ -100,9 +91,9 @@ namespace ServerTests.Server.Services
         public void GetAllPlayers_ReturnsAllConnectedPlayers()
         {
             var clientManager1 = CreateAndConnectClient();
-            Thread.Sleep(100);
+            TestWait.Until(() => _playerManager.GetAllPlayers().Count == 1, what: "player 1 registered");
             var clientManager2 = CreateAndConnectClient();
-            Thread.Sleep(100);
+            TestWait.Until(() => _playerManager.GetAllPlayers().Count == 2, what: "player 2 registered");
 
             var players = _playerManager.GetAllPlayers();
             Assert.Equal(2, players.Count);
@@ -126,13 +117,11 @@ namespace ServerTests.Server.Services
 
             manager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
 
-            for (int i = 0; i < 100 && !connected; i++)
+            try
             {
-                manager.PollEvents();
-                Thread.Sleep(10);
+                TestWait.Until(() => connected, () => manager.PollEvents(), what: "client connected");
             }
-
-            if (!connected)
+            catch (TimeoutException)
             {
                 manager.Stop();
                 throw new Exception("Failed to connect to server");

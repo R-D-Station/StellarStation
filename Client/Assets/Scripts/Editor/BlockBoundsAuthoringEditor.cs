@@ -12,28 +12,73 @@ namespace Client.Editor.Inspectors
     {
         private readonly BoxBoundsHandle _handle = new BoxBoundsHandle();
 
+        private static readonly GUIContent LEditing = new GUIContent("Набор", "Какой набор боксов правят хендлы в сцене.");
+        private static readonly string[] SetNames = { "Коллизия", "Открытая", "Триггеры", "Кабина" };
+        private static readonly string[] SetNamesNoCabin = { "Коллизия", "Открытая", "Триггеры" };
+        private static readonly GUIContent LShowAll = new GUIContent("Показать все",
+            "Снять скрытие со всех боксов набора.");
+        private static readonly GUIContent LBoxShown = new GUIContent("Вид",
+            "Бокс виден и хватается хендлами в сцене. Нажми, чтобы скрыть его на время правки соседних.");
+        private static readonly GUIContent LBoxHidden = new GUIContent("Скрыт",
+            "Бокс скрыт в сцене (только вид — на коллизию, кодоген и экспорт не влияет). Нажми, чтобы вернуть.");
+
+        private BlockDefinition _maskDef;
+        private BlockBoundsAuthoring.BoxSet _maskSet;
+        private int _maskCount = -1;
+        private ulong _mask;
+
+        private ulong EnsureMask(BlockDefinition def, BlockBoundsAuthoring.BoxSet set, int count)
+        {
+            if (_maskDef != def || _maskSet != set || _maskCount != count)
+            {
+                _maskDef = def;
+                _maskSet = set;
+                _maskCount = count;
+                _mask = BoxVisibilityMask.Load(def, set.ToString(), count);
+            }
+            return _mask;
+        }
+
         public override void OnInspectorGUI()
         {
-            DrawDefaultInspector();
-
             var authoring = (BlockBoundsAuthoring)target;
+
+            serializedObject.Update();
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("Target"));
+            serializedObject.ApplyModifiedProperties();
+
             var def = authoring.Target;
+            bool cabinAvailable = BlockBoundsAuthoring.HasCabinSet(def);
+            var set = EffectiveSet(authoring);
+
+            EditorGUI.BeginChangeCheck();
+            int picked = EditorGUILayout.Popup(LEditing, (int)set, cabinAvailable ? SetNames : SetNamesNoCabin);
+            if (EditorGUI.EndChangeCheck())
+            {
+                Undo.RecordObject(authoring, "Change box set");
+                authoring.Editing = (BlockBoundsAuthoring.BoxSet)picked;
+                EditorUtility.SetDirty(authoring);
+                set = EffectiveSet(authoring);
+            }
+
             if (def == null)
             {
                 EditorGUILayout.HelpBox("Назначь BlockDefinition — его боксы появятся в сцене.", MessageType.Info);
                 return;
             }
 
-            var set = authoring.Editing;
             var boxes = authoring.Boxes(set) ?? System.Array.Empty<BlockDefinition.CollisionBox>();
             bool clamp = set != BlockBoundsAuthoring.BoxSet.Trigger; // триггеры могут выходить за габарит
+            var extent = BlockBoundsAuthoring.ObjectExtent(def, set);
 
             EditorGUILayout.Space(8);
             EditorGUILayout.LabelField($"Боксы: {Label(set)} (оси Unity, Y = высота)", EditorStyles.boldLabel);
+            if (set == BlockBoundsAuthoring.BoxSet.Cabin)
+                EditorGUILayout.HelpBox($"Object-space кабины — МОДУЛЬ {extent.x}×{extent.y}×{extent.z} (не габарит блока).", MessageType.Info);
 
             if (clamp)
             {
-                var sv = def.Size;
+                var sv = extent;
                 foreach (var b in boxes)
                 {
                     Vector3 min = b.Center - b.Size * 0.5f, max = b.Center + b.Size * 0.5f;
@@ -48,6 +93,22 @@ namespace Client.Editor.Inspectors
                 }
             }
 
+            ulong mask = EnsureMask(def, set, boxes.Length);
+            int hidden = BoxVisibilityMask.HiddenCount(mask, boxes.Length);
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                EditorGUILayout.LabelField(hidden > 0 ? $"Скрыто {hidden} из {boxes.Length}" : $"Показаны все ({boxes.Length})",
+                    EditorStyles.miniLabel);
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button(LShowAll, GUILayout.Width(100)))
+                {
+                    _mask = 0UL;
+                    BoxVisibilityMask.Save(def, set.ToString(), boxes.Length, _mask);
+                    mask = 0UL;
+                    SceneView.RepaintAll();
+                }
+            }
+
             int removeAt = -1;
             for (int i = 0; i < boxes.Length; i++)
             {
@@ -56,6 +117,16 @@ namespace Client.Editor.Inspectors
                 Vector3 size = EditorGUILayout.Vector3Field($"Размер {i}", boxes[i].Size);
                 using (new EditorGUILayout.HorizontalScope())
                 {
+                    bool visible = !BoxVisibilityMask.IsHidden(mask, i);
+                    bool next = GUILayout.Toggle(visible, visible ? LBoxShown : LBoxHidden,
+                        EditorStyles.miniButton, GUILayout.Width(52));
+                    if (next != visible)
+                    {
+                        _mask = BoxVisibilityMask.Toggle(mask, i);
+                        BoxVisibilityMask.Save(def, set.ToString(), boxes.Length, _mask);
+                        mask = _mask;
+                        SceneView.RepaintAll();
+                    }
                     GUILayout.FlexibleSpace();
                     if (GUILayout.Button("Удалить", GUILayout.Width(70)))
                         removeAt = i;
@@ -85,8 +156,8 @@ namespace Client.Editor.Inspectors
                     Undo.RecordObject(def, "Quantize boxes");
                     for (int i = 0; i < boxes.Length; i++)
                     {
-                        Vector3 min = Quantize(boxes[i].Center - boxes[i].Size * 0.5f, def.Size, clamp);
-                        Vector3 max = Quantize(boxes[i].Center + boxes[i].Size * 0.5f, def.Size, clamp);
+                        Vector3 min = Quantize(boxes[i].Center - boxes[i].Size * 0.5f, extent, clamp);
+                        Vector3 max = Quantize(boxes[i].Center + boxes[i].Size * 0.5f, extent, clamp);
                         boxes[i].Center = (min + max) * 0.5f;
                         boxes[i].Size = max - min;
                     }
@@ -110,18 +181,22 @@ namespace Client.Editor.Inspectors
             var def = authoring.Target;
             if (def == null)
                 return;
-            var set = authoring.Editing;
+            var set = EffectiveSet(authoring);
             var boxes = authoring.Boxes(set);
             if (boxes == null)
                 return;
+            var extent = BlockBoundsAuthoring.ObjectExtent(def, set);
+            ulong mask = EnsureMask(def, set, boxes.Length);
 
             using (new Handles.DrawingScope(authoring.transform.localToWorldMatrix))
             {
                 Handles.color = BlockBoundsAuthoring.SetColor(set);
                 for (int i = 0; i < boxes.Length; i++)
                 {
+                    if (BoxVisibilityMask.IsHidden(mask, i))
+                        continue;
                     // Тот же сдвиг object→local, что и в гизмо (пивот = центр низа футпринта).
-                    _handle.center = BlockBoundsAuthoring.ObjectToLocal(boxes[i].Center, def.Size);
+                    _handle.center = BlockBoundsAuthoring.ObjectToLocal(boxes[i].Center, extent);
                     _handle.size = boxes[i].Size;
 
                     EditorGUI.BeginChangeCheck();
@@ -129,12 +204,20 @@ namespace Client.Editor.Inspectors
                     if (EditorGUI.EndChangeCheck())
                     {
                         Undo.RecordObject(def, "Edit box");
-                        boxes[i].Center = BlockBoundsAuthoring.LocalToObject(_handle.center, def.Size);
+                        boxes[i].Center = BlockBoundsAuthoring.LocalToObject(_handle.center, extent);
                         boxes[i].Size = _handle.size;
                         EditorUtility.SetDirty(def);
                     }
                 }
             }
+        }
+
+        private static BlockBoundsAuthoring.BoxSet EffectiveSet(BlockBoundsAuthoring authoring)
+        {
+            var set = authoring.Editing;
+            if (set == BlockBoundsAuthoring.BoxSet.Cabin && !BlockBoundsAuthoring.HasCabinSet(authoring.Target))
+                return BlockBoundsAuthoring.BoxSet.Collision;
+            return set;
         }
 
         private static void Assign(BlockDefinition def, BlockBoundsAuthoring.BoxSet set,
@@ -144,6 +227,7 @@ namespace Client.Editor.Inspectors
             {
                 case BlockBoundsAuthoring.BoxSet.Open: def.CollisionBoxesOpen = boxes; break;
                 case BlockBoundsAuthoring.BoxSet.Trigger: def.TriggerBoxes = boxes; break;
+                case BlockBoundsAuthoring.BoxSet.Cabin: def.LiftCabinBoxes = boxes; break;
                 default: def.CollisionBoxes = boxes; break;
             }
         }
@@ -152,6 +236,7 @@ namespace Client.Editor.Inspectors
         {
             BlockBoundsAuthoring.BoxSet.Open => "открытая коллизия",
             BlockBoundsAuthoring.BoxSet.Trigger => "триггеры",
+            BlockBoundsAuthoring.BoxSet.Cabin => "кабина",
             _ => "коллизия"
         };
 

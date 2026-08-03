@@ -41,7 +41,9 @@ namespace Shared.World.Blocks
         /// <summary>Сама — при входе игрока в триггер-объём.</summary>
         Auto = 0,
         /// <summary>Взаимодействием игрока (будущий контент).</summary>
-        Interact = 1
+        Interact = 1,
+        /// <summary>Только по команде машины (лифт): ни автомат дверей, ни игрок её не трогают.</summary>
+        External = 2
     }
 
     /// <summary>AABB коллизии в block-local координатах (оси Unity: Y — высота), квантование 1/16 (значения 0..16).</summary>
@@ -103,7 +105,7 @@ namespace Shared.World.Blocks
         /// <summary>Число стадий деконструкции (0 = не деконструируется). Рецепты — будущий контент.</summary>
         public readonly byte DeconstructStages;
 
-        /// <summary>Габарит мульти-блока (1..2 по осям, частей ≤ 4); 1×1×1 = обычный блок.</summary>
+        /// <summary>Габарит мульти-блока (1..16 по осям); 1×1×1 = обычный блок.</summary>
         public readonly byte SizeX, SizeY, SizeZ;
 
         // Боксы по [part][facing]: кодоген даёт нарезку facing=0, повороты предвычисляются в ктор.
@@ -117,11 +119,16 @@ namespace Shared.World.Blocks
         public readonly float CloseDelay;
         /// <summary>Триггер-объёмы авто-двери (object-space, facing 0); пусто — нет триггера.</summary>
         public readonly TriggerBox[] Triggers;
+        /// <summary>Шлюз: авто-открытие блокируется при большом перепаде давления по сторонам.</summary>
+        public readonly bool IsAirlock;
 
         /// <summary>Требует опору: без подходящей поверхности блок сносится сервером при загрузке.</summary>
         public readonly bool RequiresSupport;
         /// <summary>Куда крепится (порядок = приоритет); Wall/AnySolid-гориз даёт facing-от-стены.</summary>
         public readonly AttachSurface[] AttachTo;
+
+        /// <summary>Роль блока в шахте лифта (рельс/кабина); null — к лифтам не относится.</summary>
+        public readonly LiftPartInfo Lift;
 
         /// <summary>Занимает больше одной позиции.</summary>
         public bool IsMulti => SizeX * SizeY * SizeZ > 1;
@@ -134,6 +141,7 @@ namespace Shared.World.Blocks
                                 || Category == BlockCategory.SpawnPoint;
         public bool IsFloorAnchor => Category == BlockCategory.FloorAnchor;
 
+        /// <summary>Коллизия ХОТЬ У ОДНОЙ части типа (тип-уровень). Пер-клеточные решения — через <see cref="PartHasCollision"/>.</summary>
         public bool HasCollision
         {
             get
@@ -145,6 +153,10 @@ namespace Shared.World.Blocks
             }
         }
 
+        /// <summary>Коллизия у КОНКРЕТНОЙ части (клетки мульти-блока); part вне диапазона → false.</summary>
+        public bool PartHasCollision(int part)
+            => part >= 0 && part < _boxes.Length && _boxes[part][0].Length > 0;
+
         /// <summary>Боксы якорной части при facing 0 (совместимость/простые случаи).</summary>
         public BlockBox[] Boxes => _boxes[0][0];
 
@@ -153,7 +165,11 @@ namespace Shared.World.Blocks
 
         /// <summary>Боксы части с учётом поворота и состояния Open (открытая дверь → набор _boxesOpen).</summary>
         public BlockBox[] GetBoxes(int part, int facing, bool open)
-            => (open && Openable ? _boxesOpen : _boxes)[part < _boxes.Length ? part : 0][facing & 3];
+        {
+            var set = open && Openable ? _boxesOpen : _boxes;
+            int p = part >= 0 && part < set.Length ? part : 0;
+            return set[p][facing & 3];
+        }
 
         public BlockInfo(ushort id, string name, BlockCategory category,
             BlockFaceFlags sealsFaces, BlockFaceFlags opaqueFaces, byte deconstructStages, BlockBox[] boxes,
@@ -169,8 +185,11 @@ namespace Shared.World.Blocks
             byte sizeX = 1, byte sizeY = 1, byte sizeZ = 1,
             BlockBox[][] partBoxesOpen = null, DoorOpening opening = DoorOpening.Auto,
             TriggerBox[] triggers = null, float closeDelay = 0f,
-            bool requiresSupport = false, AttachSurface[] attachTo = null)
+            bool requiresSupport = false, AttachSurface[] attachTo = null,
+            bool isAirlock = false, LiftPartInfo lift = null)
         {
+            Lift = lift;
+            IsAirlock = isAirlock;
             Id = id;
             Name = name;
             Category = category;

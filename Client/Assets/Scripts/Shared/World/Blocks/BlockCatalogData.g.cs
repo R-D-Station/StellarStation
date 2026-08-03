@@ -9,21 +9,153 @@ namespace Shared.World.Blocks
     {
         internal static BlockInfo[] Build() => new BlockInfo[]
         {
-            new BlockInfo(1, "Block", BlockCategory.Generic, (BlockFaceFlags)63, (BlockFaceFlags)63, 1, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(2, "SlapFloor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 8, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(3, "IronWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) }, new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 2, 1, new BlockBox[][] { System.Array.Empty<BlockBox>(), System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(4, "Floor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(5, "Door_2x2", BlockCategory.Door, (BlockFaceFlags)63, (BlockFaceFlags)255, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 16, 16, 12) } }, 2, 2, 1, new BlockBox[][] { new[] { new BlockBox(0, 0, 4, 4, 16, 12) }, new[] { new BlockBox(12, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 4, 16, 12) }, new[] { new BlockBox(12, 0, 4, 16, 16, 12) } }, DoorOpening.Auto, new TriggerBox[] { new TriggerBox(0, 0, -20, 32, 32, 4), new TriggerBox(0, 0, 12, 32, 32, 36) }, 5.0f, false, null),
-            new BlockInfo(6, "Door_2x1", BlockCategory.Door, (BlockFaceFlags)63, (BlockFaceFlags)255, 0, new BlockBox[][] { new[] { new BlockBox(0, 4, 4, 16, 12, 12) }, new[] { new BlockBox(0, 0, 4, 16, 16, 12) } }, 1, 2, 1, new BlockBox[][] { new[] { new BlockBox(0, 0, 4, 1, 16, 12), new BlockBox(15, 0, 4, 16, 16, 12) }, new[] { new BlockBox(0, 0, 4, 1, 16, 12), new BlockBox(15, 0, 4, 16, 16, 12) } }, DoorOpening.Auto, new TriggerBox[] { new TriggerBox(0, 0, -20, 16, 32, 4), new TriggerBox(0, 0, 12, 16, 32, 36) }, 5.0f, false, null),
-            new BlockInfo(7, "IronHelpWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(8, "FutureFloor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(9, "GlassWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) }, new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 2, 1, new BlockBox[][] { System.Array.Empty<BlockBox>(), System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(10, "MetalWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) }, new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 2, 1, new BlockBox[][] { System.Array.Empty<BlockBox>(), System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(11, "FloorAnchor", BlockCategory.FloorAnchor, (BlockFaceFlags)0, (BlockFaceFlags)0, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 1) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, true, new AttachSurface[] { AttachSurface.Wall, AttachSurface.Floor, AttachSurface.AnySolid, AttachSurface.Ceiling }),
-            new BlockInfo(12, "Divider", BlockCategory.Divider, (BlockFaceFlags)0, (BlockFaceFlags)0, 0, new BlockBox[][] { System.Array.Empty<BlockBox>() }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(13, "MergeMarker", BlockCategory.MergeMarker, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(14, "MetalGlassWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) }, new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 2, 1, new BlockBox[][] { System.Array.Empty<BlockBox>(), System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
-            new BlockInfo(15, "SpawnPoint", BlockCategory.SpawnPoint, (BlockFaceFlags)0, (BlockFaceFlags)0, 0, new BlockBox[][] { System.Array.Empty<BlockBox>() }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null),
+            new BlockInfo(1, "Block", BlockCategory.Generic, (BlockFaceFlags)63, (BlockFaceFlags)63, 1, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(2, "SlapFloor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 8, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(3, "IronWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 0, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 0, 16, 16, 16) }
+            }, 1, 2, 1, new BlockBox[][]
+            {
+                System.Array.Empty<BlockBox>(),
+                System.Array.Empty<BlockBox>()
+            }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(4, "Floor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(5, "Door_2x2", BlockCategory.Door, (BlockFaceFlags)63, (BlockFaceFlags)255, 0, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 4, 16, 16, 12) },
+                new[] { new BlockBox(0, 0, 4, 16, 16, 12) },
+                new[] { new BlockBox(0, 0, 4, 16, 16, 12) },
+                new[] { new BlockBox(0, 0, 4, 16, 16, 12) }
+            }, 2, 2, 1, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 4, 4, 16, 12) },
+                new[] { new BlockBox(12, 0, 4, 16, 16, 12) },
+                new[] { new BlockBox(0, 0, 4, 4, 16, 12) },
+                new[] { new BlockBox(12, 0, 4, 16, 16, 12) }
+            }, DoorOpening.Auto, new TriggerBox[] { new TriggerBox(0, 0, -20, 32, 32, 4), new TriggerBox(0, 0, 12, 32, 32, 36) }, 5.0f, false, null, false, null),
+            new BlockInfo(6, "Door_2x1", BlockCategory.Door, (BlockFaceFlags)63, (BlockFaceFlags)255, 0, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 4, 4, 16, 12, 12) },
+                new[] { new BlockBox(0, 0, 4, 16, 16, 12) }
+            }, 1, 2, 1, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 4, 1, 16, 12), new BlockBox(15, 0, 4, 16, 16, 12) },
+                new[] { new BlockBox(0, 0, 4, 1, 16, 12), new BlockBox(15, 0, 4, 16, 16, 12) }
+            }, DoorOpening.Auto, new TriggerBox[] { new TriggerBox(0, 0, -20, 16, 32, 4), new TriggerBox(0, 0, 12, 16, 32, 36) }, 5.0f, false, null, false, null),
+            new BlockInfo(7, "IronHelpWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(8, "FutureFloor", BlockCategory.Floor, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(9, "GlassWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 0, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 0, 16, 16, 16) }
+            }, 1, 2, 1, new BlockBox[][]
+            {
+                System.Array.Empty<BlockBox>(),
+                System.Array.Empty<BlockBox>()
+            }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(10, "MetalWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 0, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 0, 16, 16, 16) }
+            }, 1, 2, 1, new BlockBox[][]
+            {
+                System.Array.Empty<BlockBox>(),
+                System.Array.Empty<BlockBox>()
+            }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(11, "FloorAnchor", BlockCategory.FloorAnchor, (BlockFaceFlags)0, (BlockFaceFlags)0, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 1) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, true, new AttachSurface[] { AttachSurface.Wall, AttachSurface.Floor, AttachSurface.AnySolid, AttachSurface.Ceiling }, false, null),
+            new BlockInfo(12, "Divider", BlockCategory.Divider, (BlockFaceFlags)0, (BlockFaceFlags)0, 0, new BlockBox[][] { System.Array.Empty<BlockBox>() }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(13, "MergeMarker", BlockCategory.MergeMarker, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { new[] { new BlockBox(0, 0, 0, 16, 16, 16) } }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(14, "MetalGlassWall", BlockCategory.Wall, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 0, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 0, 16, 16, 16) }
+            }, 1, 2, 1, new BlockBox[][]
+            {
+                System.Array.Empty<BlockBox>(),
+                System.Array.Empty<BlockBox>()
+            }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(15, "SpawnPoint", BlockCategory.SpawnPoint, (BlockFaceFlags)0, (BlockFaceFlags)0, 0, new BlockBox[][] { System.Array.Empty<BlockBox>() }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, null),
+            new BlockInfo(16, "DoorAirlock_2x2", BlockCategory.Door, (BlockFaceFlags)63, (BlockFaceFlags)255, 0, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 4, 16, 16, 12) },
+                new[] { new BlockBox(0, 0, 4, 16, 16, 12) },
+                new[] { new BlockBox(0, 0, 4, 16, 16, 12) },
+                new[] { new BlockBox(0, 0, 4, 16, 16, 12) }
+            }, 2, 2, 1, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 4, 4, 16, 12) },
+                new[] { new BlockBox(12, 0, 4, 16, 16, 12) },
+                new[] { new BlockBox(0, 0, 4, 4, 16, 12) },
+                new[] { new BlockBox(12, 0, 4, 16, 16, 12) }
+            }, DoorOpening.Interact, new TriggerBox[] { new TriggerBox(0, 0, -20, 32, 32, 4), new TriggerBox(0, 0, 12, 32, 32, 36) }, 5.0f, false, null, true, null),
+            new BlockInfo(17, "Рельс", BlockCategory.Marker, (BlockFaceFlags)0, (BlockFaceFlags)0, 0, new BlockBox[][] { System.Array.Empty<BlockBox>() }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, new LiftPartInfo(LiftPartKind.Rail, 6, 5, 5, 5, 3.0f, 1.0f, 0.5f, null)),
+            new BlockInfo(18, "DoorElevator", BlockCategory.Door, (BlockFaceFlags)0, (BlockFaceFlags)63, 0, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) }
+            }, 6, 5, 1, new BlockBox[][]
+            {
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 16) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 8, 16, 8) },
+                System.Array.Empty<BlockBox>(),
+                System.Array.Empty<BlockBox>(),
+                new[] { new BlockBox(8, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 8, 16, 8) },
+                System.Array.Empty<BlockBox>(),
+                System.Array.Empty<BlockBox>(),
+                new[] { new BlockBox(8, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 8, 16, 8) },
+                System.Array.Empty<BlockBox>(),
+                System.Array.Empty<BlockBox>(),
+                new[] { new BlockBox(8, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) },
+                new[] { new BlockBox(0, 0, 2, 16, 16, 8) }
+            }, DoorOpening.External, null, 3.0f, false, null, false, null),
+            new BlockInfo(19, "Elevator", BlockCategory.Marker, (BlockFaceFlags)63, (BlockFaceFlags)63, 0, new BlockBox[][] { System.Array.Empty<BlockBox>() }, 1, 1, 1, new BlockBox[][] { System.Array.Empty<BlockBox>() }, DoorOpening.Auto, null, 1.0f, false, null, false, new LiftPartInfo(LiftPartKind.Cabin, 6, 5, 5, 5, 3.0f, 3.0f, 1.5f, new TriggerBox[] { new TriggerBox(16, 8, 16, 80, 16, 80), new TriggerBox(10, 8, 16, 16, 64, 80), new TriggerBox(80, 8, 16, 86, 64, 80), new TriggerBox(10, 8, 10, 86, 64, 16), new TriggerBox(10, 47, 73, 82, 64, 79), new TriggerBox(63, 8, 73, 86, 64, 79), new TriggerBox(16, 8, 73, 33, 64, 79), new TriggerBox(63, 17, 15, 81, 31, 34) })),
         };
     }
 }

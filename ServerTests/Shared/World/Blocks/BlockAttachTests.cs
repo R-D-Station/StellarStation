@@ -8,7 +8,7 @@ namespace ServerTests.Shared.World.Blocks
     {
         private const ushort SolidT = 1;
         private const ushort ShelfT = 2;
-        private const ushort StackA = 3;
+        private const ushort StackA = 7;
 
         private static readonly Func<ushort, bool> IsSolid = t => t == SolidT;
 
@@ -132,6 +132,38 @@ namespace ServerTests.Shared.World.Blocks
             Assert.Equal((ushort)0, g.GetBlock(5, 6, 5));
             Assert.Equal((ushort)0, g.GetBlock(5, 7, 5));
             Assert.Equal(SolidT, g.GetBlock(5, 4, 5));
+        }
+
+        [Fact]
+        public void ValidateAll_UnsupportedMultiBlock_ErasedAtomically()
+        {
+            var g = new BlockGrid();
+            Assert.True(g.PlaceMultiBlock(20, 5, 20, TestStructCatalog.LiftDoor5x5, 0)); // 5×5×1 в воздухе
+
+            int removed = BlockAttach.ValidateAll(g, _ => false,
+                t => t == TestStructCatalog.LiftDoor5x5, _ => new[] { AttachSurface.Floor });
+
+            Assert.Equal(1, removed); // структура снесена как ЦЕЛОЕ, а не 25 клеток по одной
+            for (int x = 0; x < 5; x++)
+                for (int y = 0; y < 5; y++)
+                {
+                    Assert.Equal((ushort)0, g.GetBlock(20 + x, 5 + y, 20));
+                    Assert.False(g.TryGetStructOffset(20 + x, 5 + y, 20, out _, out _, out _));
+                }
+        }
+
+        [Fact]
+        public void ValidateAll_SupportedMultiBlock_KeptWhole()
+        {
+            var g = new BlockGrid();
+            g.SetBlock(20, 4, 20, SolidT); // опора под ЯКОРЕМ (нижний угол)
+            Assert.True(g.PlaceMultiBlock(20, 5, 20, TestStructCatalog.LiftDoor5x5, 0));
+
+            int removed = BlockAttach.ValidateAll(g, t => t == SolidT,
+                t => t == TestStructCatalog.LiftDoor5x5, _ => new[] { AttachSurface.Floor });
+
+            Assert.Equal(0, removed);
+            Assert.Equal(TestStructCatalog.LiftDoor5x5, g.GetBlock(24, 9, 20)); // дальняя часть на месте
         }
 
         private static bool ShelfIsSolid(ushort t) => t == SolidT || t == ShelfT;

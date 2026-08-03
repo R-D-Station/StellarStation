@@ -11,13 +11,27 @@ namespace Shared.World.Blocks
         // facing ОТ стены к блоку; индексы согласованы с BlockState.GetFacing (0=+Z/1=+X/2=−Z/3=−X) и MultiBlockVisual.FacingRotation
         private static readonly int[] WFacing = { 3, 1, 2, 0 };
 
-        /// <summary>Опора по умолчанию: есть коллизия и блок не открывается (дверь/люк опорой не считаются).</summary>
+        /// <summary>Опора по умолчанию (тип-уровень): есть коллизия ХОТЬ У ОДНОЙ части и блок не открывается.</summary>
         public static bool DefaultIsSolid(ushort type)
         {
             if (type == 0)
                 return false;
             var info = BlockCatalog.Get(type);
             return info.HasCollision && !info.Openable;
+        }
+
+        /// <summary>Опора по КЛЕТКЕ: коллизия конкретной части (клетки мульти-блока), не открывается — проём двери опорой не служит.</summary>
+        public static bool DefaultIsSolid(BlockGrid grid, int x, int y, int z)
+        {
+            ushort type = grid.GetBlock(x, y, z);
+            if (type == 0)
+                return false;
+            var info = BlockCatalog.Get(type);
+            if (info.Openable)
+                return false;
+            int part = MultiBlock.PartAt(grid, info.SizeX, info.SizeY, info.SizeZ,
+                                         BlockState.GetFacing(grid.GetState(x, y, z)), x, y, z);
+            return part >= 0 && info.PartHasCollision(part);
         }
 
         /// <summary>Ищет первую доступную поверхность по приоритету <paramref name="priority"/>; Wall/AnySolid-гориз выставляет facing от стены.</summary>
@@ -80,7 +94,8 @@ namespace Shared.World.Blocks
 
             int removed = 0;
             var keys = new List<long>();
-            var toRemove = new List<(int x, int y, int z)>();
+            var toRemove = new List<(int x, int y, int z, bool multi)>();
+            var seenAnchors = new HashSet<(int, int, int)>();
             bool changed = true;
             while (changed) // повтор, пока снос текущего прохода порождает новые неопёртые блоки
             {
@@ -89,6 +104,7 @@ namespace Shared.World.Blocks
                 keys.AddRange(grid.Sections.Keys);
                 keys.Sort(CompareKeys); // фиксированный порядок секций (Y,Z,X) — снос детерминирован между запусками
                 toRemove.Clear();
+                seenAnchors.Clear();
 
                 foreach (long key in keys)
                 {
@@ -102,15 +118,24 @@ namespace Shared.World.Blocks
                         int x = cx * 16 + (li & 15);
                         int y = cy * 16 + ((li >> 4) & 15);
                         int z = cz * 16 + ((li >> 8) & 15);
-                        if (!Resolve(grid, isSolid, x, y, z, attachTo(t), out _, out _))
-                            toRemove.Add((x, y, z));
+
+                        if (grid.AnchorOf(x, y, z, out int ax, out int ay, out int az)) // мульти-блок: опору решаем ПО ЯКОРЮ, снос — целиком
+                        {
+                            if (!seenAnchors.Add((ax, ay, az))) // структуру за проход решаем один раз, внутренние клетки не участвуют
+                                continue;
+                            if (!Resolve(grid, isSolid, ax, ay, az, attachTo(t), out _, out _))
+                                toRemove.Add((ax, ay, az, true));
+                        }
+                        else if (!Resolve(grid, isSolid, x, y, z, attachTo(t), out _, out _))
+                            toRemove.Add((x, y, z, false));
                     }
                 }
 
                 for (int i = 0; i < toRemove.Count; i++)
                 {
                     var p = toRemove[i];
-                    if (grid.SetBlock(p.x, p.y, p.z, 0))
+                    bool did = p.multi ? grid.EraseMultiBlock(p.x, p.y, p.z) : grid.SetBlock(p.x, p.y, p.z, 0);
+                    if (did)
                     {
                         removed++;
                         changed = true;

@@ -40,12 +40,13 @@ namespace ServerTests.Server
         {
             SVars.LoadFromJson(_configPath);
             var config = SVars.Instance;
+            config.Port = 0;
             var server = new GameServer(config);
 
             var exception = Record.Exception(() =>
             {
                 server.Start();
-                Thread.Sleep(100);
+                TestWait.Until(() => server.BoundPort > 0, what: "server bound to an ephemeral port");
                 server.Stop();
             });
 

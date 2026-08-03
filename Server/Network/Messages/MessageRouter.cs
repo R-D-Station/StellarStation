@@ -38,6 +38,7 @@ namespace Server.Network.Messages
             new PutInContainerHandler(),
             new TakeFromContainerHandler(),
             new PullItemHandler(),
+            new LiftFloorRequestHandler(),
         });
 
         /// <summary>Хендлер по wire-id или null (server→client id / неизвестный id).</summary>

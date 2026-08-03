@@ -83,13 +83,21 @@ namespace Client.Net.Prediction
 
         private IDynamicObstacles _itemObstacles; // текущий набор коллизий предметов (может быть null до первого SetDynamicObstacles)
 
+        public System.Action<uint> PrepareObstacles;
+
+        private uint _serverTickBase;
+
+        public uint PredictedTick
+            => _pending.Count > 0 ? _serverTickBase + (uint)_pending.Count - 1
+             : _serverTickBase > 0 ? _serverTickBase - 1 : 0;
+
         /// <summary>Применить ввод локально (предсказание) и запомнить для переигровки. Нить FSM+движение
         /// зеркалит GameServer.ProcessIntents/ApplyClientIntent байт-в-байт (детерминизм — иначе rubber-band).</summary>
         public void ApplyLocal(uint sequence, IntentDirection dir, bool sprint, bool layToggle, bool jump = false)
         {
             _state = FsmLogic.Step(_state, dir, layToggle, _reason, ref _timers);
             if (_blockGrid != null)
-                ApplyBlockStep(dir, sprint, jump);
+                ApplyBlockStep(dir, sprint, jump, _serverTickBase + (uint)_pending.Count);
 
             _pending.Add(new PendingInput(sequence, dir, sprint, layToggle, jump));
         }
@@ -97,8 +105,9 @@ namespace Client.Net.Prediction
         // Один блочный шаг — зеркало серверной ветки ApplyClientIntent (клиент шлёт интент каждый свой тик,
         // поэтому hasIntent здесь всегда true; серверные None-тики случаются только при потере пакетов).
         // Свойства X/Y зеркалят раскладку снапшота: в блок-мире Y — ВЫСОТА (оси Unity), план-глубина — в ZF.
-        private void ApplyBlockStep(IntentDirection dir, bool sprint, bool jump)
+        private void ApplyBlockStep(IntentDirection dir, bool sprint, bool jump, uint tick)
         {
+            PrepareObstacles?.Invoke(tick);
             bool canMove = FsmLogic.MovementAllowed(_state);
             var input = new BlockMoveInput(
                 canMove ? dir : IntentDirection.None,
@@ -115,9 +124,10 @@ namespace Client.Net.Prediction
         /// <summary>Сверка с сервером: переиграть неподтверждённые вводы поверх авторитетной позиции И стейта.
         /// Стейт сидируется из снапшота (авторитетно) и переигрывается через FsmLogic.Step — State в pending НЕ
         /// кэшируется, иначе свежий серверный стейт (напр. Stun в Этапе 5) не заморозит хвост вводов.</summary>
-        public void Reconcile(float serverX, float serverY, float serverZ, float serverVY, byte serverFacing, byte serverState, byte serverReason, float serverSpeed, uint lastProcessedInput)
+        public void Reconcile(float serverX, float serverY, float serverZ, float serverVY, byte serverFacing, byte serverState, byte serverReason, float serverSpeed, uint lastProcessedInput, uint serverTick = 0)
         {
             _z = (int)System.MathF.Floor(serverZ); // тайл-режим: этаж задаёт сервер
+            _serverTickBase = serverTick;
 
             if (!_initialized)
             {
@@ -131,6 +141,8 @@ namespace Client.Net.Prediction
             // Grounded не реплицируется — выводим из позиции+VY.
             if (_blockGrid != null)
             {
+                // Снапшот несёт состояние тика ServerTick−1 (инкремент до Broadcast) — сид коллизии с боксами ТОГО тика.
+                PrepareObstacles?.Invoke(serverTick > 0 ? serverTick - 1 : 0);
                 _mover.X = serverX;
                 _mover.Y = serverY;
                 _mover.Z = serverZ;
@@ -157,10 +169,12 @@ namespace Client.Net.Prediction
             Facing = serverFacing;
             if (_blockGrid == null) return;
 
+            uint replayTick = serverTick;
             foreach (var p in _pending)
             {
                 _state = FsmLogic.Step(_state, p.Direction, p.LayToggle, _reason, ref _timers);
-                ApplyBlockStep(p.Direction, p.Sprint, p.Jump);
+                ApplyBlockStep(p.Direction, p.Sprint, p.Jump, replayTick);
+                replayTick++;
             }
         }
     }

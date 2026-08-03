@@ -53,14 +53,8 @@ namespace Client.Map
             if (other == 0)
                 return false;
 
-            var otherDef = other == selfType ? selfDef : BlockDefinitionResolver.Find(other);
-            if (otherDef != null)
-            {
-                MultiBlock.PartToLocal(BlockState.GetPart(grid.GetState(x, y, z)),
-                    otherDef.Size.x, otherDef.Size.z, out _, out int localY, out _);
-                if (localY != 0)
-                    return false;
-            }
+            if (grid.TryGetStructOffset(x, y, z, out _, out int dy, out _) && dy != 0)
+                return false;
 
             var conn = selfDef.Connection;
             if (conn == null)

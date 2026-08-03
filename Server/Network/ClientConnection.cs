@@ -93,6 +93,9 @@ namespace Server.Network
         // Очередь адресных интеракций (клик по тайлу/сущности); дренируется в ProcessInteractions (request-only).
         public readonly ConcurrentQueue<InteractIntent> InteractQueue = new();
 
+        // Выбор этажа с панели в кабине; дренируется LiftFloorSystem ПОСЛЕ интеракций (request-only).
+        public readonly ConcurrentQueue<Shared.Messages.Lifts.LiftFloorRequest> LiftFloorQueue = new();
+
         // Инвентарь: identity-only слоты, БЕЗ ссылок на _entities/GroundItemEntity. Held-предметы физически
         // удалены из общего реестра сущностей на pickup — живут ТОЛЬКО здесь, никогда не идут в PVS.
         // Slots[cat][idx], размер второй оси = InventorySlot.DefaultCount(cat) (Фаза 1, раскладка по SlotCategory).
@@ -115,6 +118,11 @@ namespace Server.Network
         public readonly ConcurrentQueue<PullItem> PullQueue = new();
 
         public int ContainedInNetId; // NetId SS14-ящика, в котором заперт игрок (0 = свободен); гейт ввода/спрайта, эхо в ContainSync
+
+        public int ExposureTicks;
+        public float LastSentPressureKpa = float.NaN;
+        public float LastSentOxygenKpa = float.NaN;
+        public int AtmosSyncCountdown;
 
         // Блочный стрим (фаза C): отправленные клиенту секции (адресация дельт — в.44B) + таймер выгрузки.
         public readonly HashSet<long> SentBlockSections = new();

@@ -19,6 +19,8 @@ public class GameServer
 {
     private readonly SVars _config;
     private NetManager? _server;
+
+    public int BoundPort => _server?.LocalPort ?? 0;
     private readonly Dictionary<NetPeer, ClientConnection> _clients;
     private readonly ConcurrentQueue<Action> _mainThreadActions;
     private bool _isRunning;
@@ -82,16 +84,10 @@ public class GameServer
     private readonly List<BlockUpdateBatch.Entry> _blockPerClient = new();
     private readonly List<long> _blockUnloadBuffer = new();
 
-    // Авто-двери (фаза 2): реестр якорей авто-дверей (DoorOpening.Auto), построен при загрузке мира.
-    private readonly Dictionary<long, AutoDoor> _autoDoors = new();
+    private readonly global::Server.Doors.DoorSystem _doors;
 
-    private sealed class AutoDoor
-    {
-        public int Ax, Ay, Az;
-        public ushort Type;
-        public bool Open;
-        public uint CloseAtTick; // uint.MaxValue = держать открытой (игрок в зоне)
-    }
+    /// <summary>Команды дверей для обработчиков интеракций (реестр + авторитет открытия живут в DoorSystem).</summary>
+    public global::Server.Doors.IDoorCommands Doors => _doors;
 
     public float BlockSpawnX { get; private set; }
     public float BlockSpawnY { get; private set; }
@@ -99,6 +95,21 @@ public class GameServer
 
     /// <summary>Таблица зон последнего флудфилла (in-memory, не сериализуется — ZoneId в блоках уезжает клиенту существующим v12).</summary>
     public Shared.World.Blocks.ZoneFloodResult? Zones { get; private set; }
+
+    public Shared.World.Atmos.AtmosGrid Atmos { get; private set; } = new Shared.World.Atmos.AtmosGrid();
+    private readonly Shared.World.Atmos.AtmosFlow _atmosFlow = new Shared.World.Atmos.AtmosFlow();
+    private readonly global::Server.Atmos.AtmosExposure _atmosExposure;
+
+    /// <summary>Лифты (L1: наполняется тестами/вручную; скан карты — L3). Боксы кабин доливаются в набор препятствий каждый тик.</summary>
+    public List<global::Server.Lifts.LiftRuntime> Lifts { get; } = new();
+    private readonly global::Server.Lifts.LiftSystem _lifts;
+    private readonly global::Server.Lifts.LiftFloorSystem _liftFloors;
+
+    /// <summary>Результат скана шахт (шахты + остановки + диагностика).</summary>
+    public global::Server.Lifts.LiftScanResult LiftScan => _lifts.Result;
+
+    /// <summary>Система лифтов: контроллеры шахт, вызовы этажей, командование шахтными дверьми.</summary>
+    public global::Server.Lifts.LiftSystem LiftSystem => _lifts;
 
     public GameServer(SVars config, IInteractionHandler[]? interactionHandlers = null)
     {
@@ -128,11 +139,31 @@ public class GameServer
             Shared.World.Blocks.DevBlockWorld.SpawnZ);
         Console.WriteLine($"[Map] Blocks: {BlockWorld.Sections.Count} sections, " +
                           $"spawn ({BlockSpawnX}, y{BlockSpawnY}, {BlockSpawnZ})");
+
+        // Диагностика слоя структур: Shared молчит и копит данные, печатает потребитель (см. ZoneFloodResult.Leaks).
+        var mig = Shared.World.Blocks.BlockMapSerializer.LastMigrationStats;
+        if (mig.Moved > 0 || mig.Skipped > 0)
+            Console.WriteLine($"[Struct] миграция карты: перенесено частей {mig.Moved}, пропущено {mig.Skipped} (неизвестный/одиночный тип)");
+        if (BlockWorld.OrphanStructReads > 0 || Shared.Simulation.Blocks.BlockCatalogShapes.BadPartReads > 0)
+            Console.WriteLine($"[Struct] ВНИМАНИЕ: орфан-записей {BlockWorld.OrphanStructReads}, " +
+                              $"частей вне диапазона {Shared.Simulation.Blocks.BlockCatalogShapes.BadPartReads}");
+
+        _doors = new global::Server.Doors.DoorSystem(BlockWorld, Atmos, _config, _clients);
         BuildAutoDoorRegistry();
+
+        // ПОРЯДОК КРИТИЧЕН: строго ПОСЛЕ реестра дверей (иначе шахтной дверью нечем командовать) и строго
+        // ДО AtmosInit.Classify (иначе сохранённая открытой шахтная дверь разметит помещение за ней как Space).
+        _lifts = new global::Server.Lifts.LiftSystem(BlockWorld, _doors, _config);
+        _lifts.Build();
+        _lifts.PrintReport();
+        Lifts.AddRange(_lifts.Runtimes);
+        _liftFloors = new global::Server.Lifts.LiftFloorSystem(_lifts, _clients);
 
         // Пересчёт ПОСЛЕ авто-дверей: флуд классифицирует Openable-блоки как ворота вне зависимости от их состояния.
         Zones = Shared.World.Blocks.ZoneFlood.Recompute(BlockWorld, Shared.World.Blocks.CatalogZoneClassifier.Instance);
-        Console.WriteLine($"[Zones] зон: {Zones.Zones.Count}, стыков: {Zones.Junctions.Count}, конфликтов: {Zones.Conflicts.Count}");
+        Console.WriteLine($"[Zones] зон: {Zones.Zones.Count}, стыков: {Zones.Junctions.Count}, конфликтов: {Zones.Conflicts.Count}, утечек наружу: {Zones.Leaks.Count}");
+        foreach (var leak in Zones.Leaks)
+            Console.WriteLine($"[Zones] УТЕЧКА: зона {leak.ZoneId} открыта в космос у {leak.Cell}");
         if (config.DebugZones)
         {
             foreach (var zone in Zones.Zones)
@@ -144,7 +175,12 @@ public class GameServer
         }
 
         _groundItems.SpawnMapItems(BlockWorld, BlockShapes);
-        _interactionHandlers = interactionHandlers ?? InteractionRegistry.Default();
+
+        Shared.World.Atmos.AtmosInit.Classify(BlockWorld, Atmos);
+        _atmosFlow.FlowRate = config.AtmosFlowRate;
+        _atmosFlow.Epsilon = config.AtmosEpsilon;
+        _atmosExposure = new global::Server.Atmos.AtmosExposure(config);
+        _interactionHandlers = interactionHandlers ?? InteractionRegistry.Default(this);
     }
 
     public void Start()
@@ -156,10 +192,14 @@ public class GameServer
         listener.NetworkReceiveEvent += OnNetworkReceive;
 
         _server = new NetManager(listener);
-        _server.Start(_config.Port);
+        if (!_server.Start(_config.Port))
+        {
+            _server = null;
+            throw new InvalidOperationException($"NetManager.Start failed to bind {_config.Ip}:{_config.Port} (port busy?)");
+        }
         _isRunning = true;
 
-        Console.WriteLine($"[Server] Started on port {_config.Port}");
+        Console.WriteLine($"[Server] Started on port {_server.LocalPort}");
         Console.WriteLine($"[Server] Max players: {_config.MaxPlayers}");
         Console.WriteLine($"[Server] Tick rate: {_config.TickRate} TPS");
 
@@ -209,6 +249,11 @@ public class GameServer
         {
             OnClientConnected?.Invoke(client);
             SendInventorySyncToOwner(client); // ПОСЛЕ OnClientConnected — HUD видит начальный full-state со спавна
+            // Реестр (статичная геометрия) СТРОГО до сегментов: иначе клиент получит движение лифта, чью кабину не знает.
+            SendToClient(client, global::Server.Lifts.LiftRegistryBuilder.Build(
+                Lifts, _lifts.Controllers, _lifts.Result.Shafts));
+            for (int i = 0; i < _lifts.Controllers.Count; i++)
+                SendToClient(client, LiftSyncOf(_lifts.Controllers[i]));
         });
     }
 
@@ -222,6 +267,7 @@ public class GameServer
             _inventory.DropAllHeldOnDisconnect(client);
             _containers.OnClientDisconnect(client);
             _pull.OnClientDisconnect(client);
+            global::Server.Lifts.LiftFloorSystem.OnClientDisconnect(client);
 
             _clients.Remove(peer);
             _entities.Remove(client.PlayerNetId);
@@ -275,8 +321,15 @@ public class GameServer
             }
 
             _groundItems.RebuildObstacles(); // раз/тик, ДО движения — свежая коллизия по крейтам для этого тика
+            _lifts.Tick(_currentTick);
+            for (int i = 0; i < _lifts.Changed.Count; i++)
+                BroadcastToAll(LiftSyncOf(_lifts.Changed[i]));
+            // Контракт лифтов: (1) Y(tick), (2) боксы В НОВОЙ позиции с DeltaY в набор, (3) Step — клиент (L2) обязан повторить.
+            for (int i = 0; i < Lifts.Count; i++)
+                Lifts[i].Tick(_currentTick, (Shared.Simulation.Blocks.DynamicObstacleSet)_groundItems.Obstacles);
             ProcessIntents();
             ProcessInteractions();
+            _liftFloors.Process(_currentTick);
             _inventory.ProcessPickups();
             _inventory.ProcessDrops();
             _inventory.ProcessSlotOps();
@@ -284,6 +337,8 @@ public class GameServer
             _pull.ProcessPullOps();
             _pull.ProcessFollow();
             ProcessStatus();
+            if (_config.AtmosIntervalTicks > 0 && _currentTick % (uint)_config.AtmosIntervalTicks == 0)
+                _atmosFlow.Step(BlockWorld!, Atmos, _config.AtmosMaxCellsPerSubtick);
             ProcessCombat();
 
             _currentTick++;
@@ -497,10 +552,11 @@ public class GameServer
         }
     }
 
-    /// <summary>Hook для combat (будущие этапы): отсюда Kill/SetUnconscious/ApplyStun/KnockDown по урону/health.
-    /// Сейчас no-op — combat/урон не реализованы (entry-API остаётся scaffolding, зовётся прямо/в тестах).</summary>
+    /// <summary>Урон/здоровье за тик: отсюда Kill/SetUnconscious/ApplyStun/KnockDown. Сейчас — экспозиция
+    /// атмосферы (удушье); остальные источники урона подключаются сюда же своими системами.</summary>
     private void ProcessCombat()
     {
+        _atmosExposure.Process(_clients, BlockWorld!, Atmos, this);
     }
 
     // ItemDefId надетой формы (слот Uniform) для визуального оверлея на NetEntityView; 0 = ничего не надето.
@@ -712,133 +768,22 @@ public class GameServer
             BlockType = BlockWorld!.GetBlock(x, y, z),
             State = BlockWorld.GetState(x, y, z)
         });
+        _atmosFlow.WakeAround(BlockWorld!, Atmos, x, y, z);
         long key = Shared.World.Blocks.BlockGrid.KeyOfBlock(x, y, z);
         if (!BlockWorld.Sections.ContainsKey(key))
             _blockEmptiedTick.Add(key);
     }
 
-    // Уникальный ключ БЛОК-позиции (21 бит/ось). НЕ BlockGrid.KeyOfBlock — та даёт ключ СЕКЦИИ (16³),
-    // из-за чего несколько дверей в одной секции затирали друг друга в реестре.
-    private static long DoorAnchorKey(int x, int y, int z)
-        => ((long)(x & 0x1FFFFF)) | ((long)(y & 0x1FFFFF) << 21) | ((long)(z & 0x1FFFFF) << 42);
-
-    // Разовый скан мира при загрузке: якоря авто-дверей (Openable + DoorOpening.Auto + есть триггер, part 0).
-    // Рантайм-добавление/удаление (стройка/деконструкция) — будущий хук, сейчас двери приходят из карты.
+    // Скан карты + печать сводки: Shared/DoorRegistry молчат и копят счётчики, печатает потребитель.
     private void BuildAutoDoorRegistry()
     {
-        _autoDoors.Clear();
-        if (BlockWorld == null)
-            return;
-        int openable = 0, skipMode = 0, skipNoTrig = 0, skipNotAnchor = 0;
-        foreach (var kv in BlockWorld.Sections)
-        {
-            Shared.World.Blocks.BlockGrid.UnpackKey(kv.Key, out int cx, out int cy, out int cz);
-            var section = kv.Value;
-            for (int ly = 0; ly < Shared.World.Blocks.ChunkSection.Size; ly++)
-                for (int lz = 0; lz < Shared.World.Blocks.ChunkSection.Size; lz++)
-                    for (int lx = 0; lx < Shared.World.Blocks.ChunkSection.Size; lx++)
-                    {
-                        ushort type = section.GetBlock(Shared.World.Blocks.ChunkSection.LocalIndex(lx, ly, lz));
-                        if (type == 0)
-                            continue;
-                        var info = Shared.World.Blocks.BlockCatalog.Get(type);
-                        if (!info.Openable)
-                            continue;
-                        openable++;
-                        int wx = cx * 16 + lx, wy = cy * 16 + ly, wz = cz * 16 + lz;
-                        byte st = BlockWorld.GetState(wx, wy, wz);
-                        if (info.Opening != Shared.World.Blocks.DoorOpening.Auto) { skipMode++; continue; }
-                        if (info.Triggers.Length == 0) { skipNoTrig++; continue; }
-                        if (Shared.World.Blocks.BlockState.GetPart(st) != 0) { skipNotAnchor++; continue; }
-
-                        bool open = Shared.World.Blocks.BlockState.GetOpen(st);
-                        _autoDoors[DoorAnchorKey(wx, wy, wz)] = new AutoDoor
-                        {
-                            Ax = wx, Ay = wy, Az = wz, Type = type, Open = open,
-                            CloseAtTick = open ? uint.MaxValue : 0u
-                        };
-                        if (_config.DebugAutoDoors)
-                        {
-                            int facing = Shared.World.Blocks.BlockState.GetFacing(st);
-                            Shared.Simulation.Blocks.AutoDoorLogic.TriggerWorldBounds(wx, wy, wz, info.Triggers[0],
-                                info.SizeX, info.SizeZ, facing,
-                                out float x0, out float y0, out float z0, out float x1, out float y1, out float z1);
-                            Console.WriteLine($"[Doors] анкор ({wx},{wy},{wz}) '{info.Name}' facing={facing} " +
-                                $"size={info.SizeX}x{info.SizeY}x{info.SizeZ} триггеров={info.Triggers.Length} open={open}; " +
-                                $"триггер[0] мир X[{x0:0.##}..{x1:0.##}] Y[{y0:0.##}..{y1:0.##}] Z[{z0:0.##}..{z1:0.##}]");
-                        }
-                    }
-        }
-        Console.WriteLine($"[Doors] авто-дверей: {_autoDoors.Count}; openable: {openable} " +
-                          $"(пропуск: не-Auto {skipMode}, без триггеров {skipNoTrig}, не-якорь {skipNotAnchor})");
+        var stats = _doors.Build();
+        Console.WriteLine($"[Doors] дверей в реестре: {stats.Registered} (Interact: {stats.Interact}, External: {stats.External}); " +
+                          $"дверей-якорей: {stats.Openable} (пропуск: Auto без триггеров {stats.SkippedNoTrigger}, " +
+                          $"частей мульти-блока {stats.SkippedNotAnchor})");
     }
 
-    // Per-tick авторитет авто-дверей: игрок в триггере → Open сразу; вышел → закрыть по DoorCloseDelay.
-    private void ProcessBlockDoors()
-    {
-        if (BlockWorld == null || _autoDoors.Count == 0)
-            return;
-        float hw = Shared.Simulation.Blocks.BlockMovementConfig.HalfWidth;
-        float hh = Shared.Simulation.Blocks.BlockMovementConfig.StandHeight;
-
-        // Троттл-диагностика раз в секунду: позиции игроков (сверить с триггером двери).
-        bool dbg = _config.DebugAutoDoors && _currentTick % (uint)Math.Max(1, _config.TickRate) == 0;
-        if (dbg)
-            foreach (var c in _clients.Values)
-                if (c.PlayerNetId != 0)
-                    Console.WriteLine($"[Doors] player {c.PlayerNetId} pos ({c.Mover.X:0.##}, {c.Mover.Y:0.##}, {c.Mover.Z:0.##})");
-
-        foreach (var door in _autoDoors.Values)
-        {
-            var info = Shared.World.Blocks.BlockCatalog.Get(door.Type);
-            int facing = Shared.World.Blocks.BlockState.GetFacing(BlockWorld.GetState(door.Ax, door.Ay, door.Az));
-
-            bool occupied = false;
-            foreach (var client in _clients.Values)
-            {
-                if (client.PlayerNetId == 0)
-                    continue; // не заспавнен
-                if (Shared.Simulation.Blocks.AutoDoorLogic.PlayerInTrigger(
-                        client.Mover.X, client.Mover.Y, client.Mover.Z, hw, hh,
-                        door.Ax, door.Ay, door.Az, info.Triggers, info.SizeX, info.SizeZ, facing))
-                {
-                    occupied = true;
-                    break;
-                }
-            }
-
-            if (dbg)
-            {
-                Shared.Simulation.Blocks.AutoDoorLogic.TriggerWorldBounds(door.Ax, door.Ay, door.Az, info.Triggers[0],
-                    info.SizeX, info.SizeZ, facing,
-                    out float x0, out float y0, out float z0, out float x1, out float y1, out float z1);
-                Console.WriteLine($"[Doors] ({door.Ax},{door.Ay},{door.Az}) facing={facing} occupied={occupied} " +
-                    $"open={door.Open}; триггер[0] X[{x0:0.##}..{x1:0.##}] Y[{y0:0.##}..{y1:0.##}] Z[{z0:0.##}..{z1:0.##}]");
-            }
-
-            uint closeDelay = (uint)Math.Max(1, (int)(info.CloseDelay * _config.TickRate));
-            Shared.Simulation.Blocks.AutoDoorLogic.Tick(occupied, door.Open, door.CloseAtTick, _currentTick,
-                closeDelay, out bool newOpen, out uint newCloseAt);
-            door.CloseAtTick = newCloseAt;
-            if (newOpen != door.Open)
-                SetDoorOpen(door, info, facing, newOpen);
-        }
-    }
-
-    // Атомарный тоггл Open всех частей двери (SetState фиксит дельту тика через OnBlockWorldChanged).
-    private void SetDoorOpen(AutoDoor door, Shared.World.Blocks.BlockInfo info, int facing, bool open)
-    {
-        int parts = Shared.World.Blocks.MultiBlock.PartCount(info.SizeX, info.SizeY, info.SizeZ);
-        for (int p = 0; p < parts; p++)
-        {
-            Shared.World.Blocks.MultiBlock.PartWorldOffset(p, info.SizeX, info.SizeZ, facing,
-                out int dx, out int dy, out int dz);
-            int px = door.Ax + dx, py = door.Ay + dy, pz = door.Az + dz;
-            byte st = BlockWorld!.GetState(px, py, pz);
-            BlockWorld.SetState(px, py, pz, Shared.World.Blocks.BlockState.WithOpen(st, open));
-        }
-        door.Open = open;
-    }
+    private void ProcessBlockDoors() => _doors.Tick(_currentTick);
 
     /// <summary>Синхронный первичный стрим окна секций (логин) — до первого шага игрока (стопор фронтира).</summary>
     public void StreamBlockSectionsToClient(ClientConnection client) => StreamBlockWindow(client);
@@ -939,6 +884,21 @@ public class GameServer
         client.Y = y;
         client.Z = z;
         client.Facing = facing;
+    }
+
+    private static Shared.Messages.Lifts.LiftSync LiftSyncOf(global::Server.Lifts.LiftController c)
+    {
+        var seg = c.Runtime.Segment;
+        return new Shared.Messages.Lifts.LiftSync
+        {
+            LiftId = c.LiftId,
+            FromY = seg.FromY,
+            ToY = seg.ToY,
+            StartTick = seg.StartTick,
+            BlocksPerTick = seg.BlocksPerTick,
+            DwellUntilTick = c.Plan.DwellUntilTick,
+            Calls = c.Calls
+        };
     }
 
     /// <summary>Отправить сообщение одному клиенту.</summary>

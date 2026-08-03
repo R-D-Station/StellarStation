@@ -2,9 +2,25 @@ using System.Collections.Generic;
 using UnityEngine;
 using Shared.Simulation.Blocks;
 using Shared.World.Blocks;
+using Client.Lifts;
 
 namespace Client.Map
 {
+    public enum PlaceFail { None, CellOccupied, OutOfBounds, OffsetOutOfRange }
+
+    public struct BlockPlaceResult
+    {
+        public bool Ok;
+        public int Cx, Cy, Cz;
+        public ushort BlockingType;
+        public PlaceFail Reason;
+
+        public static BlockPlaceResult Success => new BlockPlaceResult { Ok = true };
+
+        public static BlockPlaceResult Fail(PlaceFail reason, int x, int y, int z, ushort blocking)
+            => new BlockPlaceResult { Ok = false, Reason = reason, Cx = x, Cy = y, Cz = z, BlockingType = blocking };
+    }
+
     /// <summary>In-scene редактор блок-карт: держит BlockGrid + живую куб-визуализацию (не сохраняется в сцену).</summary>
     public sealed class BlockMapAuthoring : MonoBehaviour
     {
@@ -44,38 +60,52 @@ namespace Client.Map
         }
 
         /// <summary>Кисть: записать блок (y — высота), снять сид если перекрасили НЕ-анкером, авто-ориентировать по опоре, обновить куб + соседей.</summary>
-        public void PaintBlock(int x, int y, int z, ushort type)
+        public BlockPlaceResult PaintBlock(int x, int y, int z, ushort type, int facing = 0)
         {
-            if (Grid == null || !Grid.SetBlock(x, y, z, type))
-                return;
+            if (Grid == null)
+                return BlockPlaceResult.Fail(PlaceFail.None, x, y, z, 0);
+            if (!BlockGrid.InBounds(y))
+                return BlockPlaceResult.Fail(PlaceFail.OutOfBounds, x, y, z, 0);
+            if (type != 0 && BelongsToStructure(x, y, z, out ushort owner))
+                return BlockPlaceResult.Fail(PlaceFail.CellOccupied, x, y, z, owner);
+
+            Grid.SetBlock(x, y, z, type);
+            if (Grid.GetBlock(x, y, z) != type)
+                return BlockPlaceResult.Fail(PlaceFail.None, x, y, z, Grid.GetBlock(x, y, z));
             if (!BlockCatalog.Get(type).IsFloorAnchor)
                 Grid.RemoveSeed(x, y, z);
-            ApplyAttachFacing(x, y, z, type);
+            if (!ApplyAttachFacing(x, y, z, type))
+                Grid.SetState(x, y, z, BlockState.WithFacing(Grid.GetState(x, y, z), facing));
             UpdateCell(x, y, z, type);
             RefreshNeighborsVisual(x, y, z);
+            return BlockPlaceResult.Success;
         }
 
         /// <summary>Кисть FloorAnchor: красит блок и пишет сайдкар-<see cref="FloorSeed"/> (имя/ранг/этаж зоны).</summary>
-        public void PaintSeed(int x, int y, int z, ushort type, string name, int rank, int floor)
+        public BlockPlaceResult PaintSeed(int x, int y, int z, ushort type, string name, int rank, int floor)
         {
             if (Grid == null)
-                return;
-            PaintBlock(x, y, z, type);
+                return BlockPlaceResult.Fail(PlaceFail.None, x, y, z, 0);
+            var result = PaintBlock(x, y, z, type);
             if (Grid.GetBlock(x, y, z) == type) // покраска могла не состояться (занято/бракован тип)
                 Grid.SetSeed(x, y, z, new FloorSeed(name, rank, floor));
+            return result;
         }
 
         private static readonly System.Func<ushort, bool> AttachSolid = BlockAttach.DefaultIsSolid; // делегат-кэш: не аллоцировать на каждый PaintBlock
 
-        private void ApplyAttachFacing(int x, int y, int z, ushort type)
+        private bool ApplyAttachFacing(int x, int y, int z, ushort type)
         {
             var info = BlockCatalog.Get(type);
             if (!info.RequiresSupport)
-                return;
+                return false;
             if (BlockAttach.Resolve(Grid, AttachSolid, x, y, z, info.AttachTo, out _, out int facing))
+            {
                 Grid.SetState(x, y, z, BlockState.WithFacing(Grid.GetState(x, y, z), facing));
-            else
-                Debug.LogWarning($"[Attach] «{info.Name}» в ({x},{y},{z}) без опоры — сервер снесёт при загрузке.");
+                return true;
+            }
+            Debug.LogWarning($"[Attach] «{info.Name}» в ({x},{y},{z}) без опоры — сервер снесёт при загрузке.");
+            return false;
         }
 
         // Соседи по плану (8) + верх/низ: их формы верха/автотайл зависят от изменившейся ячейки.
@@ -94,30 +124,141 @@ namespace Client.Map
         public ushort GetBlock(int x, int y, int z) => Grid?.GetBlock(x, y, z) ?? (ushort)0;
 
         /// <summary>Поставить объект якорем в (x,y,z); true — если поставлен (все позиции футпринта были свободны).</summary>
-        public bool PaintObject(int x, int y, int z, BlockDefinition def, int facing)
+        public BlockPlaceResult PaintObject(int x, int y, int z, BlockDefinition def, int facing)
         {
             if (Grid == null || def == null || def.Type == 0)
-                return false;
+                return BlockPlaceResult.Fail(PlaceFail.None, x, y, z, 0);
+
+            var blocked = FirstBlocking(x, y, z, def.Type, facing);
+            if (!blocked.Ok)
+                return blocked;
+            if (!Grid.PlaceMultiBlock(x, y, z, def.Type, facing))
+                return BlockPlaceResult.Fail(PlaceFail.CellOccupied, x, y, z, Grid.GetBlock(x, y, z));
 
             int sx = def.Size.x, sy = def.Size.y, sz = def.Size.z;
             int parts = MultiBlock.PartCount(sx, sy, sz);
-
             for (int p = 0; p < parts; p++)
             {
                 MultiBlock.PartWorldOffset(p, sx, sz, facing, out int dx, out int dy, out int dz);
-                if (Grid.GetBlock(x + dx, y + dy, z + dz) != 0)
-                    return false; // занято — не ставим частично
-            }
-
-            for (int p = 0; p < parts; p++)
-            {
-                MultiBlock.PartWorldOffset(p, sx, sz, facing, out int dx, out int dy, out int dz);
-                Grid.SetBlock(x + dx, y + dy, z + dz, def.Type);
-                Grid.SetState(x + dx, y + dy, z + dz,
-                    BlockState.WithPart(BlockState.WithFacing(0, facing), p));
                 UpdateCell(x + dx, y + dy, z + dz, def.Type);
                 RefreshNeighborsVisual(x + dx, y + dy, z + dz);
             }
+            return BlockPlaceResult.Success;
+        }
+
+        private BlockPlaceResult FirstBlocking(int x, int y, int z, ushort type, int facing)
+        {
+            var info = BlockCatalog.Get(type);
+            int parts = MultiBlock.PartCount(info.SizeX, info.SizeY, info.SizeZ);
+            for (int p = 0; p < parts; p++)
+            {
+                MultiBlock.PartWorldOffset(p, info.SizeX, info.SizeZ, facing, out int dx, out int dy, out int dz);
+                int cx = x + dx, cy = y + dy, cz = z + dz;
+                if (!MultiBlock.OffsetInRange(dx, dy, dz))
+                    return BlockPlaceResult.Fail(PlaceFail.OffsetOutOfRange, cx, cy, cz, 0);
+                if (!BlockGrid.InBounds(cy))
+                    return BlockPlaceResult.Fail(PlaceFail.OutOfBounds, cx, cy, cz, 0);
+                ushort at = Grid.GetBlock(cx, cy, cz);
+                if (at != 0)
+                    return BlockPlaceResult.Fail(PlaceFail.CellOccupied, cx, cy, cz, at);
+            }
+            return BlockPlaceResult.Success;
+        }
+
+        private bool BelongsToStructure(int x, int y, int z, out ushort owner)
+        {
+            owner = Grid.GetBlock(x, y, z);
+            return owner != 0
+                && (Grid.TryGetStructOffset(x, y, z, out _, out _, out _) || BlockCatalog.Get(owner).PartCount > 1);
+        }
+
+        /// <summary>Откажет ли кисть 1×1 в этой клетке (тот же предикат, что и в PaintBlock — для призрака).</summary>
+        public bool BlocksSinglePaint(int x, int y, int z)
+            => Grid == null || !BlockGrid.InBounds(y) || BelongsToStructure(x, y, z, out _);
+
+        /// <summary>Откажет ли постановка объекта в этой части футпринта (тот же предикат, что и FirstBlocking).</summary>
+        public bool BlocksObjectPart(int cx, int cy, int cz, int dx, int dy, int dz)
+            => Grid == null || !MultiBlock.OffsetInRange(dx, dy, dz) || !BlockGrid.InBounds(cy)
+               || Grid.GetBlock(cx, cy, cz) != 0;
+
+        public struct ShaftRect
+        {
+            public int RailX, RailY, RailZ, Facing;
+            public int X0, X1, Z0, Z1;
+            public int ModuleX, ModuleY, ModuleZ;
+        }
+
+        private readonly List<ShaftRect> _shaftScratch = new();
+
+        /// <summary>Плановые прямоугольники всех шахт (по якорям рельсов) — геометрия из Shared, как у сервера.</summary>
+        public void CollectShafts(List<ShaftRect> into)
+        {
+            into.Clear();
+            if (Grid == null)
+                return;
+            foreach (var kv in Grid.Sections)
+            {
+                BlockGrid.UnpackKey(kv.Key, out int cx, out int cy, out int cz);
+                for (int ly = 0; ly < ChunkSection.Size; ly++)
+                    for (int lz = 0; lz < ChunkSection.Size; lz++)
+                        for (int lx = 0; lx < ChunkSection.Size; lx++)
+                        {
+                            ushort t = kv.Value.GetBlock(ChunkSection.LocalIndex(lx, ly, lz));
+                            if (t == 0)
+                                continue;
+                            var lift = BlockCatalog.Get(t).Lift;
+                            if (lift == null || lift.Kind != LiftPartKind.Rail)
+                                continue;
+                            int rx = cx * 16 + lx, ry = cy * 16 + ly, rz = cz * 16 + lz;
+                            if (Grid.TryGetStructOffset(rx, ry, rz, out _, out _, out _))
+                                continue;
+                            int facing = BlockState.GetFacing(Grid.GetState(rx, ry, rz));
+                            LiftCabinPlacement.PlanRect(rx, rz, lift.ModuleX, lift.ModuleZ, facing,
+                                out int x0, out int x1, out int z0, out int z1);
+                            into.Add(new ShaftRect
+                            {
+                                RailX = rx, RailY = ry, RailZ = rz, Facing = facing,
+                                X0 = x0, X1 = x1, Z0 = z0, Z1 = z1,
+                                ModuleX = lift.ModuleX, ModuleY = lift.ModuleY, ModuleZ = lift.ModuleZ
+                            });
+                        }
+            }
+        }
+
+        public static bool IsLiftPart(BlockDefinition def) => def != null && def.IsLiftPart;
+
+        private bool TryFindShaft(int x, int z, out ShaftRect found)
+        {
+            CollectShafts(_shaftScratch);
+            for (int i = 0; i < _shaftScratch.Count; i++)
+            {
+                var s = _shaftScratch[i];
+                if (x >= s.X0 && x <= s.X1 && z >= s.Z0 && z <= s.Z1)
+                {
+                    found = s;
+                    return true;
+                }
+            }
+            found = default;
+            return false;
+        }
+
+        private bool TryPlaceLiftVisual(Transform view, ushort type, int x, int y, int z)
+        {
+            var lift = BlockCatalog.Get(type).Lift;
+            if (lift == null)
+                return false;
+
+            var plan = default(LiftShaftPlan);
+            if (lift.Kind != LiftPartKind.Rail && TryFindShaft(x, z, out var shaft))
+                plan = new LiftShaftPlan(shaft.X0, shaft.Z0, shaft.ModuleX, shaft.ModuleZ, shaft.Facing);
+
+            int ownFacing = BlockState.GetFacing(Grid.GetState(x, y, z));
+            if (!LiftPlanSource.TryPose(lift.Kind, x, y, z, lift.ModuleX, lift.ModuleZ, ownFacing, in plan,
+                    out float px, out float py, out float pz, out int facing))
+                return false;
+
+            view.SetPositionAndRotation(new Vector3(px, py, pz), MultiBlockVisual.FacingRotation(facing));
             return true;
         }
 
@@ -130,26 +271,22 @@ namespace Client.Map
             if (type == 0)
                 return;
 
-            var def = BlockDefinitionResolver.Find(type);
-            int sx = def != null ? def.Size.x : 1, sy = def != null ? def.Size.y : 1, sz = def != null ? def.Size.z : 1;
-            if (!MultiBlock.IsMulti(sx, sy, sz))
+            if (!Grid.AnchorOf(x, y, z, out int ax, out int ay, out int az))
             {
                 PaintBlock(x, y, z, 0);
                 return;
             }
 
-            byte st = Grid.GetState(x, y, z);
-            MultiBlock.AnchorOf(x, y, z, BlockState.GetPart(st), sx, sz, BlockState.GetFacing(st),
-                                out int ax, out int ay, out int az);
-            int parts = MultiBlock.PartCount(sx, sy, sz);
+            var info = BlockCatalog.Get(type);
+            int facing = BlockState.GetFacing(Grid.GetState(ax, ay, az));
+            int parts = MultiBlock.PartCount(info.SizeX, info.SizeY, info.SizeZ);
+            if (!Grid.EraseMultiBlock(x, y, z))
+                return;
             for (int p = 0; p < parts; p++)
             {
-                MultiBlock.PartWorldOffset(p, sx, sz, BlockState.GetFacing(st), out int dx, out int dy, out int dz);
-                if (Grid.SetBlock(ax + dx, ay + dy, az + dz, 0))
-                {
-                    UpdateCell(ax + dx, ay + dy, az + dz, 0);
-                    RefreshNeighborsVisual(ax + dx, ay + dy, az + dz);
-                }
+                MultiBlock.PartWorldOffset(p, info.SizeX, info.SizeZ, facing, out int dx, out int dy, out int dz);
+                UpdateCell(ax + dx, ay + dy, az + dz, 0);
+                RefreshNeighborsVisual(ax + dx, ay + dy, az + dz);
             }
         }
 
@@ -186,7 +323,7 @@ namespace Client.Map
                             if (type == 0) continue;
 
                             byte bake = Grid.GetBake(x, y, z); // аддитивно: OR к существующему
-                            if (SolidTop(x, y - 1, z) == false && HasAnyBox(type))
+                            if (SolidTop(x, y - 1, z) == false && HasAnyBox(x, y, z, type))
                                 bake |= ChunkSection.BakeCeiling;
                             if (SolidTop(x, y, z) && Grid.GetBlock(x, y + 1, z) == 0 && HasRoofAbove(x, y, z))
                                 bake |= ChunkSection.BakeInteriorFloor;
@@ -224,12 +361,13 @@ namespace Client.Map
             return true;
         }
 
-        private bool HasAnyBox(ushort type) => BlockCatalogShapes.Instance.GetBoxes(type, 0).Length > 0;
+        private bool HasAnyBox(int x, int y, int z, ushort type)
+            => BlockCatalogShapes.Instance.GetBoxes(type, Grid.GetState(x, y, z), Grid, x, y, z).Length > 0;
 
         // Есть ли у блока solid-верх (top ≈ 1.0).
         private bool SolidTop(int x, int y, int z)
         {
-            var boxes = BlockCatalogShapes.Instance.GetBoxes(Grid.GetBlock(x, y, z), Grid.GetState(x, y, z));
+            var boxes = BlockCatalogShapes.Instance.GetBoxes(Grid.GetBlock(x, y, z), Grid.GetState(x, y, z), Grid, x, y, z);
             for (int i = 0; i < boxes.Length; i++)
                 if (boxes[i].MaxYf >= 0.999f)
                     return true;
@@ -239,7 +377,7 @@ namespace Client.Map
         private bool HasRoofAbove(int x, int y, int z)
         {
             for (int dy = 2; dy <= InteriorRoofScan; dy++)
-                if (BlockCatalogShapes.Instance.GetBoxes(Grid.GetBlock(x, y + dy, z), Grid.GetState(x, y + dy, z)).Length > 0)
+                if (BlockCatalogShapes.Instance.GetBoxes(Grid.GetBlock(x, y + dy, z), Grid.GetState(x, y + dy, z), Grid, x, y + dy, z).Length > 0)
                     return true;
             return false;
         }
@@ -338,7 +476,7 @@ namespace Client.Map
                 // Мульти-блок: визуал рисует только якорная часть (0), центрируясь по футпринту с поворотом.
                 byte st = Grid.GetState(x, y, z);
                 bool multi = def.Size.x * def.Size.y * def.Size.z > 1;
-                if (multi && BlockState.GetPart(st) != 0) // не-якорная часть мульти-блока — визуал не рисуем
+                if (multi && Grid.TryGetStructOffset(x, y, z, out _, out _, out _)) // не-якорная часть мульти-блока — визуал не рисуем
                 {
                     _cells[key] = cell;
                     return;
@@ -348,7 +486,13 @@ namespace Client.Map
                 view.hideFlags = VisFlags;
                 float pivotY = def.PivotYOffset; // Низ = 0; Центр = половина высоты объекта
                 var shapeRot = Quaternion.Euler(0f, 90f * rotSteps, 0f);
-                if (multi)
+                bool isLift = IsLiftPart(def);
+                bool liftPlaced = isLift && TryPlaceLiftVisual(view.transform, type, x, y, z);
+                if (liftPlaced)
+                {
+                    // позиция выведена от рельса — как её считает движок
+                }
+                else if (multi)
                 {
                     int facing = BlockState.GetFacing(st);
                     view.transform.SetPositionAndRotation(
@@ -367,6 +511,9 @@ namespace Client.Map
                     }
                     view.transform.SetPositionAndRotation(new Vector3(x + 0.5f, y + pivotY, z + 0.5f), rot);
                 }
+                if (isLift && !liftPlaced)
+                    SpawnCube(cell.transform, new Vector3(x + 0.5f, y + 1.4f, z + 0.5f),
+                              new Vector3(0.5f, 0.5f, 0.5f), new Color(1f, 0.1f, 0.1f));
                 FeedTopMesh(view, def, type, x, y, z, rotSteps);
                 var gizmo = view.GetComponentInChildren<BlockGizmo>(true);
                 if (gizmo != null)
@@ -375,7 +522,7 @@ namespace Client.Map
                 return;
             }
 
-            var boxes = BlockCatalogShapes.Instance.GetBoxes(type, Grid.GetState(x, y, z));
+            var boxes = BlockCatalogShapes.Instance.GetBoxes(type, Grid.GetState(x, y, z), Grid, x, y, z);
             if (boxes.Length == 0)
             {
                 SpawnCube(cell.transform, new Vector3(x + 0.5f, y + 0.5f, z + 0.5f), // маркер/без коллизии — кубик

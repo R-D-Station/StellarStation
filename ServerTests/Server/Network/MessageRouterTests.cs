@@ -23,6 +23,7 @@ namespace ServerTests.Server.Network
             MessageType.PutInContainer,
             MessageType.TakeFromContainer,
             MessageType.PullItem,
+            MessageType.LiftFloorRequest,
         };
 
         [Fact]

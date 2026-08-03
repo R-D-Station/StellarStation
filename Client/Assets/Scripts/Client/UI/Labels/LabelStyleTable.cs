@@ -30,9 +30,21 @@ namespace Client.UI.Labels
             if (_entries != null)
                 for (int i = 0; i < _entries.Length; i++)
                     if (_entries[i].Kind == k)
-                        return _entries[i];
+                    {
+                        var e = _entries[i];
+                        // Запись в таблице — ВЫКЛЮЧАТЕЛЬ, а не косметика: пока её нет, Default даёт Lifetime=∞,
+                        // но стоит человеку добавить строку в инспекторе — поле по умолчанию 0 погасит надпись
+                        // по таймеру, и баг будут искать в потребителе, а не в SO. Для персистентных видов
+                        // Lifetime <= 0 трактуем как бесконечность.
+                        if (IsPersistent(k) && !(e.Lifetime > 0f))
+                            e.Lifetime = float.PositiveInfinity;
+                        return e;
+                    }
             return Default(k);
         }
+
+        /// <summary>Виды, которые снимает ВЛАДЕЛЕЦ, а не таймер (иначе исчезнут посреди игры).</summary>
+        private static bool IsPersistent(LabelKind k) => k == LabelKind.CursorHint;
 
         /// <summary>Безопасный дефолт, если записи/таблицы нет: видимая персистентная надпись (Lifetime=∞).</summary>
         // Lifetime=∞ намеренно: мисконфиг заметен (надпись висит), а не тихо исчезает за кадр как default(Entry) (Lifetime=0).

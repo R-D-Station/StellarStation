@@ -4,6 +4,8 @@ using Shared.Messages;
 using Shared.Messages.Core;
 using Shared.Messages.Player;
 using Shared.Messages.Interaction;
+using Shared.Messages.Atmos;
+using Shared.Messages.Lifts;
 using System;
 using System.Collections.Generic;
 using UnityEngine;
@@ -25,6 +27,9 @@ namespace Client.Net
         public event Action<ContainerSync> OnContainerSync;
         public event Action<PullSync> OnPullSync;
         public event Action<ContainSync> OnContainSync;
+        public event Action<AtmosSync> OnAtmosSync;
+        public event Action<LiftSync> OnLiftSync;
+        public event Action<LiftRegistry> OnLiftRegistry;
         public event Action<BlockChunkData> OnBlockChunkData;
         public event Action<BlockSectionGone> OnBlockSectionGone;
         public event Action<BlockUpdateBatch> OnBlockUpdateBatch;
@@ -50,6 +55,9 @@ namespace Client.Net
             { MessageType.ContainerSync, () => new ContainerSync() },
             { MessageType.PullSync, () => new PullSync() },
             { MessageType.ContainSync, () => new ContainSync() },
+            { MessageType.AtmosSync, () => new AtmosSync() },
+            { MessageType.LiftSync, () => new LiftSync() },
+            { MessageType.LiftRegistry, () => new LiftRegistry() },
             { MessageType.BlockChunkData, () => new BlockChunkData() },
             { MessageType.BlockSectionGone, () => new BlockSectionGone() },
             { MessageType.BlockUpdateBatch, () => new BlockUpdateBatch() },
@@ -160,6 +168,18 @@ namespace Client.Net
 
                 case ContainSync cs:
                     OnContainSync?.Invoke(cs);
+                    break;
+
+                case AtmosSync a:
+                    OnAtmosSync?.Invoke(a);
+                    break;
+
+                case LiftSync ls:
+                    OnLiftSync?.Invoke(ls);
+                    break;
+
+                case LiftRegistry lr:
+                    OnLiftRegistry?.Invoke(lr);
                     break;
 
                 case BlockChunkData bc:

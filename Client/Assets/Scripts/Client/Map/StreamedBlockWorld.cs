@@ -47,6 +47,9 @@ namespace Client.Map
 
         public byte GetState(int x, int y, int z) => _grid.GetState(x, y, z); // неизвестное = 0 и так
 
+        public bool TryGetStructOffset(int x, int y, int z, out int dx, out int dy, out int dz)
+            => _grid.TryGetStructOffset(x, y, z, out dx, out dy, out dz);
+
         // Пустые секции не стримятся: внутри суженного окна отсутствие секции = воздух, а не «неизвестно».
         private bool InKnownWindow(int cx, int cy, int cz)
         {
@@ -75,5 +78,8 @@ namespace Client.Map
 
         public BlockBox[] GetBoxes(ushort type, byte state)
             => type == BlockStreaming.UnknownBlock ? FullBox : _inner.GetBoxes(type, state);
+
+        public BlockBox[] GetBoxes(ushort type, byte state, IBlockSampler grid, int x, int y, int z)
+            => type == BlockStreaming.UnknownBlock ? FullBox : _inner.GetBoxes(type, state, grid, x, y, z);
     }
 }

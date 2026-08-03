@@ -264,5 +264,165 @@ namespace ServerTests.Shared.World.Blocks
                 Assert.Equal(ra.Conflicts[i].Floors, rb.Conflicts[i].Floors);
             }
         }
+
+        private static void Bake(BlockGrid g, int x, int y, int z, byte bake)
+            => Assert.True(g.SetBake(x, y, z, bake), $"SetBake должен примениться в ({x},{y},{z})");
+
+        [Fact]
+        public void DividerBake_OnAirCell_CutsZone()
+        {
+            var g = TwoRooms(0);
+            PlaceSeed(g, 1, 1, 1, "A", 1, 1);
+            PlaceSeed(g, 8, 1, 3, "B", 2, 1);
+            Assert.Equal(0, g.GetBlock(5, 1, 2));
+
+            Bake(g, 5, 1, 2, ChunkSection.BakeDivider);
+            var r = ZoneFlood.Recompute(g, Cls);
+
+            Assert.Equal(2, r.Zones.Count);
+            Assert.NotEqual(g.GetZone(2, 1, 2), g.GetZone(7, 1, 2));
+        }
+
+        [Fact]
+        public void DividerBake_SurvivesBlockPlacementAndRemoval()
+        {
+            var g = TwoRooms(0);
+            PlaceSeed(g, 1, 1, 1, "A", 1, 1);
+            PlaceSeed(g, 8, 1, 3, "B", 2, 1);
+            Bake(g, 5, 1, 2, ChunkSection.BakeDivider);
+
+            g.SetBlock(5, 1, 2, DoorT);
+            Assert.Equal(ChunkSection.BakeDivider, g.GetBake(5, 1, 2));
+            Assert.Equal(2, ZoneFlood.Recompute(g, Cls).Zones.Count);
+            Assert.NotEqual(g.GetZone(2, 1, 2), g.GetZone(7, 1, 2));
+
+            g.SetBlock(5, 1, 2, 0);
+            Assert.Equal(ChunkSection.BakeDivider, g.GetBake(5, 1, 2));
+            Assert.Equal(2, ZoneFlood.Recompute(g, Cls).Zones.Count);
+        }
+
+        [Fact]
+        public void VisualBakeBits_ClearedOnRemoval_CellBitsKept()
+        {
+            var g = TwoRooms(0);
+            Bake(g, 5, 1, 1, (byte)(ChunkSection.BakeCeiling | ChunkSection.BakeDivider));
+
+            g.SetBlock(5, 1, 1, 0);
+
+            Assert.Equal(ChunkSection.BakeDivider, g.GetBake(5, 1, 1));
+        }
+
+        [Fact]
+        public void GateToExterior_IsNotZoned()
+        {
+            var g = TwoRooms(0);
+            g.SetBlock(5, 1, 2, WallT);
+            g.SetBlock(9, 1, 2, DoorT);
+            PlaceSeed(g, 8, 1, 3, "B", 1, 1);
+
+            var r = ZoneFlood.Recompute(g, Cls);
+
+            Assert.Single(r.Zones);
+            Assert.NotEqual(0, g.GetZone(7, 1, 2));
+            Assert.Equal(0, g.GetZone(9, 1, 2));
+        }
+
+        [Fact]
+        public void GateBetweenRoomsOfSameZone_IsZoned()
+        {
+            var g = TwoRooms(DoorT);
+            PlaceSeed(g, 1, 1, 1, "A", 1, 1);
+            PlaceSeed(g, 8, 1, 3, "B", 2, 1);
+
+            var r = ZoneFlood.Recompute(g, Cls);
+
+            Assert.Single(r.Zones);
+            Assert.NotEqual(0, g.GetZone(5, 1, 2));
+        }
+
+        [Fact]
+        public void GateToUnseededClosedRoom_KeepsZone()
+        {
+            var g = TwoRooms(DoorT);
+            PlaceSeed(g, 1, 1, 1, "A", 1, 1);
+
+            var r = ZoneFlood.Recompute(g, Cls);
+
+            Assert.Single(r.Zones);
+            Assert.NotEqual(0, g.GetZone(5, 1, 2));
+            Assert.Empty(r.Leaks);
+        }
+
+        [Fact]
+        public void SeededRegionOpenToExterior_ReportsLeak()
+        {
+            var g = TwoRooms(0);
+            PlaceSeed(g, 1, 1, 1, "A", 1, 1);
+            Assert.Empty(ZoneFlood.Recompute(g, Cls).Leaks);
+
+            g.SetBlock(9, 1, 2, 0);
+            var r = ZoneFlood.Recompute(g, Cls);
+
+            Assert.Single(r.Leaks);
+            Assert.Equal(g.GetZone(2, 1, 2), r.Leaks[0].ZoneId);
+        }
+
+        [Fact]
+        public void ExteriorRegion_GetsExteriorZoneId()
+        {
+            var g = TwoRooms(0);
+            PlaceSeed(g, 1, 1, 1, "A", 1, 1);
+
+            ZoneFlood.Recompute(g, Cls);
+
+            Assert.Equal(ZoneFlood.ExteriorZoneId, g.GetZone(11, 1, 2));
+            Assert.Equal(ZoneFlood.ExteriorZoneId, g.GetZone(13, 5, 9));
+        }
+
+        [Fact]
+        public void InteriorAndExterior_AreDifferentZones_NotMergedThroughDoor()
+        {
+            var g = TwoRooms(0);
+            g.SetBlock(5, 1, 2, WallT);
+            g.SetBlock(9, 1, 2, DoorT);
+            PlaceSeed(g, 8, 1, 3, "B", 1, 1);
+
+            var r = ZoneFlood.Recompute(g, Cls);
+
+            ushort inside = g.GetZone(7, 1, 2);
+            Assert.Single(r.Zones);
+            Assert.NotEqual(0, inside);
+            Assert.NotEqual(ZoneFlood.ExteriorZoneId, inside);
+            Assert.Equal(ZoneFlood.ExteriorZoneId, g.GetZone(11, 1, 2));
+            Assert.Equal(0, g.GetZone(9, 1, 2));
+            Assert.Empty(r.Leaks);
+        }
+
+        [Fact]
+        public void ClosedUnseededRoom_StaysZoneless_NotExterior()
+        {
+            var g = TwoRooms(WallT);
+            PlaceSeed(g, 1, 1, 1, "A", 1, 1);
+
+            ZoneFlood.Recompute(g, Cls);
+
+            Assert.NotEqual(0, g.GetZone(2, 1, 2));
+            Assert.Equal(0, g.GetZone(7, 1, 2));
+        }
+
+        [Fact]
+        public void LeakingSeededRegion_KeepsOwnZone_NotExterior()
+        {
+            var g = TwoRooms(0);
+            PlaceSeed(g, 1, 1, 1, "A", 1, 1);
+            g.SetBlock(9, 1, 2, 0);
+
+            var r = ZoneFlood.Recompute(g, Cls);
+
+            ushort z = g.GetZone(2, 1, 2);
+            Assert.NotEqual(0, z);
+            Assert.NotEqual(ZoneFlood.ExteriorZoneId, z);
+            Assert.Single(r.Leaks);
+        }
     }
 }

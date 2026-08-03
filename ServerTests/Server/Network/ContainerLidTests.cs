@@ -24,32 +24,23 @@ namespace ServerTests.Server.Network
 
         private readonly SVars _config;
         private GameServer? _server;
-        private readonly int _testPort;
-        private static int _portCounter = 9100;
-        private static readonly object _portLock = new object();
+        private int _testPort;
 
         public ContainerLidTests()
         {
-            lock (_portLock)
-            {
-                _testPort = _portCounter++;
-                if (_testPort > 9300) _portCounter = 9100;
-            }
-
             _config = new SVars
             {
                 Ip = "127.0.0.1",
-                Port = _testPort,
+                Port = 0,
                 MaxPlayers = 10,
                 TickRate = 30,
-                ConnectionKey = $"LidTest_{_testPort}"
+                ConnectionKey = "LidTest"
             };
         }
 
         public void Dispose()
         {
             _server?.Stop();
-            Thread.Sleep(50);
         }
 
         private static ItemProto? Protos(ushort defId) => defId switch
@@ -69,7 +60,7 @@ namespace ServerTests.Server.Network
             _config.MapPath = "";
             _server = new GameServer(_config);
             _server.Start();
-            Thread.Sleep(50);
+            _testPort = _server.BoundPort;
             _server.ProtoLookup = Protos;
             return _server;
         }
@@ -85,9 +76,11 @@ namespace ServerTests.Server.Network
             clientListener.PeerConnectedEvent += peer => { connectedPeer = peer; connected = true; };
 
             clientManager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
-            for (int i = 0; i < 100 && !connected; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
-
-            if (connectedPeer == null)
+            try
+            {
+                TestWait.Until(() => connectedPeer != null, () => clientManager.PollEvents(), what: "peer connected");
+            }
+            catch (TimeoutException)
             {
                 clientManager.Stop();
                 throw new Exception($"Failed to connect to server on port {_testPort}");
@@ -109,8 +102,7 @@ namespace ServerTests.Server.Network
                 catch (Exception e) { error = e; }
                 finally { Volatile.Write(ref completed, true); }
             });
-            for (int i = 0; i < 500 && !Volatile.Read(ref completed); i++) Thread.Sleep(10);
-            if (!Volatile.Read(ref completed)) throw new TimeoutException("GameLoop did not run the queued action");
+            TestWait.Until(() => Volatile.Read(ref completed), TestWait.DefaultTimeoutMs, "GameLoop ran queued action");
             if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
         }
 
@@ -518,29 +510,27 @@ namespace ServerTests.Server.Network
 
         private static ClientConnection WaitServerClient(GameServer s)
         {
-            for (int i = 0; i < 300; i++)
+            ClientConnection? found = null;
+            TestWait.Until(() =>
             {
                 var d = (System.Collections.IDictionary)ClientsField.GetValue(s)!;
-                foreach (var v in d.Values) return (ClientConnection)v;
-                Thread.Sleep(10);
-            }
-            throw new Exception("server ClientConnection not registered");
+                foreach (var v in d.Values) { found = (ClientConnection)v; return true; }
+                return false;
+            }, 3000, "server ClientConnection registered");
+            return found!;
         }
 
         private static List<ClientConnection> WaitServerClients(GameServer s, int n)
         {
-            for (int i = 0; i < 400; i++)
+            System.Collections.IDictionary d = null!;
+            TestWait.Until(() =>
             {
-                var d = (System.Collections.IDictionary)ClientsField.GetValue(s)!;
-                if (d.Count >= n)
-                {
-                    var list = new List<ClientConnection>();
-                    foreach (var v in d.Values) list.Add((ClientConnection)v);
-                    return list;
-                }
-                Thread.Sleep(10);
-            }
-            throw new Exception($"expected {n} server clients");
+                d = (System.Collections.IDictionary)ClientsField.GetValue(s)!;
+                return d.Count >= n;
+            }, 4000, $"expected {n} server clients");
+            var list = new List<ClientConnection>();
+            foreach (var v in d.Values) list.Add((ClientConnection)v);
+            return list;
         }
 
         private static void OnCell(ClientConnection c, float x, float z, int y)
@@ -758,8 +748,7 @@ namespace ServerTests.Server.Network
                 catch (Exception e) { error = e; }
                 finally { Volatile.Write(ref completed, true); }
             });
-            for (int i = 0; i < 500 && !Volatile.Read(ref completed); i++) Thread.Sleep(10);
-            if (!Volatile.Read(ref completed)) throw new TimeoutException("GameLoop did not run the queued action");
+            TestWait.Until(() => Volatile.Read(ref completed), TestWait.DefaultTimeoutMs, "GameLoop ran queued action");
             if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
             return result;
         }

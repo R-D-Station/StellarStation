@@ -16,6 +16,10 @@ public enum MessageType : ushort
     BlockChunkData = 11,   // фаза C: одна секция 16³ (server→client, ReliableOrdered)
     BlockSectionGone = 12, // фаза C: секция ушла — вне радиуса (забудь) либо опустела (воздух)
     BlockUpdateBatch = 13, // фаза C: пакет дельт блоков одного тика (server→client, держателям секций)
+    AtmosSync = 14, // server→client, OWNER-ONLY: атмосфера клетки игрока (давление+O₂ кПа) — HUD-датчик
+    LiftSync = 15,  // server→client, BROADCAST: сегмент траектории лифта (только при смене; позиция = Y(tick) на обеих сторонах)
+    LiftRegistry = 16, // server→client, BROADCAST: СТАТИЧНАЯ геометрия лифтов (якорь + боксы кабины); обязан прийти ДО первого LiftSync
+    LiftFloorRequest = 17, // client→server: выбор этажа с панели в кабине (request-only, без предсказания)
 
     // Player (100-199)
     LoginRequest = 100,

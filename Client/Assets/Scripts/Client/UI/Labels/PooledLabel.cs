@@ -69,8 +69,25 @@ namespace Client.UI.Labels
             _worldTarget = null;
             _camera = null;
             _lifetime = float.PositiveInfinity;
+            Generation++; // новая выдача — старые хендлы обязаны перестать считаться своими
             if (_text != null) _text.text = string.Empty;
             if (_group != null) _group.alpha = 0f;
+        }
+
+        /// <summary>Токен владения выдачей. Метка возвращает себя в пул САМА (истёк lifetime, пропала камера/цель),
+        /// а владелец продолжает держать ссылку — без сверки токена он испортил бы ЧУЖУЮ надпись, уже выданную
+        /// следующему потребителю.</summary>
+        public int Generation { get; private set; }
+
+        /// <summary>Всё ещё моя ли это выдача (метка не вернулась в пул и не переиспользована).</summary>
+        public bool IsOwnedBy(int generation) => !_returned && Generation == generation;
+
+        /// <summary>Сменить текст уже показанной надписи. Владелец обязан сперва сверить <see cref="IsOwnedBy"/>.</summary>
+        public void SetText(string text)
+        {
+            if (_text == null) return;
+            _text.text = text;
+            _rt.sizeDelta = _text.GetPreferredValues(text) + _padding;
         }
 
         /// <summary>Прокинуть экранную позицию курсора (FollowScreen), БЕЗ Y-флипа (overlay bottom-left = Input).</summary>

@@ -44,6 +44,17 @@ namespace Shared.World.Blocks
                  | ((long)(cz & 0x1FFFFF) << 42);
         }
 
+        /// <summary>Ключ КЛЕТКИ (21 бит на ось). НЕ путать с <see cref="Key"/>/<see cref="KeyOfBlock"/> — те дают ключ СЕКЦИИ 16³.</summary>
+        public static long PackCell(int x, int y, int z)
+            => ((long)(x & 0x1FFFFF)) | ((long)(y & 0x1FFFFF) << 21) | ((long)(z & 0x1FFFFF) << 42);
+
+        public static void UnpackCell(long key, out int x, out int y, out int z)
+        {
+            x = SignExtend21((int)(key & 0x1FFFFF));
+            y = SignExtend21((int)((key >> 21) & 0x1FFFFF));
+            z = SignExtend21((int)((key >> 42) & 0x1FFFFF));
+        }
+
         public static void UnpackKey(long key, out int cx, out int cy, out int cz)
         {
             cx = SignExtend21((int)(key & 0x1FFFFF));
@@ -167,7 +178,7 @@ namespace Shared.World.Blocks
             return s?.GetBake(LocalIndex(x, y, z)) ?? (byte)0;
         }
 
-        /// <summary>Записать бейк-байт (авторская разметка редактора). false — если не изменился либо Air.</summary>
+        /// <summary>Записать бейк-байт (авторская разметка редактора). false — если не изменился либо нет секции.</summary>
         public bool SetBake(int x, int y, int z, byte bake)
         {
             CheckWriteBounds(y);
@@ -175,6 +186,115 @@ namespace Shared.World.Blocks
             if (!_sections.TryGetValue(key, out var s) || !s.SetBake(LocalIndex(x, y, z), bake))
                 return false;
             _dirty.Add(key);
+            return true;
+        }
+
+        public bool TryGetStructOffset(int x, int y, int z, out int dx, out int dy, out int dz)
+        {
+            dx = dy = dz = 0;
+            if (!InBounds(y))
+                return false;
+            var s = GetSection(FloorDiv(x, ChunkSection.Size), FloorDiv(y, ChunkSection.Size), FloorDiv(z, ChunkSection.Size));
+            ushort packed = s?.GetStruct(LocalIndex(x, y, z)) ?? (ushort)0;
+            if (packed == 0)
+                return false;
+            MultiBlock.UnpackOffset(packed, out dx, out dy, out dz);
+            return true;
+        }
+
+        public bool SetStructOffset(int x, int y, int z, int dx, int dy, int dz)
+        {
+            if (!MultiBlock.OffsetInRange(dx, dy, dz))
+                return false;
+            CheckWriteBounds(y);
+            long key = Key(FloorDiv(x, ChunkSection.Size), FloorDiv(y, ChunkSection.Size), FloorDiv(z, ChunkSection.Size));
+            ushort packed = dx == 0 && dy == 0 && dz == 0 ? (ushort)0 : (ushort)MultiBlock.PackOffset(dx, dy, dz);
+            if (!_sections.TryGetValue(key, out var s) || !s.SetStruct(LocalIndex(x, y, z), packed))
+                return false;
+            _dirty.Add(key);
+            return true;
+        }
+
+        /// <summary>Клетка — якорь мульти-блока: тип с PartCount &gt; 1 и БЕЗ записи слоя.</summary>
+        public bool IsStructAnchor(int x, int y, int z)
+        {
+            var info = BlockCatalog.Get(GetBlock(x, y, z));
+            return info.PartCount > 1 && !TryGetStructOffset(x, y, z, out _, out _, out _);
+        }
+
+        /// <summary>Якорь структуры, которой принадлежит клетка (сама клетка, если якорь). false — не структура либо орфан.</summary>
+        public bool AnchorOf(int x, int y, int z, out int ax, out int ay, out int az)
+        {
+            ax = x; ay = y; az = z;
+            ushort type = GetBlock(x, y, z);
+            if (BlockCatalog.Get(type).PartCount <= 1)
+                return false;
+            if (!TryGetStructOffset(x, y, z, out int dx, out int dy, out int dz))
+                return true;
+
+            ax = x - dx; ay = y - dy; az = z - dz;
+            if (GetBlock(ax, ay, az) == type)
+                return true;
+
+            // Секции якоря нет (клиентский стрим: структура через границу 16³) — это НЕ повреждение, орфаном не считаем.
+            bool anchorSectionLoaded = InBounds(ay) && GetSection(
+                FloorDiv(ax, ChunkSection.Size), FloorDiv(ay, ChunkSection.Size), FloorDiv(az, ChunkSection.Size)) != null;
+            if (anchorSectionLoaded)
+                OrphanStructReads++;
+            ax = x; ay = y; az = z;
+            return false;
+        }
+
+        /// <summary>Записей слоя, приведших к якорю чужого типа (диагностика; печатает потребитель — Shared молчит).</summary>
+        public int OrphanStructReads { get; private set; }
+
+        /// <summary>Разместить мульти-блок якорем в (x,y,z): все части + facing + записи слоя не-якорным. false — занято/вне пределов.</summary>
+        public bool PlaceMultiBlock(int x, int y, int z, ushort type, int facing)
+        {
+            var info = BlockCatalog.Get(type);
+            int parts = MultiBlock.PartCount(info.SizeX, info.SizeY, info.SizeZ);
+            for (int p = 0; p < parts; p++)
+            {
+                MultiBlock.PartWorldOffset(p, info.SizeX, info.SizeZ, facing, out int dx, out int dy, out int dz);
+                if (!MultiBlock.OffsetInRange(dx, dy, dz) || !InBounds(y + dy) || GetBlock(x + dx, y + dy, z + dz) != 0)
+                    return false;
+            }
+
+            byte state = BlockState.WithFacing(0, facing);
+            for (int p = 0; p < parts; p++)
+            {
+                MultiBlock.PartWorldOffset(p, info.SizeX, info.SizeZ, facing, out int dx, out int dy, out int dz);
+                SetBlock(x + dx, y + dy, z + dz, type);
+                SetState(x + dx, y + dy, z + dz, state);
+                if (dx != 0 || dy != 0 || dz != 0)
+                    SetStructOffset(x + dx, y + dy, z + dz, dx, dy, dz);
+            }
+            return true;
+        }
+
+        /// <summary>Снести структуру от ЛЮБОЙ её клетки (блоки+state+записи слоя). false — не структура.</summary>
+        public bool EraseMultiBlock(int x, int y, int z)
+        {
+            ushort type = GetBlock(x, y, z);
+            var info = BlockCatalog.Get(type);
+            if (info.PartCount <= 1)
+                return false;
+            if (!AnchorOf(x, y, z, out int ax, out int ay, out int az))
+                return false;
+
+            int facing = BlockState.GetFacing(GetState(ax, ay, az));
+            int parts = MultiBlock.PartCount(info.SizeX, info.SizeY, info.SizeZ);
+            for (int p = 0; p < parts; p++)
+            {
+                MultiBlock.PartWorldOffset(p, info.SizeX, info.SizeZ, facing, out int dx, out int dy, out int dz);
+                int px = ax + dx, py = ay + dy, pz = az + dz;
+                if (!InBounds(py))
+                    continue;
+                SetStructOffset(px, py, pz, 0, 0, 0); // до проверки типа: осиротевшая запись не должна пережить снос
+                if (GetBlock(px, py, pz) != type)
+                    continue;
+                SetBlock(px, py, pz, 0);
+            }
             return true;
         }
 

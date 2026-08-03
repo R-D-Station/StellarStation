@@ -6,8 +6,11 @@ namespace Shared.World.Blocks
     {
         ushort GetBlock(int x, int y, int z);
 
-        /// <summary>State-байт (part/facing/Open — коллизия мульти-блоков и дверей зависит от него).</summary>
+        /// <summary>State-байт (facing/Open — коллизия дверей зависит от него).</summary>
         byte GetState(int x, int y, int z);
+
+        /// <summary>Смещение клетки до якоря её структуры (слой принадлежности); false — якорь либо одиночный блок.</summary>
+        bool TryGetStructOffset(int x, int y, int z, out int dx, out int dy, out int dz);
     }
 
     /// <summary>Константы блочного стрима — в Shared (обе стороны считают окно одинаково, в.42-стиль).</summary>

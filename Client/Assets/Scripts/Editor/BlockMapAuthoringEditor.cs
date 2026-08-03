@@ -18,9 +18,15 @@ namespace Client.Editor.Inspectors
         private static int _facing; // поворот мульти-блока (R в SceneView, 90° по часовой)
         private static double _lastBrushTime; // пауза кисти присоединения (BrushInterval)
         private static readonly Vector3[] _cellRect = new Vector3[4]; // подсветка ячейки слоя (без аллокаций)
+        private static bool _hasFail;
+        private static Vector3Int _failCell;
+        private static readonly System.Collections.Generic.List<BlockMapAuthoring.ShaftRect> _shafts = new();
+        private static bool _shaftsDirty = true;
+        private static readonly Color ShaftWire = new Color(0.2f, 0.95f, 1f);
         private static readonly string[] ModeNames = { "Слой", "Присоед.", "Вставка" };
         private static readonly string[] SectionNames = { "Блоки", "Предметы", "Маркеры" };
         private static readonly string[] MarkerNames = { "Потолки", "Полы", "Marker", "Divider", "MergeMarker", "Точка спавна" };
+        private static readonly string[] FacingNames = { "Север", "Восток", "Юг", "Запад" };
         private static readonly Shared.World.Blocks.BlockCategory[] MarkerBlockCats =
         {
             Shared.World.Blocks.BlockCategory.Marker,
@@ -41,6 +47,11 @@ namespace Client.Editor.Inspectors
         private readonly List<Vector3> _zoneQuadPos = new();
         private readonly List<Color> _zoneQuadColor = new();
         private readonly HashSet<ushort> _conflictZones = new(); // Id зон с конфликтом этажей — красная подсветка сидов
+
+        private const int MarkerOverlayCap = 3000;
+        private readonly List<Vector3> _dividerCells = new();
+        private readonly List<Vector3> _mergeCells = new();
+        private bool _markerOverlayDirty = true;
 
         private BlockDefinition[] _palette;
         private string[] _paletteNames;
@@ -156,7 +167,9 @@ namespace Client.Editor.Inspectors
             return -1;
         }
 
-        private static bool ModeAllowed(int mode) => _section == 0 || mode == 2; // Предметы/Маркеры ставятся только «Вставкой»
+        private static bool IsBitMarkerSelected() => _section == 2 && (_markerIndex == 3 || _markerIndex == 4);
+        private static bool ModeAllowed(int mode) => _section == 0 || mode == 2 || (IsBitMarkerSelected() && mode == 0);
+        private static bool RotationApplies() => _section == 0 || (_section == 2 && (_markerIndex == 2 || _markerIndex == 5));
 
         private int MarkerPaletteIndex() // индекс палитры для маркерного блока (-1 в бейк-режимах Потолки/Полы)
         {
@@ -201,6 +214,10 @@ namespace Client.Editor.Inspectors
             else
                 DrawMarkerPicker();
 
+            if (RotationApplies())
+                EditorGUILayout.LabelField(new GUIContent("Поворот", "Крутит R в SceneView: Север/Восток/Юг/Запад."),
+                    new GUIContent(FacingNames[_facing & 3]));
+
             EditorGUILayout.Space(6);
             EditorGUI.BeginChangeCheck();
             DrawDefaultInspector();
@@ -210,9 +227,9 @@ namespace Client.Editor.Inspectors
             EditorGUILayout.Space(6);
             using (new EditorGUILayout.HorizontalScope())
             {
-                if (GUILayout.Button("Новая")) { t.NewMap(); t.RebuildBakeVisual(); if (_showZones) RecomputeZonesPreview(t); }
+                if (GUILayout.Button("Новая")) { t.NewMap(); t.RebuildBakeVisual(); _markerOverlayDirty = true; _shaftsDirty = true; if (_showZones) RecomputeZonesPreview(t); }
                 using (new EditorGUI.DisabledScope(!System.IO.File.Exists(t.MapPath)))
-                    if (GUILayout.Button("Загрузить")) TryIO(() => { t.LoadMap(); t.RebuildBakeVisual(); if (_showZones) RecomputeZonesPreview(t); });
+                    if (GUILayout.Button("Загрузить")) TryIO(() => { t.LoadMap(); t.RebuildBakeVisual(); _markerOverlayDirty = true; _shaftsDirty = true; if (_showZones) RecomputeZonesPreview(t); });
                 using (new EditorGUI.DisabledScope(!t.IsLoaded))
                     if (GUILayout.Button("Сохранить")) TryIO(() => { t.SaveMap(); AssetDatabase.Refresh(); });
             }
@@ -220,6 +237,14 @@ namespace Client.Editor.Inspectors
             using (new EditorGUI.DisabledScope(!t.IsLoaded))
                 if (GUILayout.Button("Запечь потолки/полы"))
                     t.BakeLayers();
+
+            using (new EditorGUI.DisabledScope(!t.IsLoaded))
+                if (GUILayout.Button(new GUIContent("Маркеры → метки", "Старые блоки Divider/MergeMarker → бейк-биты (блок удаляется).")))
+                {
+                    ConvertMarkerBlocks(t);
+                    _markerOverlayDirty = true;
+                    if (_showZones) RecomputeZonesPreview(t);
+                }
 
             EditorGUILayout.Space(6);
             _layer = EditorGUILayout.IntField(new GUIContent("Слой (Y)", "Высота кисти; [ и ] в SceneView."), _layer);
@@ -294,8 +319,8 @@ namespace Client.Editor.Inspectors
         private void DrawMarkerPicker()
         {
             int newMarker = EditorGUILayout.Popup(new GUIContent("Категория"), _markerIndex, MarkerNames);
-            if (newMarker != _markerIndex) { _markerIndex = newMarker; _markerBlockIndex = 0; }
-            if (_markerIndex < 2)
+            if (newMarker != _markerIndex) { _markerIndex = newMarker; _markerBlockIndex = 0; if (!ModeAllowed(_mode)) _mode = 2; }
+            if (_markerIndex < 2 || _markerIndex == 3 || _markerIndex == 4)
                 return;
 
             var cat = MarkerBlockCats[_markerIndex - 2];
@@ -306,11 +331,8 @@ namespace Client.Editor.Inspectors
                 return;
             }
             var inCat = _paletteByCategory[ci];
-            if (inCat.Length > 1)
-            {
-                _markerBlockIndex = Mathf.Clamp(_markerBlockIndex, 0, inCat.Length - 1);
-                _markerBlockIndex = EditorGUILayout.Popup(new GUIContent("Блок"), _markerBlockIndex, _blockNamesByCategory[ci]);
-            }
+            _markerBlockIndex = Mathf.Clamp(_markerBlockIndex, 0, inCat.Length - 1);
+            _markerBlockIndex = EditorGUILayout.Popup(new GUIContent("Блок"), _markerBlockIndex, _blockNamesByCategory[ci]);
             _paletteIndex = inCat[Mathf.Clamp(_markerBlockIndex, 0, inCat.Length - 1)];
         }
 
@@ -414,8 +436,13 @@ namespace Client.Editor.Inspectors
                 DrawZonePreview();
             if (t.IsLoaded)
                 DrawItemSpawns(t);
+            if (t.IsLoaded)
+                DrawMarkerOverlay(t);
             if (!t.IsLoaded)
                 return;
+
+            DrawFailHighlight();
+            DrawShaftRects(t);
 
             Event e = Event.current;
 
@@ -456,11 +483,150 @@ namespace Client.Editor.Inspectors
                 BakeMode(t, e, ray, ceiling: _markerIndex == 0);
                 return;
             }
+            if (_markerIndex == 3 || _markerIndex == 4)
+            {
+                BitMarkerPaint(t, e, ray, merge: _markerIndex == 4);
+                return;
+            }
             int idx = MarkerPaletteIndex();
             if (idx < 0)
                 return;
             _paletteIndex = idx;
             BlockInsert(t, e, ray);
+        }
+
+        private void BitMarkerPaint(BlockMapAuthoring t, Event e, Ray ray, bool merge)
+        {
+            Vector3Int cell;
+            if (_mode == 0)
+            {
+                if (!PlaneCell(ray, out cell))
+                    return;
+                DrawGrid(cell.x, cell.z);
+            }
+            else if (RaycastGrid(t, ray, 200f, out var hit, out _))
+            {
+                cell = hit;
+            }
+            else
+            {
+                if (!PlaneCell(ray, out cell))
+                    return;
+                DrawGrid(cell.x, cell.z);
+            }
+
+            bool erase = e.shift;
+            Handles.color = erase ? new Color(1f, 0.3f, 0.2f)
+                                  : (merge ? new Color(0.25f, 1f, 0.35f) : new Color(1f, 0.3f, 0.3f));
+            Handles.DrawWireCube(new Vector3(cell.x + 0.5f, cell.y + 0.5f, cell.z + 0.5f), Vector3.one);
+
+            if ((e.type == EventType.MouseDown || e.type == EventType.MouseDrag) && e.button == 0 && !e.alt)
+            {
+                SetBitMarker(t, cell.x, cell.y, cell.z, merge, on: !erase);
+                _markerOverlayDirty = true;
+                e.Use();
+            }
+        }
+
+        private bool PlaneCell(Ray ray, out Vector3Int cell)
+        {
+            var plane = new Plane(Vector3.up, new Vector3(0f, _layer, 0f));
+            if (!plane.Raycast(ray, out float enter))
+            {
+                cell = default;
+                return false;
+            }
+            Vector3 p = ray.GetPoint(enter);
+            cell = new Vector3Int(Mathf.FloorToInt(p.x), _layer, Mathf.FloorToInt(p.z));
+            return true;
+        }
+
+        private static void SetBitMarker(BlockMapAuthoring t, int x, int y, int z, bool merge, bool on)
+        {
+            if (t.Grid == null)
+                return;
+            byte bit = merge ? Shared.World.Blocks.ChunkSection.BakeMerge : Shared.World.Blocks.ChunkSection.BakeDivider;
+            byte other = merge ? Shared.World.Blocks.ChunkSection.BakeDivider : Shared.World.Blocks.ChunkSection.BakeMerge;
+            byte cur = t.Grid.GetBake(x, y, z);
+            byte next = on ? (byte)((cur | bit) & ~other) : (byte)(cur & ~bit);
+            t.Grid.SetBake(x, y, z, next);
+        }
+
+        private void DrawMarkerOverlay(BlockMapAuthoring t)
+        {
+            if (_markerOverlayDirty)
+                BuildMarkerOverlay(t);
+            Handles.color = new Color(1f, 0.25f, 0.25f, 0.9f);
+            for (int i = 0; i < _dividerCells.Count; i++)
+                Handles.DrawWireCube(_dividerCells[i], new Vector3(0.96f, 0.96f, 0.96f));
+            Handles.color = new Color(0.25f, 1f, 0.35f, 0.9f);
+            for (int i = 0; i < _mergeCells.Count; i++)
+                Handles.DrawWireCube(_mergeCells[i], new Vector3(0.96f, 0.96f, 0.96f));
+        }
+
+        private void BuildMarkerOverlay(BlockMapAuthoring t)
+        {
+            _dividerCells.Clear();
+            _mergeCells.Clear();
+            _markerOverlayDirty = false;
+            if (t.Grid == null)
+                return;
+            byte divider = Shared.World.Blocks.ChunkSection.BakeDivider;
+            byte mergeBit = Shared.World.Blocks.ChunkSection.BakeMerge;
+            int count = 0;
+            foreach (var kv in t.Grid.Sections)
+            {
+                Shared.World.Blocks.BlockGrid.UnpackKey(kv.Key, out int cx, out int cy, out int cz);
+                for (int ly = 0; ly < Shared.World.Blocks.ChunkSection.Size; ly++)
+                    for (int lz = 0; lz < Shared.World.Blocks.ChunkSection.Size; lz++)
+                        for (int lx = 0; lx < Shared.World.Blocks.ChunkSection.Size; lx++)
+                        {
+                            if (count >= MarkerOverlayCap)
+                                return;
+                            byte bake = kv.Value.GetBake(Shared.World.Blocks.ChunkSection.LocalIndex(lx, ly, lz));
+                            if ((bake & divider) != 0)
+                            {
+                                _dividerCells.Add(new Vector3(cx * 16 + lx + 0.5f, cy * 16 + ly + 0.5f, cz * 16 + lz + 0.5f));
+                                count++;
+                            }
+                            else if ((bake & mergeBit) != 0)
+                            {
+                                _mergeCells.Add(new Vector3(cx * 16 + lx + 0.5f, cy * 16 + ly + 0.5f, cz * 16 + lz + 0.5f));
+                                count++;
+                            }
+                        }
+            }
+        }
+
+        private static void ConvertMarkerBlocks(BlockMapAuthoring t)
+        {
+            if (t.Grid == null)
+                return;
+            var cells = new List<(int x, int y, int z, bool merge)>();
+            foreach (var kv in t.Grid.Sections)
+            {
+                Shared.World.Blocks.BlockGrid.UnpackKey(kv.Key, out int cx, out int cy, out int cz);
+                for (int ly = 0; ly < Shared.World.Blocks.ChunkSection.Size; ly++)
+                    for (int lz = 0; lz < Shared.World.Blocks.ChunkSection.Size; lz++)
+                        for (int lx = 0; lx < Shared.World.Blocks.ChunkSection.Size; lx++)
+                        {
+                            ushort type = kv.Value.GetBlock(Shared.World.Blocks.ChunkSection.LocalIndex(lx, ly, lz));
+                            if (type == 0)
+                                continue;
+                            var cat = Shared.World.Blocks.BlockCatalog.Get(type).Category;
+                            if (cat == Shared.World.Blocks.BlockCategory.Divider)
+                                cells.Add((cx * 16 + lx, cy * 16 + ly, cz * 16 + lz, false));
+                            else if (cat == Shared.World.Blocks.BlockCategory.MergeMarker)
+                                cells.Add((cx * 16 + lx, cy * 16 + ly, cz * 16 + lz, true));
+                        }
+            }
+            for (int i = 0; i < cells.Count; i++)
+            {
+                var c = cells[i];
+                SetBitMarker(t, c.x, c.y, c.z, c.merge, on: true);
+                t.EraseObject(c.x, c.y, c.z);
+            }
+            Debug.Log($"[Markers] Маркеры→метки: сконвертировано {cells.Count}.");
         }
 
         // Режим «Вставка»: рейкаст в занятую ячейку под курсором, при промахе — фолбэк на плоскость текущего слоя.
@@ -570,18 +736,75 @@ namespace Client.Editor.Inspectors
         // Общая установка/стирание для режимов Слой и Присоединение: мульти-блоки — футпринтом с _facing.
         private void PlaceOrErase(BlockMapAuthoring t, int x, int y, int z, bool erase)
         {
+            _shaftsDirty = true;
             if (erase)
             {
                 t.EraseObject(x, y, z);
                 return;
             }
             var def = _palette[_paletteIndex];
+            BlockPlaceResult r;
             if (def.Size.x * def.Size.y * def.Size.z > 1)
-                t.PaintObject(x, y, z, def, _facing);
+                r = t.PaintObject(x, y, z, def, _facing);
             else if (def.Category == Shared.World.Blocks.BlockCategory.FloorAnchor)
-                t.PaintSeed(x, y, z, def.Type, _seedName, _seedRank, _seedFloor);
+                r = t.PaintSeed(x, y, z, def.Type, _seedName, _seedRank, _seedFloor);
             else
-                t.PaintBlock(x, y, z, def.Type);
+                r = t.PaintBlock(x, y, z, def.Type, _facing);
+
+            if (r.Ok)
+            {
+                _hasFail = false;
+                return;
+            }
+            var cell = new Vector3Int(r.Cx, r.Cy, r.Cz);
+            bool repeat = _hasFail && _failCell == cell;
+            _hasFail = true;
+            _failCell = cell;
+            if (!repeat) // протяжка по той же помешавшей клетке не спамит консоль
+                Debug.LogWarning($"[BlockMapAuthoring] «{def.DisplayName}» не поставлен в ({x},{y},{z}): {FailText(r)}");
+        }
+
+        private static string FailText(BlockPlaceResult r) => r.Reason switch
+        {
+            PlaceFail.CellOccupied =>
+                $"клетка ({r.Cx},{r.Cy},{r.Cz}) занята — «{Shared.World.Blocks.BlockCatalog.Get(r.BlockingType).Name}»",
+            PlaceFail.OutOfBounds => $"клетка ({r.Cx},{r.Cy},{r.Cz}) вне пределов карты по высоте",
+            PlaceFail.OffsetOutOfRange => $"часть ({r.Cx},{r.Cy},{r.Cz}) вне диапазона смещения структуры",
+            _ => "карта не загружена или тип блока не назначен"
+        };
+
+        // Каркас плановых прямоугольников шахт: виден, когда в палитре выбрана лифт-часть.
+        // Скан карты кэшируется (_shaftsDirty) — OnSceneGUI покадровый.
+        private void DrawShaftRects(BlockMapAuthoring t)
+        {
+            if (_palette == null || _paletteIndex < 0 || _paletteIndex >= _palette.Length)
+                return;
+            var def = _palette[_paletteIndex];
+            if (def == null || !def.IsLiftPart)
+                return;
+            if (_shaftsDirty)
+            {
+                t.CollectShafts(_shafts);
+                _shaftsDirty = false;
+            }
+            Handles.color = ShaftWire;
+            for (int i = 0; i < _shafts.Count; i++)
+            {
+                var s = _shafts[i];
+                float h = Mathf.Max(1, s.ModuleY);
+                Handles.DrawWireCube(
+                    new Vector3((s.X0 + s.X1 + 1) * 0.5f, s.RailY + h * 0.5f, (s.Z0 + s.Z1 + 1) * 0.5f),
+                    new Vector3(s.X1 - s.X0 + 1, h, s.Z1 - s.Z0 + 1));
+            }
+        }
+
+        // Клетка последнего отказа: подсвечивается, пока не поставят удачно.
+        private void DrawFailHighlight()
+        {
+            if (!_hasFail)
+                return;
+            Handles.color = new Color(1f, 0.15f, 0.1f);
+            Handles.DrawWireCube(new Vector3(_failCell.x + 0.5f, _failCell.y + 0.5f, _failCell.z + 0.5f), Vector3.one * 1.02f);
         }
 
         // Призрак стирания: весь объект под курсором (мульти-блок подсвечивается целиком — он единая структура).
@@ -596,11 +819,12 @@ namespace Client.Editor.Inspectors
                 return;
             }
 
-            byte st = t.Grid.GetState(cell.x, cell.y, cell.z);
-            int facing = Shared.World.Blocks.BlockState.GetFacing(st);
-            Shared.World.Blocks.MultiBlock.AnchorOf(cell.x, cell.y, cell.z,
-                Shared.World.Blocks.BlockState.GetPart(st), def.Size.x, def.Size.z, facing,
-                out int ax, out int ay, out int az);
+            if (!t.Grid.AnchorOf(cell.x, cell.y, cell.z, out int ax, out int ay, out int az))
+            {
+                Handles.DrawWireCube(new Vector3(cell.x + 0.5f, cell.y + 0.5f, cell.z + 0.5f), Vector3.one);
+                return;
+            }
+            int facing = Shared.World.Blocks.BlockState.GetFacing(t.Grid.GetState(ax, ay, az));
             int parts = Shared.World.Blocks.MultiBlock.PartCount(def.Size.x, def.Size.y, def.Size.z);
             for (int p = 0; p < parts; p++)
             {
@@ -611,23 +835,39 @@ namespace Client.Editor.Inspectors
         }
 
         // Призрак: одиночный куб либо футпринт мульти-блока (с учётом поворота R).
+        private static readonly Color GhostFree = new Color(0.2f, 1f, 0.4f);
+        private static readonly Color GhostBusy = new Color(1f, 0.25f, 0.15f);
+        private static readonly Color GhostErase = new Color(1f, 0.3f, 0.2f);
+
         private void DrawGhost(BlockMapAuthoring t, int x, int y, int z, bool erase)
         {
-            Handles.color = erase ? new Color(1f, 0.3f, 0.2f) : new Color(0.2f, 1f, 0.4f);
             var def = _palette[_paletteIndex];
             int parts = erase ? 1 : def.Size.x * def.Size.y * def.Size.z;
             if (parts <= 1)
             {
-                Handles.DrawWireCube(new Vector3(x + 0.5f, y + 0.5f, z + 0.5f), Vector3.one);
+                var c = new Vector3(x + 0.5f, y + 0.5f, z + 0.5f);
+                Handles.color = erase ? GhostErase : (t.BlocksSinglePaint(x, y, z) ? GhostBusy : GhostFree);
+                Handles.DrawWireCube(c, Vector3.one);
+                if (!erase && !def.RequiresSupport)
+                    Handles.DrawLine(c, c + FacingDir(_facing) * 0.5f);
                 return;
             }
             for (int p = 0; p < parts; p++)
             {
                 Shared.World.Blocks.MultiBlock.PartWorldOffset(p, def.Size.x, def.Size.z, _facing,
                     out int dx, out int dy, out int dz);
+                Handles.color = t.BlocksObjectPart(x + dx, y + dy, z + dz, dx, dy, dz) ? GhostBusy : GhostFree;
                 Handles.DrawWireCube(new Vector3(x + dx + 0.5f, y + dy + 0.5f, z + dz + 0.5f), Vector3.one);
             }
         }
+
+        private static Vector3 FacingDir(int facing) => (facing & 3) switch
+        {
+            0 => Vector3.forward,
+            1 => Vector3.right,
+            2 => Vector3.back,
+            _ => Vector3.left
+        };
 
         // Режим «Присоединение»: рейкаст в существующий блок, ставим к его грани; Shift — стереть сам объект.
         private void AttachMode(BlockMapAuthoring t, Event e, Ray ray)

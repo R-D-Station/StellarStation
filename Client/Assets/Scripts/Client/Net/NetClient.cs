@@ -1,6 +1,8 @@
 using Shared.Messages.Core;
 using Shared.Messages.Player;
 using Shared.Messages.Interaction;
+using Shared.Messages.Atmos;
+using Shared.Messages.Lifts;
 using Shared.World.Items;
 using System;
 
@@ -21,6 +23,9 @@ namespace Client.Net
         public event Action<ContainerSync> OnContainerSync;
         public event Action<PullSync> OnPullSync;
         public event Action<ContainSync> OnContainSync;
+        public event Action<AtmosSync> OnAtmosSync;
+        public event Action<LiftSync> OnLiftSync;
+        public event Action<LiftRegistry> OnLiftRegistry;
         public event Action<BlockChunkData> OnBlockChunkData;
         public event Action<BlockSectionGone> OnBlockSectionGone;
         public event Action<BlockUpdateBatch> OnBlockUpdateBatch;
@@ -43,6 +48,9 @@ namespace Client.Net
             _transport.OnContainerSync += s => OnContainerSync?.Invoke(s);
             _transport.OnPullSync += s => OnPullSync?.Invoke(s);
             _transport.OnContainSync += s => OnContainSync?.Invoke(s);
+            _transport.OnAtmosSync += s => OnAtmosSync?.Invoke(s);
+            _transport.OnLiftSync += s => OnLiftSync?.Invoke(s);
+            _transport.OnLiftRegistry += s => OnLiftRegistry?.Invoke(s);
             _transport.OnBlockChunkData += m => OnBlockChunkData?.Invoke(m);
             _transport.OnBlockSectionGone += m => OnBlockSectionGone?.Invoke(m);
             _transport.OnBlockUpdateBatch += m => OnBlockUpdateBatch?.Invoke(m);
@@ -106,5 +114,8 @@ namespace Client.Net
         public void SendTakeFromContainer(int netId, ushort index) => _transport.Send(new TakeFromContainer { NetId = netId, Index = index });
 
         public void SendPullItem(int netId) => _transport.Send(new PullItem { NetId = netId });
+
+        public void SendLiftFloor(int liftId, byte floor)
+            => _transport.Send(new Shared.Messages.Lifts.LiftFloorRequest { LiftId = liftId, Floor = floor });
     }
 }

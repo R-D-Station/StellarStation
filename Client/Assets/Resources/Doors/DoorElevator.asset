@@ -1,0 +1,70 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2a5ba86ce8fa84d4aa708dd205f2ef8f, type: 3}
+  m_Name: DoorElevator
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockDefinition
+  Type: 18
+  DisplayName: DoorElevator
+  Category: 4
+  SealsFaces: 0
+  OpaqueFaces: 63
+  CoversBlockBelow: 0
+  CollisionBoxes:
+  - Center: {x: 3, y: 0.5, z: 0.55}
+    Size: {x: 6, y: 1, z: 0.9}
+  - Center: {x: 3, y: 3, z: 0.3}
+    Size: {x: 6, y: 4, z: 0.4}
+  CollisionBoxesOpen:
+  - Center: {x: 3, y: 0.5, z: 0.55}
+    Size: {x: 6, y: 1, z: 0.9}
+  - Center: {x: 0.75, y: 2.5, z: 0.3}
+    Size: {x: 1.5, y: 3, z: 0.39999998}
+  - Center: {x: 5.25, y: 2.5, z: 0.3}
+    Size: {x: 1.5, y: 3, z: 0.4}
+  - Center: {x: 3, y: 4.5, z: 0.3}
+    Size: {x: 6, y: 1, z: 0.4}
+  Opening: 2
+  TriggerBoxes: []
+  DoorCloseDelay: 3
+  _isAirlock: 0
+  DeconstructStages: 0
+  RequiresSupport: 0
+  AttachTo: 
+  Size: {x: 6, y: 5, z: 1}
+  IsLiftPart: 0
+  LiftKind: 0
+  LiftModule: {x: 5, y: 5, z: 5}
+  LiftFloorStep: 5
+  LiftSpeed: 3
+  LiftDwellSec: 1
+  LiftDoorLeadSec: 0.5
+  LiftCabinBoxes: []
+  Connection:
+    UseConnections: 0
+    ConnectsToSameType: 1
+    ConnectsToTypes: 
+    MeshSingle: {fileID: 0}
+    MeshEnd: {fileID: 0}
+    MeshStraight: {fileID: 0}
+    MeshCorner: {fileID: 0}
+    MeshT: {fileID: 0}
+    MeshCross: {fileID: 0}
+  UseGrid: 0
+  TopMap: {fileID: 0}
+  BackingMap: {fileID: 0}
+  TopMapCountX: 5
+  TopMapCountY: 2
+  TopCalibration: {fileID: 0}
+  SideMap: {fileID: 0}
+  Prefab: {fileID: 8880379371873745835, guid: 4f31d33da1e5de2448b87a257e98ada9, type: 3}
+  Pivot: 0
+  EditorSprite: {fileID: 0}

@@ -2,6 +2,8 @@ using Shared.Messages;
 using Shared.Messages.Core;
 using Shared.Messages.Player;
 using Shared.Messages.Interaction;
+using Shared.Messages.Atmos;
+using Shared.Messages.Lifts;
 using System;
 
 namespace Client.Net
@@ -29,6 +31,12 @@ namespace Client.Net
         event Action<PullSync> OnPullSync;
 
         event Action<ContainSync> OnContainSync;
+
+        event Action<AtmosSync> OnAtmosSync;
+
+        event Action<LiftSync> OnLiftSync;
+
+        event Action<LiftRegistry> OnLiftRegistry;
 
         /// <summary>Блочный стрим (фаза C): секция / секция ушла / пакет дельт (server→client).</summary>
         event Action<BlockChunkData> OnBlockChunkData;

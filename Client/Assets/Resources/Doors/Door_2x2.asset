@@ -44,22 +44,26 @@ MonoBehaviour:
     Size: {x: 2, y: 2, z: 1.5}
   DoorCloseDelay: 5
   DeconstructStages: 0
+  RequiresSupport: 0
+  AttachTo: 
   Size: {x: 2, y: 2, z: 1}
   Connection:
     UseConnections: 0
     ConnectsToSameType: 0
-    ConnectsToOtherConnected: 0
+    ConnectsToTypes: 
     MeshSingle: {fileID: 0}
     MeshEnd: {fileID: 0}
     MeshStraight: {fileID: 0}
     MeshCorner: {fileID: 0}
     MeshT: {fileID: 0}
     MeshCross: {fileID: 0}
+  UseGrid: 0
   TopMap: {fileID: 0}
   BackingMap: {fileID: 0}
   TopMapCountX: 5
   TopMapCountY: 2
   TopCalibration: {fileID: 0}
+  SideMap: {fileID: 0}
   Prefab: {fileID: 1950560432707846408, guid: b939211f41c96e340848553f1c125409, type: 3}
   Pivot: 0
   EditorSprite: {fileID: 0}

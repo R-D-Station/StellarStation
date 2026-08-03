@@ -22,10 +22,19 @@ namespace Client.Editor.Inspectors
         private static readonly GUIContent LOpening = new GUIContent("Открытие", "Auto — сама при входе в триггер; Interact — взаимодействием.");
         private static readonly GUIContent LTriggers = new GUIContent("Триггеры", "Object-space AABB авто-двери; МОГУТ выходить за габарит. Пусто = нет авто-открытия.");
         private static readonly GUIContent LCloseDelay = new GUIContent("Задержка закрытия", "Сек после выхода игрока из триггера.");
+        private static readonly GUIContent LAirlock = new GUIContent("Шлюз", "Не открывается сам при большом перепаде давления по сторонам. E открывает всегда.");
         private static readonly GUIContent LDecon = new GUIContent("Стадии", "Число стадий деконструкции (0 = не разбирается).");
         private static readonly GUIContent LReqSupport = new GUIContent("Крепится", "Не сам по себе: без опоры сервер снесёт при загрузке.");
         private static readonly GUIContent LAttachTo = new GUIContent("Крепить к", "Куда (порядок = приоритет). Wall → поворот ОТ стены.");
-        private static readonly GUIContent LSize = new GUIContent("Размер", "Габарит в блоках (X-ширина, Y-высота, Z-глубина). Оси 1..2, частей ≤ 4. Дверь 2×2×1.");
+        private static readonly GUIContent LSize = new GUIContent("Размер", "Габарит в блоках (X-ширина, Y-высота, Z-глубина). Оси 1..16. Дверь 2×2×1.");
+        private static readonly GUIContent LStretch = new GUIContent("Растянуть на габарит", "Заменить коллизию одним боксом на весь габарит [0..Size].");
+        private static readonly GUIContent LLiftKind = new GUIContent("Вид", "Rail — рельс шахты; Cabin — кабина.");
+        private static readonly GUIContent LLiftModule = new GUIContent("Модуль", "Габарит модуля шахты в блоках (X×Y×Z).");
+        private static readonly GUIContent LLiftStep = new GUIContent("Шаг этажа", "Вертикальный шаг штабеля рельса (блоков между этажами).");
+        private static readonly GUIContent LLiftSpeed = new GUIContent("Скорость", "Скорость кабины, блоков/сек.");
+        private static readonly GUIContent LLiftDwell = new GUIContent("Стоянка", "Стоянка на этаже с открытыми дверями, сек. Закрытие идёт СВЕРХ неё.");
+        private static readonly GUIContent LLiftLead = new GUIContent("Закрытие", "За сколько сек до ОТПРАВЛЕНИЯ начинать закрывать двери (последние секунды стоянки).");
+        private static readonly GUIContent LLiftBoxes = new GUIContent("Боксы кабины", "Коллизия кабины в object-space МОДУЛЯ (не габарита блока): пол/стены. Правится хендлами — набор «Кабина».");
         private static readonly GUIContent LPrefab = new GUIContent("Префаб", "Пусто → серые кубы. Ассет держать в папке Resources.");
         private static readonly GUIContent LPivot = new GUIContent("Пивот", "Bottom Center — пивот в центре низа объекта. Center — пивот в центре модели (как у Unity-примитивов): система сама поднимет на половину высоты.");
         private static readonly GUIContent LSprite = new GUIContent("Спрайт", "Превью в редакторе; для маркеров — единственный визуал.");
@@ -48,9 +57,10 @@ namespace Client.Editor.Inspectors
         private static readonly Color CGreen = new Color(0.24f, 0.44f, 0.28f);
         private static readonly Color CBlack = new Color(0.15f, 0.15f, 0.17f);
         private static readonly Color CPurple = new Color(0.40f, 0.30f, 0.52f);
+        private static readonly Color CBlue = new Color(0.22f, 0.34f, 0.55f);
 
         // static — свёрнутость групп сохраняется между выборами разных BlockDefinition в сессии редактора.
-        private static bool _gPlay = true, _gCollision = true, _gTiling = true, _gAuto = true;
+        private static bool _gPlay = true, _gCollision = true, _gTiling = true, _gAuto = true, _gLift = true;
         private static GUIStyle _hDark, _hLight;
 
         private SerializedProperty _type;
@@ -64,10 +74,19 @@ namespace Client.Editor.Inspectors
         private SerializedProperty _opening;
         private SerializedProperty _triggerBoxes;
         private SerializedProperty _doorCloseDelay;
+        private SerializedProperty _isAirlock;
         private SerializedProperty _deconstructStages;
         private SerializedProperty _requiresSupport;
         private SerializedProperty _attachTo;
         private SerializedProperty _size;
+        private SerializedProperty _isLiftPart;
+        private SerializedProperty _liftKind;
+        private SerializedProperty _liftModule;
+        private SerializedProperty _liftFloorStep;
+        private SerializedProperty _liftSpeed;
+        private SerializedProperty _liftDwellSec;
+        private SerializedProperty _liftDoorLeadSec;
+        private SerializedProperty _liftCabinBoxes;
         private SerializedProperty _prefab;
         private SerializedProperty _pivot;
         private SerializedProperty _editorSprite;
@@ -102,10 +121,19 @@ namespace Client.Editor.Inspectors
             _opening = serializedObject.FindProperty("Opening");
             _triggerBoxes = serializedObject.FindProperty("TriggerBoxes");
             _doorCloseDelay = serializedObject.FindProperty("DoorCloseDelay");
+            _isAirlock = serializedObject.FindProperty("_isAirlock");
             _deconstructStages = serializedObject.FindProperty("DeconstructStages");
             _requiresSupport = serializedObject.FindProperty("RequiresSupport");
             _attachTo = serializedObject.FindProperty("AttachTo");
             _size = serializedObject.FindProperty("Size");
+            _isLiftPart = serializedObject.FindProperty("IsLiftPart");
+            _liftKind = serializedObject.FindProperty("LiftKind");
+            _liftModule = serializedObject.FindProperty("LiftModule");
+            _liftFloorStep = serializedObject.FindProperty("LiftFloorStep");
+            _liftSpeed = serializedObject.FindProperty("LiftSpeed");
+            _liftDwellSec = serializedObject.FindProperty("LiftDwellSec");
+            _liftDoorLeadSec = serializedObject.FindProperty("LiftDoorLeadSec");
+            _liftCabinBoxes = serializedObject.FindProperty("LiftCabinBoxes");
             _prefab = serializedObject.FindProperty("Prefab");
             _pivot = serializedObject.FindProperty("Pivot");
             _editorSprite = serializedObject.FindProperty("EditorSprite");
@@ -184,9 +212,18 @@ namespace Client.Editor.Inspectors
             {
                 EditorGUILayout.PropertyField(_size, LSize);
                 var sv = _size.vector3IntValue;
-                if (sv.x < 1 || sv.y < 1 || sv.z < 1 || sv.x > 2 || sv.y > 2 || sv.z > 2
-                    || sv.x * sv.y * sv.z > 4)
-                    EditorGUILayout.HelpBox("Оси 1..2 и не больше 4 частей (ёмкость part-бит).", MessageType.Error);
+                int maxAxis = Shared.World.Blocks.MultiBlock.MaxAxis;
+                int maxParts = Shared.World.Blocks.MultiBlock.MaxPartsSanity;
+                if (sv.x < 1 || sv.y < 1 || sv.z < 1 || sv.x > maxAxis || sv.y > maxAxis || sv.z > maxAxis
+                    || sv.x * sv.y * sv.z > maxParts)
+                    EditorGUILayout.HelpBox($"Оси 1..{maxAxis} и не больше {maxParts} частей.", MessageType.Error);
+                bool multiCell = sv.x > 1 || sv.y > 1 || sv.z > 1;
+                if (multiCell && self != null && !CoversGabarit(self.CollisionBoxes, sv))
+                {
+                    EditorGUILayout.HelpBox("Коллизия не покрывает габарит — части без боксов проходимы насквозь (объект-призрак). Если это не проём — растяните бокс.", MessageType.Warning);
+                    if (GUILayout.Button(LStretch))
+                        StretchToGabarit(self, sv);
+                }
             }
 
             if (_prefab != null) EditorGUILayout.PropertyField(_prefab, LPrefab);
@@ -223,9 +260,33 @@ namespace Client.Editor.Inspectors
                 if (openable)
                 {
                     if (_collisionBoxesOpen != null) EditorGUILayout.PropertyField(_collisionBoxesOpen, LBoxesOpen, true);
+                    if (self != null && (self.Size.x > 1 || self.Size.y > 1 || self.Size.z > 1))
+                    {
+                        int total = MultiBlock.PartCount(self.Size.x, self.Size.y, self.Size.z);
+                        int solid = SolidPartsOpen(self);
+                        EditorGUILayout.HelpBox(solid == 0
+                            ? $"Открыто: проходима целиком (0 из {total} частей твёрдые)."
+                            : $"Открыто: {solid} из {total} частей остаются твёрдыми.", MessageType.Info);
+                    }
                     if (_opening != null) EditorGUILayout.PropertyField(_opening, LOpening);
+
+                    bool auto = _opening == null || _opening.enumValueIndex == (int)DoorOpening.Auto;
+                    bool external = _opening != null && _opening.enumValueIndex == (int)DoorOpening.External;
+
                     if (_triggerBoxes != null) EditorGUILayout.PropertyField(_triggerBoxes, LTriggers, true);
+                    if (!auto)
+                        EditorGUILayout.HelpBox("Триггеры читает только открытие Auto — при Interact и External они не используются.",
+                            MessageType.Info);
+
                     if (_doorCloseDelay != null) EditorGUILayout.PropertyField(_doorCloseDelay, LCloseDelay);
+                    if (external)
+                        EditorGUILayout.HelpBox("У двери с открытием External это поле не используется — время стоянки задают «Стоянка» и «Закрытие» в определении КАБИНЫ.",
+                            MessageType.Info);
+
+                    if (_isAirlock != null) EditorGUILayout.PropertyField(_isAirlock, LAirlock);
+                    if (!auto)
+                        EditorGUILayout.HelpBox("Проверка перепада давления работает только при открытии Auto.",
+                            MessageType.Info);
                 }
             }
             EndGroup(_gCollision);
@@ -270,6 +331,16 @@ namespace Client.Editor.Inspectors
                     }
                 }
                 EndGroup(_gAuto);
+            }
+
+            if (_isLiftPart != null)
+            {
+                if (BeginGroupToggle(ref _gLift, "Лифт", CBlue, false, _isLiftPart))
+                {
+                    if (_isLiftPart.boolValue)
+                        DrawLiftGroup(self);
+                }
+                EndGroup(_gLift);
             }
 
             EditorGUILayout.Space(10);
@@ -333,6 +404,96 @@ namespace Client.Editor.Inspectors
             Undo.RecordObject(def, "Set collision preset");
             def.CollisionBoxes = boxes;
             EditorUtility.SetDirty(def);
+        }
+
+        private static bool CoversGabarit(BlockDefinition.CollisionBox[] boxes, Vector3Int size)
+        {
+            if (boxes == null || boxes.Length == 0)
+                return false;
+            float minX = float.MaxValue, minY = float.MaxValue, minZ = float.MaxValue;
+            float maxX = float.MinValue, maxY = float.MinValue, maxZ = float.MinValue;
+            foreach (var b in boxes)
+            {
+                Vector3 mn = b.Center - b.Size * 0.5f;
+                Vector3 mx = b.Center + b.Size * 0.5f;
+                minX = Mathf.Min(minX, mn.x); minY = Mathf.Min(minY, mn.y); minZ = Mathf.Min(minZ, mn.z);
+                maxX = Mathf.Max(maxX, mx.x); maxY = Mathf.Max(maxY, mx.y); maxZ = Mathf.Max(maxZ, mx.z);
+            }
+            return minX <= 0.001f && minY <= 0.001f && minZ <= 0.001f
+                && maxX >= size.x - 0.001f && maxY >= size.y - 0.001f && maxZ >= size.z - 0.001f;
+        }
+
+        private static void StretchToGabarit(BlockDefinition def, Vector3Int size)
+        {
+            Undo.RecordObject(def, "Stretch collision to size");
+            def.CollisionBoxes = new[]
+            {
+                new BlockDefinition.CollisionBox
+                {
+                    Center = new Vector3(size.x * 0.5f, size.y * 0.5f, size.z * 0.5f),
+                    Size = new Vector3(size.x, size.y, size.z)
+                }
+            };
+            EditorUtility.SetDirty(def);
+        }
+
+        private static int SolidPartsOpen(BlockDefinition def)
+        {
+            var s = def.Size;
+            var r = MultiBlockSlicer.Slice(ToSliceBoxes(def.CollisionBoxesOpen), s.x, s.y, s.z);
+            return r.PartCount - r.EmptyParts;
+        }
+
+        private static MultiBlockSlicer.Box[] ToSliceBoxes(BlockDefinition.CollisionBox[] boxes)
+        {
+            if (boxes == null || boxes.Length == 0)
+                return System.Array.Empty<MultiBlockSlicer.Box>();
+            var arr = new MultiBlockSlicer.Box[boxes.Length];
+            for (int i = 0; i < boxes.Length; i++)
+            {
+                Vector3 min = boxes[i].Center - boxes[i].Size * 0.5f;
+                Vector3 max = boxes[i].Center + boxes[i].Size * 0.5f;
+                arr[i] = new MultiBlockSlicer.Box(min.x, min.y, min.z, max.x, max.y, max.z);
+            }
+            return arr;
+        }
+
+        private void DrawLiftGroup(BlockDefinition self)
+        {
+            if (_liftKind != null) EditorGUILayout.PropertyField(_liftKind, LLiftKind);
+            bool cabin = _liftKind != null && _liftKind.enumValueIndex == 1;
+
+            if (self != null && self.Category != BlockCategory.Marker)
+                EditorGUILayout.HelpBox("Лифт-часть должна быть Marker (визуал рисует лифт-код).", MessageType.Warning);
+
+            if (self != null && self.CollisionBoxes != null && self.CollisionBoxes.Length > 0)
+                EditorGUILayout.HelpBox("У лифт-части коллизия задаётся полем «Боксы кабины», а не обычными боксами.", MessageType.Warning);
+
+            if (_liftModule != null)
+            {
+                EditorGUILayout.PropertyField(_liftModule, LLiftModule);
+                var m = _liftModule.vector3IntValue;
+                if (m.x < 1 || m.y < 1 || m.z < 1 || m.x > 255 || m.y > 255 || m.z > 255)
+                    EditorGUILayout.HelpBox("Модуль вне диапазона (оси 1..255) — генерация каталога будет отменена.", MessageType.Error);
+            }
+
+            if (cabin)
+            {
+                if (_liftSpeed != null) EditorGUILayout.PropertyField(_liftSpeed, LLiftSpeed);
+                if (_liftDwellSec != null) EditorGUILayout.PropertyField(_liftDwellSec, LLiftDwell);
+                if (_liftDoorLeadSec != null) EditorGUILayout.PropertyField(_liftDoorLeadSec, LLiftLead);
+                if (_liftCabinBoxes != null) EditorGUILayout.PropertyField(_liftCabinBoxes, LLiftBoxes, true);
+                if (_liftCabinBoxes != null && _liftCabinBoxes.arraySize == 0)
+                    EditorGUILayout.HelpBox("Кабина без боксов — лифт не создастся.", MessageType.Warning);
+                if (_liftSpeed != null && _liftSpeed.floatValue <= 0f)
+                    EditorGUILayout.HelpBox("Скорость ≤ 0 — кабина не поедет.", MessageType.Warning);
+            }
+            else
+            {
+                if (_liftFloorStep != null) EditorGUILayout.PropertyField(_liftFloorStep, LLiftStep);
+                if (_liftFloorStep != null && _liftFloorStep.intValue < 1)
+                    EditorGUILayout.HelpBox("Шаг этажа < 1 — скан не соберёт штабель.", MessageType.Warning);
+            }
         }
 
         private static List<ushort> CollectUsedIds(BlockDefinition exclude)

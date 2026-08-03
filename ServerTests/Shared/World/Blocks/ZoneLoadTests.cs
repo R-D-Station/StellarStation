@@ -60,7 +60,8 @@ namespace ServerTests.Shared.World.Blocks
             for (int x = 1; x <= 3; x++)
                 for (int z = 1; z <= 3; z++)
                     Assert.Equal(zone.Id, g.GetZone(x, 1, z));
-            Assert.Equal((ushort)0, g.GetZone(2, 5, 2));
+            Assert.Equal(ZoneFlood.ExteriorZoneId, g.GetZone(2, 5, 2));
+            Assert.NotEqual(zone.Id, g.GetZone(2, 5, 2));
 
             var section = g.GetSection(0, 0, 0);
             using var ms = new MemoryStream();

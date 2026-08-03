@@ -9,13 +9,13 @@ namespace ServerTests.Shared.World.Blocks
         [Fact]
         public void BlockState_Open_RoundTrips_PreservingOtherBits()
         {
-            byte s = BlockState.WithFacing(BlockState.WithPart(0, 1), 2); // part 1, facing 2
+            byte s = BlockState.WithFacing(BlockState.Wire, 2); // facing 2 + провод
             Assert.False(BlockState.GetOpen(s));
 
             byte opened = BlockState.WithOpen(s, true);
             Assert.True(BlockState.GetOpen(opened));
-            Assert.Equal(1, BlockState.GetPart(opened));   // сохранён
-            Assert.Equal(2, BlockState.GetFacing(opened)); // сохранён
+            Assert.Equal(2, BlockState.GetFacing(opened));    // сохранён
+            Assert.NotEqual(0, opened & BlockState.Wire);     // сохранён
 
             byte closed = BlockState.WithOpen(opened, false);
             Assert.False(BlockState.GetOpen(closed));
@@ -70,8 +70,8 @@ namespace ServerTests.Shared.World.Blocks
 
             byte closed = 0;
             byte open = BlockState.WithOpen(0, true);
-            Assert.Single(door.GetBoxes(BlockState.GetPart(closed), BlockState.GetFacing(closed), BlockState.GetOpen(closed)));
-            Assert.Empty(door.GetBoxes(BlockState.GetPart(open), BlockState.GetFacing(open), BlockState.GetOpen(open)));
+            Assert.Single(door.GetBoxes(0, BlockState.GetFacing(closed), BlockState.GetOpen(closed)));
+            Assert.Empty(door.GetBoxes(0, BlockState.GetFacing(open), BlockState.GetOpen(open)));
         }
 
         [Fact]

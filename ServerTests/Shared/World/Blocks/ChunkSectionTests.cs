@@ -68,23 +68,21 @@ namespace ServerTests.Shared.World.Blocks
         }
 
         [Fact]
-        public void BlockState_FacingAndPartRoundTrip()
+        public void BlockState_FacingRoundTrip_KeepsOtherBits()
         {
             byte st = 0;
             st = BlockState.WithFacing(st, 2);
-            st = BlockState.WithPart(st, 3);
             st |= BlockState.Open | BlockState.Wire;
 
             Assert.Equal(2, BlockState.GetFacing(st));
-            Assert.Equal(3, BlockState.GetPart(st));
             Assert.NotEqual(0, st & BlockState.Open);
             Assert.NotEqual(0, st & BlockState.Wire);
             Assert.Equal(0, st & BlockState.Pipe);
 
             st = BlockState.WithFacing(st, 0); // смена facing не трогает остальные биты
             Assert.Equal(0, BlockState.GetFacing(st));
-            Assert.Equal(3, BlockState.GetPart(st));
             Assert.NotEqual(0, st & BlockState.Open);
+            Assert.NotEqual(0, st & BlockState.Wire);
         }
     }
 }

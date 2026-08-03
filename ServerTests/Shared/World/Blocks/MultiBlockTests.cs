@@ -11,7 +11,7 @@ namespace ServerTests.Shared.World.Blocks
             for (int part = 0; part < 4; part++)
             {
                 MultiBlock.PartToLocal(part, 2, 1, out int w, out int y, out int d);
-                Assert.Equal(part, MultiBlock.LocalToPart(w, y, d, 2, 1));
+                Assert.Equal(part, MultiBlock.LocalToPart(w, y, d, 2, 2, 1));
             }
         }
 

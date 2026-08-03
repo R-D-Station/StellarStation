@@ -13,7 +13,7 @@ namespace Shared.World.Blocks
         {
             for (int y = startY; y > startY - MaxScanDepth; y--)
             {
-                var boxes = shapes.GetBoxes(grid.GetBlock(x, y, z), grid.GetState(x, y, z));
+                var boxes = shapes.GetBoxes(grid.GetBlock(x, y, z), grid.GetState(x, y, z), grid, x, y, z);
                 if (boxes.Length == 0) continue;
 
                 float partialTop = 0f;

@@ -24,6 +24,19 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\Client\Assets\Scripts\Client\Gameplay\CameraMath.cs" LinkBase="ClientPure" />
+    <Compile Include="..\Client\Assets\Scripts\Client\Gameplay\CameraQuadrant.cs" LinkBase="ClientPure" />
+    <Compile Include="..\Client\Assets\Scripts\Client\Gameplay\ZoneBox.cs" LinkBase="ClientPure" />
+    <Compile Include="..\Client\Assets\Scripts\Client\Gameplay\TransitionMath.cs" LinkBase="ClientPure" />
+    <Compile Include="..\Client\Assets\Scripts\Client\Lifts\LiftVisibilityGate.cs" LinkBase="ClientPure" />
+    <Compile Include="..\Client\Assets\Scripts\Client\Lifts\BlockComponentPairing.cs" LinkBase="ClientPure" />
+    <Compile Include="..\Client\Assets\Scripts\Client\Lifts\LiftPlanSource.cs" LinkBase="ClientPure" />
+    <Compile Include="..\Client\Assets\Scripts\Client\Lifts\LiftMotion.cs" LinkBase="ClientPure" />
+    <Compile Include="..\Client\Assets\Scripts\Client\Net\RenderClock.cs" LinkBase="ClientPure" />
+    <Compile Include="..\Client\Assets\Scripts\Client\Lifts\LiftCabinDoorState.cs" LinkBase="ClientPure" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="test-config.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

@@ -4,6 +4,7 @@ using UnityEngine.InputSystem;
 using Shared.Messages.Core;
 using Shared.Messages.Player;
 using Shared.Messages.Interaction;
+using Shared.Messages.Atmos;
 using Client.Config;
 using Client.Net.View;
 using Client.Items;
@@ -49,8 +50,14 @@ namespace Client.Net
         [SerializeField] private InventoryHud _inventoryHud;
         [Tooltip("Сервис окон контейнеров")]
         [SerializeField] private ContainerWindows _containerWindows;
+        [Tooltip("Опц.: панель выбора этажа в кабине лифта (открывается по E, когда игрок едет).")]
+        [SerializeField] private Client.UI.Lifts.LiftPanel _liftPanel;
+        [Tooltip("Отладка: рисовать кабину кубами по КОЛЛИЗИОННЫМ боксам вместо префаба — детектор расхождения визуала и физики.")]
+        [SerializeField] private bool _liftCabinBoxes;
         [Tooltip("Пул экранных надписей — локальный хинт «Руки заняты» при попытке подбора без раунд-трипа.")]
         [SerializeField] private LabelManager _labels;
+        [Tooltip("Датчик атмосферы (давление/O₂). Пусто — приём AtmosSync работает, но не отображается.")]
+        [SerializeField] private Client.UI.Atmos.AtmosHud _atmosHud;
         [Tooltip("Материал обводки предмета под курсором (шейдер Station/SpriteOutline). Пусто — без обводки.")]
         [SerializeField] private Material _itemOutlineMaterial;
 
@@ -78,6 +85,19 @@ namespace Client.Net
         // Коллизия от предметов с HasCollision для предиктора (F1b): полностью пересобирается каждый ItemSnapshot.
         private readonly Shared.Simulation.Blocks.DynamicObstacleSet _itemObstacles = new Shared.Simulation.Blocks.DynamicObstacleSet();
 
+        private readonly Shared.Simulation.Blocks.DynamicObstacleSet _simObstacles = new Shared.Simulation.Blocks.DynamicObstacleSet();
+        private readonly Client.Lifts.LiftClientState _lifts = new Client.Lifts.LiftClientState();
+
+        /// <summary>Состояние лифтов (сегменты/реестр/боксы) — для панели и дисплеев.</summary>
+        public Client.Lifts.LiftClientState Lifts => _lifts;
+
+        // ⚠ ОСИ предиктора: X — план X, Y — ВЫСОТА, ZF — план Z. Имена ниже развязывают эту ловушку явно.
+        public bool IsPredictorInitialized => _predictor.IsInitialized;
+        public float PredictedPlanX => _predictor.X;
+        public float PredictedHeight => _predictor.Y;
+        public float PredictedPlanZ => _predictor.ZF;
+        public uint PredictedTick => _predictor.PredictedTick;
+
         private int _itemSpawnSeq;
         private int _hoveredItemNetId = -1;
         private Vector2 _lastHoverMouse = new Vector2(float.MinValue, float.MinValue);
@@ -103,6 +123,11 @@ namespace Client.Net
         private float _tickAccumulator;
         private float TickInterval => 1f / _tickRate;
 
+        // Часы ВИЗУАЛА, отдельные от сим-тика предиктора. PredictedTick меняется только в Reconcile,
+        // а доля кадра бежит локально — склейка двух несинхронных 30-Гц источников давала скачок
+        // ровно на ход лифта за тик. Симуляция (PrepareSimObstacles/AddObstacles/FindRiding) на эти часы НЕ переводится.
+        private readonly RenderClock _renderClock = new RenderClock();
+
         /// <summary>NetId этого клиента. -1, пока сервер не прислал LoginResponse.</summary>
         public int LocalNetId { get; private set; } = -1;
 
@@ -123,6 +148,9 @@ namespace Client.Net
             _net.OnContainerSync += OnContainerSync;
             _net.OnPullSync += OnPullSync;
             _net.OnContainSync += OnContainSync;
+            _net.OnAtmosSync += OnAtmosSync;
+            _net.OnLiftSync += OnLiftSync;
+            _net.OnLiftRegistry += OnLiftRegistry;
 
             _controls = new PlayerControl();
 
@@ -156,6 +184,7 @@ namespace Client.Net
             // к этому моменту _tickRate выставлен серверным TickRate (LoginResponse), интервал корректен.
             if (LocalNetId >= 0)
             {
+                _renderClock.Advance(Time.deltaTime, TickInterval);
                 _tickAccumulator += Time.deltaTime;
                 while (_tickAccumulator >= TickInterval)
                 {
@@ -206,6 +235,7 @@ namespace Client.Net
                 HandleEquipToggle();
 
             HandleInteractionInput();
+            UpdateLiftVisual();
 
             // Ручной тайм-аут хинта «Руки заняты» (см. ShowHandsFullHint — CursorHint-стиль по умолчанию не самовозвращается).
             if (_handsFullHandle != null && Time.unscaledTime >= _handsFullExpire)
@@ -246,6 +276,8 @@ namespace Client.Net
             Vector2 move = _controls.Player.Move.ReadValue<Vector2>();
             bool sprint = _controls.Player.Sprint.IsPressed();
             IntentDirection dir = ToIntent(move);
+            if (_camera != null)
+                dir = _camera.Quadrant.Rotate(dir);
 
             bool layToggle = _layTogglePending;
             _layTogglePending = false;
@@ -317,7 +349,22 @@ namespace Client.Net
                     if (_containerWindows != null) { _containerWindows.Toggle(netId, view.ItemDefId); return; }
                 }
             }
-            _net.SendUse();
+
+            // Панель лифта — СТРОГО ПОСЛЕ ветки «предмет/контейнер под курсором»: иначе в кабине перестанут
+            // открываться ящики. Явный E снимает запрет авто-открытия, поставленный крестиком.
+            if (_liftPanel != null)
+            {
+                _liftPanel.ClearSuppression();
+                if (_liftPanel.Toggle()) return;
+            }
+
+            if (UnityEngine.EventSystems.EventSystem.current != null
+                && UnityEngine.EventSystems.EventSystem.current.IsPointerOverGameObject()) return;
+
+            if (_predictor.IsInitialized && Mouse.current != null
+                && TryResolveHoverTile(Mouse.current.position.ReadValue(), out int cellX, out int cellY, out int cellZ))
+                _net.SendInteract((byte)InteractTargetKind.Tile, (byte)InteractVerb.Primary, _activeHand,
+                    cellX, cellY, cellZ, -1);
         }
 
         /// <summary>Клик мыши → адресная интеракция (в Update, не в Tick): request-only, без предсказания. Экран→ЦЕЛЫЙ
@@ -493,7 +540,8 @@ namespace Client.Net
                     : Shared.World.Blocks.DevBlockWorld.Shapes;
                 _blockShapes = baseShapes;
                 _predictor.SetBlockWorld(_streamWorld, new Client.Map.ShapesWithUnknown(baseShapes));
-                _predictor.SetDynamicObstacles(_itemObstacles);
+                _predictor.SetDynamicObstacles(_simObstacles);
+                _predictor.PrepareObstacles = PrepareSimObstacles;
                 _blockRenderer = gameObject.AddComponent<Client.Map.BlockRenderer>();
                 _blockRenderer.Init(_blockGrid, baseShapes);
                 _blockRenderer.SetZoneFade(login.ZoneFadeDistance, login.ZoneFadeVertical);
@@ -502,7 +550,7 @@ namespace Client.Net
                 // Один раз на весь клиент: даёт ItemView высоту опоры под предметом — верх САМОЙ высокой не-полноблочной коробки блока (0 — пустой блок/пол).
                 Client.Net.View.ItemView.BlockSurface = (x, h, pz) =>
                 {
-                    var boxes = itemShapes.GetBoxes(itemGrid.GetBlock(x, h, pz), itemGrid.GetState(x, h, pz));
+                    var boxes = itemShapes.GetBoxes(itemGrid.GetBlock(x, h, pz), itemGrid.GetState(x, h, pz), itemGrid, x, h, pz);
                     float top = 0f;
                     for (int i = 0; i < boxes.Length; i++)
                         if (boxes[i].MaxYf < 0.999f && boxes[i].MaxYf > top)
@@ -627,6 +675,7 @@ namespace Client.Net
             if (_snapshotSeen && snap.ServerTick <= _lastServerTick) return;
             _snapshotSeen = true;
             _lastServerTick = snap.ServerTick;
+            _renderClock.SyncToServer(snap.ServerTick);
 
             _seenIds.Clear();
             float now = Time.time;
@@ -639,7 +688,7 @@ namespace Client.Net
                 {
                     // Свой игрок: reconciliation, без интерполяционного буфера. State сидируется в предиктор
                     // (seed для running-state нити), а вьюха берёт ПРЕДСКАЗАННЫЙ _predictor.State.
-                    _predictor.Reconcile(e.X, e.Y, e.Z, e.VY, e.Facing, e.State, e.Reason, e.Speed, snap.LastProcessedInput);
+                    _predictor.Reconcile(e.X, e.Y, e.Z, e.VY, e.Facing, e.State, e.Reason, e.Speed, snap.LastProcessedInput, snap.ServerTick);
 
                     if (_localView == null)
                     {
@@ -771,6 +820,29 @@ namespace Client.Net
             if (_localView != null) _localView.SetCulled(_containedNetId != 0);
         }
 
+        private void OnAtmosSync(AtmosSync sync)
+        {
+            if (_atmosHud != null) _atmosHud.Apply(in sync);
+        }
+
+        private void OnLiftSync(Shared.Messages.Lifts.LiftSync sync) => _lifts.ApplySync(in sync);
+
+        private void OnLiftRegistry(Shared.Messages.Lifts.LiftRegistry registry) => _lifts.ApplyRegistry(in registry);
+
+        private void PrepareSimObstacles(uint tick)
+        {
+            _simObstacles.Clear();
+            _itemObstacles.CopyInto(_simObstacles);
+            _lifts.AddObstacles(tick, _simObstacles);
+        }
+
+        private void UpdateLiftVisual()
+        {
+            if (!_predictor.IsInitialized || !_renderClock.Seeded) return;
+            _lifts.UpdateVisuals(_renderClock.Tick, _renderClock.RenderTick,
+                _liftCabinBoxes, _blockRenderer);
+        }
+
         // Клавиша F: надеть equippable-предмет из активной руки в его worn-категорию (снятие — ЛКМ по worn-слоту, Unequip).
         private void HandleEquipToggle()
         {
@@ -818,5 +890,8 @@ namespace Client.Net
 
         /// <summary>Запрос закрыть окно контейнера.</summary>
         public void SendCloseContainer(int netId) => _net.SendCloseContainer(netId);
+
+        /// <summary>Выбор этажа с панели кабины (request-only, без предсказания).</summary>
+        public void SendLiftFloor(int liftId, byte floor) => _net.SendLiftFloor(liftId, floor);
     }
 }

@@ -1,0 +1,72 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2a5ba86ce8fa84d4aa708dd205f2ef8f, type: 3}
+  m_Name: Elevator
+  m_EditorClassIdentifier: Assembly-CSharp::Client.Map.BlockDefinition
+  Type: 19
+  DisplayName: Elevator
+  Category: 7
+  SealsFaces: 63
+  OpaqueFaces: 63
+  CoversBlockBelow: 0
+  CollisionBoxes: []
+  CollisionBoxesOpen: []
+  Opening: 0
+  TriggerBoxes: []
+  DoorCloseDelay: 1
+  _isAirlock: 0
+  DeconstructStages: 0
+  RequiresSupport: 0
+  AttachTo: 
+  Size: {x: 1, y: 1, z: 1}
+  IsLiftPart: 1
+  LiftKind: 1
+  LiftModule: {x: 6, y: 5, z: 5}
+  LiftFloorStep: 5
+  LiftSpeed: 3
+  LiftDwellSec: 3
+  LiftDoorLeadSec: 1.5
+  LiftCabinBoxes:
+  - Center: {x: 3, y: 0.75, z: 3}
+    Size: {x: 4, y: 0.5, z: 4}
+  - Center: {x: 0.825, y: 2.25, z: 3}
+    Size: {x: 0.35, y: 3.5, z: 4}
+  - Center: {x: 5.175, y: 2.25, z: 3}
+    Size: {x: 0.35, y: 3.5, z: 4}
+  - Center: {x: 3, y: 2.25, z: 0.83}
+    Size: {x: 4.7, y: 3.5, z: 0.35}
+  - Center: {x: 2.9, y: 3.4778614, z: 4.75}
+    Size: {x: 4.5, y: 1.0442774, z: 0.43499994}
+  - Center: {x: 4.657233, y: 2.25, z: 4.75}
+    Size: {x: 1.3855292, y: 3.5, z: 0.43499994}
+  - Center: {x: 1.5457778, y: 2.25, z: 4.75}
+    Size: {x: 1.0782984, y: 3.5, z: 0.43499994}
+  Connection:
+    UseConnections: 0
+    ConnectsToSameType: 1
+    ConnectsToTypes: 
+    MeshSingle: {fileID: 0}
+    MeshEnd: {fileID: 0}
+    MeshStraight: {fileID: 0}
+    MeshCorner: {fileID: 0}
+    MeshT: {fileID: 0}
+    MeshCross: {fileID: 0}
+  UseGrid: 0
+  TopMap: {fileID: 0}
+  BackingMap: {fileID: 0}
+  TopMapCountX: 5
+  TopMapCountY: 2
+  TopCalibration: {fileID: 0}
+  SideMap: {fileID: 0}
+  Prefab: {fileID: 5380097784590371886, guid: 70833dad9868e144480a038ce742c578, type: 3}
+  Pivot: 0
+  EditorSprite: {fileID: 0}

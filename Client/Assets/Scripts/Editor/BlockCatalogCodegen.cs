@@ -67,10 +67,11 @@ namespace Client.Editor
                 }
 
                 var s = def.Size;
-                if (s.x < 1 || s.y < 1 || s.z < 1 || s.x > 2 || s.y > 2 || s.z > 2
-                    || s.x * s.y * s.z > Shared.World.Blocks.MultiBlock.MaxParts)
+                int axis = Shared.World.Blocks.MultiBlock.MaxAxis;
+                if (s.x < 1 || s.y < 1 || s.z < 1 || s.x > axis || s.y > axis || s.z > axis
+                    || s.x * s.y * s.z > Shared.World.Blocks.MultiBlock.MaxPartsSanity)
                 {
-                    Debug.LogError($"[BlockCatalogCodegen] '{def.name}': размер {s} недопустим (оси 1..2, частей ≤ 4).", def);
+                    Debug.LogError($"[BlockCatalogCodegen] '{def.name}': размер {s} недопустим (оси 1..{axis}, частей ≤ {Shared.World.Blocks.MultiBlock.MaxPartsSanity}).", def);
                     ok = false;
                 }
 
@@ -86,8 +87,39 @@ namespace Client.Editor
                             Debug.LogError($"[BlockCatalogCodegen] '{def.name}': триггер-бокс вырождается при квантовании 1/16.", def);
                             ok = false;
                         }
+
+                CheckLift(def, ref ok);
             }
             return ok;
+        }
+
+        private static void CheckLift(BlockDefinition def, ref bool ok)
+        {
+            if (!def.IsLiftPart)
+                return;
+            var m = def.LiftModule;
+            if (m.x < 1 || m.y < 1 || m.z < 1 || m.x > 255 || m.y > 255 || m.z > 255)
+            {
+                Debug.LogError($"[BlockCatalogCodegen] '{def.name}': модуль лифта {m} вне диапазона (оси 1..255).", def);
+                ok = false;
+            }
+            if (def.Category != BlockCategory.Marker)
+                Debug.LogWarning($"[BlockCatalogCodegen] '{def.name}': лифт-часть обязана быть Marker (визуал рисует лифт-код).", def);
+            if (def.CollisionBoxes != null && def.CollisionBoxes.Length > 0)
+                Debug.LogWarning($"[BlockCatalogCodegen] '{def.name}': у лифт-части коллизия задаётся полем «Боксы кабины», а не обычными боксами.", def);
+            if (def.LiftKind == LiftPartKind.Cabin)
+            {
+                if (def.LiftCabinBoxes == null || def.LiftCabinBoxes.Length == 0)
+                    Debug.LogWarning($"[BlockCatalogCodegen] '{def.name}': кабина без боксов — лифт не создастся.", def);
+                if (def.LiftSpeed <= 0f)
+                    Debug.LogWarning($"[BlockCatalogCodegen] '{def.name}': скорость лифта ≤ 0 — кабина не поедет.", def);
+                if (def.Pivot == BlockDefinition.BlockPivot.Center)
+                    Debug.LogWarning($"[BlockCatalogCodegen] '{def.name}': Pivot = Center. К кабине PivotYOffset " +
+                                     "НЕ применяется (корень = план-центр модуля ШАХТЫ на уровне пола кабины), " +
+                                     $"а Size.y*0.5 = {def.Size.y * 0.5f} при модуле {m.y} — поставь BottomCenter.", def);
+            }
+            else if (def.LiftKind == LiftPartKind.Rail && def.LiftFloorStep < 1)
+                Debug.LogWarning($"[BlockCatalogCodegen] '{def.name}': шаг этажа < 1 — скан не соберёт штабель.", def);
         }
 
         private static void CheckClampedBoxes(BlockDefinition def, BlockDefinition.CollisionBox[] boxes,
@@ -141,15 +173,42 @@ namespace Client.Editor
         {
             string name = (def.DisplayName ?? def.name).Replace("\\", "\\\\").Replace("\"", "\\\"");
             int sx = def.Size.x, sy = def.Size.y, sz = def.Size.z;
-            string closed = SlicePerPart(def.CollisionBoxes, sx, sy, sz);
-            string open = SlicePerPart(def.CollisionBoxesOpen, sx, sy, sz);
+            string closed = SlicePerPart(def.CollisionBoxes, sx, sy, sz, def, "коллизия", true);
+            string open = SlicePerPart(def.CollisionBoxesOpen, sx, sy, sz, def, "открытая коллизия", false);
             string triggers = EmitTriggers(def);
 
             return $"new BlockInfo({def.Type}, \"{name}\", BlockCategory.{def.Category}, " +
                    $"(BlockFaceFlags){(byte)def.SealsFaces}, (BlockFaceFlags){(byte)def.OpaqueFaces}, " +
                    $"{def.DeconstructStages}, {closed}, {sx}, {sy}, {sz}, " +
                    $"{open}, DoorOpening.{def.Opening}, {triggers}, {F(def.DoorCloseDelay)}, " +
-                   $"{(def.RequiresSupport ? "true" : "false")}, {EmitAttach(def)})";
+                   $"{(def.RequiresSupport ? "true" : "false")}, {EmitAttach(def)}, " +
+                   $"{(def.IsAirlock ? "true" : "false")}, {EmitLiftPart(def)})";
+        }
+
+        private static string EmitLiftPart(BlockDefinition def)
+        {
+            if (!def.IsLiftPart)
+                return "null";
+            return $"new LiftPartInfo(LiftPartKind.{def.LiftKind}, " +
+                   $"{def.LiftModule.x}, {def.LiftModule.y}, {def.LiftModule.z}, {def.LiftFloorStep}, " +
+                   $"{F(def.LiftSpeed)}, {F(def.LiftDwellSec)}, {F(def.LiftDoorLeadSec)}, {EmitLiftBoxes(def.LiftCabinBoxes)})";
+        }
+
+        private static string EmitLiftBoxes(BlockDefinition.CollisionBox[] boxes)
+        {
+            if (boxes == null || boxes.Length == 0)
+                return "null";
+            var list = new List<string>();
+            foreach (var box in boxes)
+            {
+                Vector3 min = box.Center - box.Size * 0.5f;
+                Vector3 max = box.Center + box.Size * 0.5f;
+                int x0 = R16(min.x), y0 = R16(min.y), z0 = R16(min.z);
+                int x1 = R16(max.x), y1 = R16(max.y), z1 = R16(max.z);
+                if (x1 > x0 && y1 > y0 && z1 > z0)
+                    list.Add($"new TriggerBox({x0}, {y0}, {z0}, {x1}, {y1}, {z1})");
+            }
+            return list.Count == 0 ? "null" : $"new TriggerBox[] {{ {string.Join(", ", list)} }}";
         }
 
         private static string EmitAttach(BlockDefinition def)
@@ -162,34 +221,79 @@ namespace Client.Editor
             return $"new AttachSurface[] {{ {string.Join(", ", list)} }}";
         }
 
-        // Нарезка object-space боксов [0..Size] на ПЕР-ЧАСТЬ [0..1] (пересечение с кубом части).
-        private static string SlicePerPart(BlockDefinition.CollisionBox[] boxes, int sx, int sy, int sz)
+        private static string SlicePerPart(BlockDefinition.CollisionBox[] boxes, int sx, int sy, int sz,
+                                           BlockDefinition def, string label, bool warnCoverage)
         {
-            int partCount = Shared.World.Blocks.MultiBlock.PartCount(sx, sy, sz);
-            var perPart = new List<string>(partCount);
-            for (int p = 0; p < partCount; p++)
+            var result = MultiBlockSlicer.Slice(ToSliceBoxes(boxes), sx, sy, sz);
+            ReportSlicing(def, label, sx, sy, sz, boxes, result, warnCoverage);
+            return EmitPerPart(result.PerPart);
+        }
+
+        private static MultiBlockSlicer.Box[] ToSliceBoxes(BlockDefinition.CollisionBox[] boxes)
+        {
+            if (boxes == null || boxes.Length == 0)
+                return System.Array.Empty<MultiBlockSlicer.Box>();
+            var arr = new MultiBlockSlicer.Box[boxes.Length];
+            for (int i = 0; i < boxes.Length; i++)
             {
-                Shared.World.Blocks.MultiBlock.PartToLocal(p, sx, sz, out int w, out int y, out int d);
-                var slices = new List<string>();
-                if (boxes != null)
-                    foreach (var box in boxes)
-                    {
-                        Vector3 min = box.Center - box.Size * 0.5f;
-                        Vector3 max = box.Center + box.Size * 0.5f;
-                        float ix0 = Mathf.Max(min.x, w), ix1 = Mathf.Min(max.x, w + 1);
-                        float iy0 = Mathf.Max(min.y, y), iy1 = Mathf.Min(max.y, y + 1);
-                        float iz0 = Mathf.Max(min.z, d), iz1 = Mathf.Min(max.z, d + 1);
-                        int qx0 = Quant(ix0 - w), qx1 = Quant(ix1 - w);
-                        int qy0 = Quant(iy0 - y), qy1 = Quant(iy1 - y);
-                        int qz0 = Quant(iz0 - d), qz1 = Quant(iz1 - d);
-                        if (qx1 > qx0 && qy1 > qy0 && qz1 > qz0)
-                            slices.Add($"new BlockBox({qx0}, {qy0}, {qz0}, {qx1}, {qy1}, {qz1})");
-                    }
-                perPart.Add(slices.Count == 0
-                    ? "System.Array.Empty<BlockBox>()"
-                    : $"new[] {{ {string.Join(", ", slices)} }}");
+                Vector3 min = boxes[i].Center - boxes[i].Size * 0.5f;
+                Vector3 max = boxes[i].Center + boxes[i].Size * 0.5f;
+                arr[i] = new MultiBlockSlicer.Box(min.x, min.y, min.z, max.x, max.y, max.z);
             }
-            return $"new BlockBox[][] {{ {string.Join(", ", perPart)} }}";
+            return arr;
+        }
+
+        private static void ReportSlicing(BlockDefinition def, string label, int sx, int sy, int sz,
+                                          BlockDefinition.CollisionBox[] boxes, MultiBlockSlicer.Result result, bool warnCoverage)
+        {
+            if (warnCoverage && result.PartCount > 1 && result.EmptyParts > 0)
+            {
+                if (result.AnchorOnly && IsSingleUnitBox(boxes))
+                    Debug.LogWarning($"[BlockCatalogCodegen] '{def.name}' ({label}): бокс не растянут на габарит {sx}×{sy}×{sz} — коллизия только у якорной клетки, {result.EmptyParts} из {result.PartCount} частей проходимы насквозь. Растяните бокс на габарит.", def);
+                else
+                    Debug.LogWarning($"[BlockCatalogCodegen] '{def.name}' ({label}): {result.EmptyParts} из {result.PartCount} частей без коллизии (для проёмов законно).", def);
+            }
+            foreach (var drop in result.Dropped)
+                Debug.LogWarning($"[BlockCatalogCodegen] '{def.name}' ({label}): часть {drop.Part}, бокс {drop.BoxIndex} — ломтик схлопнулся при квантовании 1/16 по осям{(drop.CollapsedX ? " X" : "")}{(drop.CollapsedY ? " Y" : "")}{(drop.CollapsedZ ? " Z" : "")}.", def);
+        }
+
+        private static bool IsSingleUnitBox(BlockDefinition.CollisionBox[] boxes)
+        {
+            if (boxes == null || boxes.Length != 1)
+                return false;
+            var b = boxes[0];
+            return Mathf.Abs(b.Center.x - 0.5f) < 0.001f && Mathf.Abs(b.Center.y - 0.5f) < 0.001f && Mathf.Abs(b.Center.z - 0.5f) < 0.001f
+                && Mathf.Abs(b.Size.x - 1f) < 0.001f && Mathf.Abs(b.Size.y - 1f) < 0.001f && Mathf.Abs(b.Size.z - 1f) < 0.001f;
+        }
+
+        private static string EmitPerPart(BlockBox[][] perPart)
+        {
+            if (perPart.Length <= 1)
+            {
+                var inline = new List<string>(perPart.Length);
+                foreach (var part in perPart)
+                    inline.Add(EmitPart(part));
+                return $"new BlockBox[][] {{ {string.Join(", ", inline)} }}";
+            }
+            var sb = new StringBuilder();
+            sb.Append("new BlockBox[][]\n            {\n");
+            for (int p = 0; p < perPart.Length; p++)
+            {
+                sb.Append("                ").Append(EmitPart(perPart[p]));
+                sb.Append(p < perPart.Length - 1 ? ",\n" : "\n");
+            }
+            sb.Append("            }");
+            return sb.ToString();
+        }
+
+        private static string EmitPart(BlockBox[] part)
+        {
+            if (part.Length == 0)
+                return "System.Array.Empty<BlockBox>()";
+            var boxes = new List<string>(part.Length);
+            foreach (var b in part)
+                boxes.Add($"new BlockBox({b.MinX}, {b.MinY}, {b.MinZ}, {b.MaxX}, {b.MaxY}, {b.MaxZ})");
+            return $"new[] {{ {string.Join(", ", boxes)} }}";
         }
 
         // Триггеры двери: object-space AABB в 1/16, БЕЗ клампа (могут торчать за габарит). null → нет триггеров.

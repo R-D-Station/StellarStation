@@ -14,32 +14,23 @@ namespace ServerTests.Server.Network
     {
         private readonly SVars _config;
         private GameServer? _server;
-        private readonly int _testPort;
-        private static int _portCounter = 8100;
-        private static readonly object _portLock = new object();
+        private int _testPort;
 
         public InventoryTests()
         {
-            lock (_portLock)
-            {
-                _testPort = _portCounter++;
-                if (_testPort > 8300) _portCounter = 8100;
-            }
-
             _config = new SVars
             {
                 Ip = "127.0.0.1",
-                Port = _testPort,
+                Port = 0,
                 MaxPlayers = 10,
                 TickRate = 30,
-                ConnectionKey = $"InvTest_{_testPort}"
+                ConnectionKey = "InvTest"
             };
         }
 
         public void Dispose()
         {
             _server?.Stop();
-            Thread.Sleep(50);
         }
 
         private GameServer StartServer()
@@ -47,7 +38,7 @@ namespace ServerTests.Server.Network
             _config.MapPath = "";
             _server = new GameServer(_config);
             _server.Start();
-            Thread.Sleep(50);
+            _testPort = _server.BoundPort;
             return _server;
         }
 
@@ -62,9 +53,11 @@ namespace ServerTests.Server.Network
             clientListener.PeerConnectedEvent += peer => { connectedPeer = peer; connected = true; };
 
             clientManager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
-            for (int i = 0; i < 100 && !connected; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
-
-            if (connectedPeer == null)
+            try
+            {
+                TestWait.Until(() => connectedPeer != null, () => clientManager.PollEvents(), what: "peer connected");
+            }
+            catch (TimeoutException)
             {
                 clientManager.Stop();
                 throw new Exception($"Failed to connect to server on port {_testPort}");
@@ -91,8 +84,7 @@ namespace ServerTests.Server.Network
                 catch (Exception e) { error = e; }
                 finally { Volatile.Write(ref completed, true); }
             });
-            for (int i = 0; i < 500 && !Volatile.Read(ref completed); i++) Thread.Sleep(10);
-            if (!Volatile.Read(ref completed)) throw new TimeoutException("GameLoop did not run the queued action");
+            TestWait.Until(() => Volatile.Read(ref completed), TestWait.DefaultTimeoutMs, "GameLoop ran queued action");
             if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
             return result;
         }
@@ -208,13 +200,13 @@ namespace ServerTests.Server.Network
             clientManager.Start();
             var peer = clientManager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
 
-            for (int i = 0; i < 200 && spawned == null; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => spawned != null, () => clientManager.PollEvents(), what: "item spawn received");
             Assert.NotNull(spawned);
 
             bool disconnected = false;
             server.OnClientDisconnected += _ => disconnected = true;
             peer.Disconnect();
-            for (int i = 0; i < 200 && !disconnected; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => disconnected, () => clientManager.PollEvents(), what: "disconnect received");
             Assert.True(disconnected);
 
             var ground = server.GroundItemsInInterest(3.5f, 3.5f, 1);
@@ -259,13 +251,12 @@ namespace ServerTests.Server.Network
                 reader.Recycle();
             };
 
-            for (int i = 0; i < 100 && !(connectedA && connectedB); i++)
-            {
-                managerA.PollEvents(); managerB.PollEvents(); Thread.Sleep(10);
-            }
+            TestWait.Until(() => connectedA && connectedB,
+                () => { managerA.PollEvents(); managerB.PollEvents(); }, what: "both clients connected");
             Assert.True(connectedA && connectedB);
 
-            for (int i = 0; i < 100 && (server.EntityCount < 2 || serverClient == null); i++) { managerA.PollEvents(); managerB.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => server.EntityCount >= 2 && serverClient != null,
+                () => { managerA.PollEvents(); managerB.PollEvents(); }, what: "both entities registered");
             Assert.Equal(2, server.EntityCount);
             Assert.NotNull(serverClient);
 
@@ -394,7 +385,7 @@ namespace ServerTests.Server.Network
 
             var peer = manager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
 
-            for (int i = 0; i < 200 && activeHands.Count == 0; i++) { manager.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => activeHands.Count >= 1, () => manager.PollEvents(), what: "active hands received");
             Assert.True(activeHands.Count >= 1);
             Assert.Equal((byte)0, activeHands[0]);
 
@@ -403,7 +394,7 @@ namespace ServerTests.Server.Network
             writer.PutBytesWithLength(new SwapHandRequest { Hand = 1 }.Serialize());
             peer.Send(writer, DeliveryMethod.ReliableOrdered);
 
-            for (int i = 0; i < 200 && !activeHands.Contains((byte)1); i++) { manager.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => activeHands.Contains((byte)1), () => manager.PollEvents(), what: "hand slot 1 active");
             Assert.Contains((byte)1, activeHands);
 
             manager.Stop();
@@ -685,7 +676,7 @@ namespace ServerTests.Server.Network
             };
 
             manager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
-            for (int i = 0; i < 200 && serverClient == null; i++) { manager.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => serverClient != null, () => manager.PollEvents(), what: "server accepted client");
             Assert.NotNull(serverClient);
 
             OnGameLoop(server, () =>
@@ -695,7 +686,8 @@ namespace ServerTests.Server.Network
                 Invoke(server, "SendInventorySyncToOwner", serverClient!);
             });
 
-            for (int i = 0; i < 30; i++) { manager.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => received.Count > 0 && received[received.Count - 1].Length == 2,
+                () => manager.PollEvents(), what: "последний InventorySync содержит 2 записи");
 
             Assert.NotEmpty(received);
             var last = received[received.Count - 1];
@@ -895,7 +887,7 @@ namespace ServerTests.Server.Network
             ClientConnection? sc = null;
             server.OnClientConnected += c => { if (sc == null) sc = c; };
             var peer = CreateConnectedPeer();
-            for (int i = 0; i < 200 && sc == null; i++) Thread.Sleep(10);
+            TestWait.Until(() => sc != null, what: "server registered client");
             Assert.NotNull(sc);
 
             ushort empty = OnGameLoop(server, () =>

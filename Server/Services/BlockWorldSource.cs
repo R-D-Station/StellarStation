@@ -15,7 +15,8 @@ namespace Server.Services
                 try
                 {
                     var grid = BlockMapSerializer.LoadFromFile(resolved);
-                    Console.WriteLine($"[Map] Blocks: loaded v10 '{resolved}' ({grid.Sections.Count} sections)");
+                    Console.WriteLine($"[Map] Blocks: loaded v{BlockMapSerializer.LastLoadedVersion} '{resolved}' " +
+                                      $"({grid.Sections.Count} sections)");
                     return (grid, true);
                 }
                 catch (Exception e)

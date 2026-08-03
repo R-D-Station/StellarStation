@@ -14,6 +14,7 @@ namespace Shared.World.Blocks
         private readonly Dictionary<int, byte> _states = new();
         private readonly Dictionary<int, byte> _bake = new(); // авторская разметка (потолок/пол-интерьер), v11
         private readonly Dictionary<int, ushort> _zone = new();
+        private readonly Dictionary<int, ushort> _struct = new(); // v15: смещение до якоря мульти-блока
         private readonly Dictionary<int, FloorSeed> _seeds = new();
         private int _nonAirCount;
 
@@ -25,6 +26,9 @@ namespace Shared.World.Blocks
         public const byte BakeDivider = 1 << 2;
         /// <summary>Бейк-биты: ручное принудительное слияние зон (сильнее закрытой двери-ворот).</summary>
         public const byte BakeMerge = 1 << 3;
+
+        /// <summary>Биты-семантика КЛЕТКИ (не блока): переживают установку/снос блока в позиции.</summary>
+        public const byte BakeCellMask = BakeDivider | BakeMerge;
 
         /// <summary>Секция целиком Air (state на Air не бывает) — хранить/слать её не нужно.</summary>
         public bool IsEmpty => _nonAirCount == 0;
@@ -67,17 +71,43 @@ namespace Shared.World.Blocks
             }
 
             if (old == 0) _nonAirCount++;
+            _struct.Remove(localIndex); // смена типа рвёт принадлежность к прежней структуре (в т.ч. перезапись не-Air)
             if (type == 0)
             {
                 _nonAirCount--;
                 _states.Remove(localIndex);
-                _bake.Remove(localIndex);
                 _seeds.Remove(localIndex);
+                byte keep = (byte)(GetBake(localIndex) & BakeCellMask);
+                if (keep == 0)
+                    _bake.Remove(localIndex);
+                else
+                    _bake[localIndex] = keep;
             }
             return true;
         }
 
-        public ushort GetZone(int localIndex) => _zone.TryGetValue(localIndex, out ushort z) ? z : (ushort)0;
+        /// <summary>Зона клеток без записи в словаре: сжатие «дефолт + исключения» (0 = как до v14).</summary>
+        public ushort DefaultZone { get; private set; }
+
+        /// <summary>Сколько клеток отличаются от <see cref="DefaultZone"/> (диагностика/замер сжатия).</summary>
+        public int ZoneExceptionCount => _zone.Count;
+
+        /// <summary>Слой принадлежности структур: упакованное смещение до якоря. Запись ЕСТЬ только у НЕ-якорных клеток.</summary>
+        public ushort GetStruct(int localIndex) => _struct.TryGetValue(localIndex, out ushort s) ? s : (ushort)0;
+
+        public bool SetStruct(int localIndex, ushort packed)
+        {
+            ushort old = GetStruct(localIndex);
+            if (old == packed)
+                return false;
+            if (packed == 0)
+                _struct.Remove(localIndex);
+            else
+                _struct[localIndex] = packed;
+            return true;
+        }
+
+        public ushort GetZone(int localIndex) => _zone.TryGetValue(localIndex, out ushort z) ? z : DefaultZone;
 
         /// <summary>Записать ZoneId позиции. true — если изменился; в отличие от seed/bake, разрешено на Air (зона течёт через воздух).</summary>
         public bool SetZone(int localIndex, ushort zone)
@@ -85,11 +115,48 @@ namespace Shared.World.Blocks
             ushort old = GetZone(localIndex);
             if (old == zone)
                 return false;
-            if (zone == 0)
+            if (zone == DefaultZone)
                 _zone.Remove(localIndex);
             else
                 _zone[localIndex] = zone;
             return true;
+        }
+
+        /// <summary>Сбросить все зоны секции (дефолт и исключения) — полный пересчёт флуда стартует с чистого листа.</summary>
+        public void ResetZones()
+        {
+            _zone.Clear();
+            DefaultZone = 0;
+        }
+
+        /// <summary>Свернуть зоны: самый частый id по 4096 клеткам становится DefaultZone, в словаре остаются исключения.
+        /// При равенстве частот берётся меньший id (детерминизм).</summary>
+        public void CompactZones()
+        {
+            var values = new ushort[BlockCount];
+            var counts = new Dictionary<ushort, int>();
+            for (int li = 0; li < BlockCount; li++)
+            {
+                ushort z = GetZone(li);
+                values[li] = z;
+                counts.TryGetValue(z, out int c);
+                counts[z] = c + 1;
+            }
+
+            ushort best = 0;
+            int bestCount = -1;
+            foreach (var kv in counts)
+                if (kv.Value > bestCount || (kv.Value == bestCount && kv.Key < best))
+                {
+                    best = kv.Key;
+                    bestCount = kv.Value;
+                }
+
+            DefaultZone = best;
+            _zone.Clear();
+            for (int li = 0; li < BlockCount; li++)
+                if (values[li] != best)
+                    _zone[li] = values[li];
         }
 
         public bool TryGetSeed(int localIndex, out FloorSeed seed) => _seeds.TryGetValue(localIndex, out seed);
@@ -109,11 +176,9 @@ namespace Shared.World.Blocks
 
         public byte GetBake(int localIndex) => _bake.TryGetValue(localIndex, out byte b) ? b : (byte)0;
 
-        /// <summary>Записать бейк-байт (авторская разметка). true — если изменился; на Air запрещён.</summary>
+        /// <summary>Записать бейк-байт (авторская разметка). true — если изменился.</summary>
         public bool SetBake(int localIndex, byte bake)
         {
-            if (GetBlock(localIndex) == 0)
-                return false;
             byte old = GetBake(localIndex);
             if (old == bake)
                 return false;
@@ -162,14 +227,17 @@ namespace Shared.World.Blocks
         internal Dictionary<int, byte> States => _states;
         internal Dictionary<int, byte> Bake => _bake;
         internal Dictionary<int, ushort> Zone => _zone;
+        internal Dictionary<int, ushort> Struct => _struct;
         internal Dictionary<int, FloorSeed> Seeds => _seeds;
 
         /// <summary>Собрать секцию из десериализованных данных (raw-режим: palette/indices = null).</summary>
         internal static ChunkSection FromData(BlockPalette palette, byte[] indices, ushort[] raw, Dictionary<int, byte> states,
                                               Dictionary<int, byte> bake = null,
-                                              Dictionary<int, ushort> zone = null, Dictionary<int, FloorSeed> seeds = null)
+                                              Dictionary<int, ushort> zone = null, Dictionary<int, FloorSeed> seeds = null,
+                                              ushort defaultZone = 0, Dictionary<int, ushort> structOffsets = null)
         {
             var s = new ChunkSection();
+            s.DefaultZone = defaultZone;
             if (raw != null)
             {
                 s._raw = raw;
@@ -196,12 +264,21 @@ namespace Shared.World.Blocks
                         s._bake[kv.Key] = kv.Value;
             if (zone != null)
                 foreach (var kv in zone)
-                    if (kv.Value != 0)
+                    if (kv.Value != defaultZone)
                         s._zone[kv.Key] = kv.Value;
             if (seeds != null)
                 foreach (var kv in seeds)
                     if (s.GetBlock(kv.Key) != 0)
                         s._seeds[kv.Key] = kv.Value;
+            if (structOffsets != null)
+                foreach (var kv in structOffsets)
+                {
+                    if (kv.Value == 0)
+                        continue;
+                    ushort t = s.GetBlock(kv.Key);
+                    if (t != 0 && BlockCatalog.Get(t).PartCount > 1)
+                        s._struct[kv.Key] = kv.Value;
+                }
             return s;
         }
     }

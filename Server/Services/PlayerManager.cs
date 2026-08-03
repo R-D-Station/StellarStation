@@ -10,6 +10,7 @@ namespace Server.Services
     {
         private readonly GameServer _server;
         private readonly Dictionary<int, ClientConnection> _players;
+        private readonly object _playersLock = new();
 
         public PlayerManager(GameServer server)
         {
@@ -30,7 +31,8 @@ namespace Server.Services
             client.Z = (int)MathF.Floor(client.Mover.Y);
             client.Facing = 0;
 
-            _players[client.ConnectionId] = client;
+            lock (_playersLock)
+                _players[client.ConnectionId] = client;
 
             Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} spawned at ({client.X}, {client.Y}, z{client.Z})");
 
@@ -62,10 +64,15 @@ namespace Server.Services
         {
             // PlayerLeft ДО Remove. Пир уже снят из GameServer._clients → своё PlayerLeft не получит (корректно).
             _server.BroadcastToAll(new PlayerLeft { NetId = client.PlayerNetId });
-            _players.Remove(client.ConnectionId);
+            lock (_playersLock)
+                _players.Remove(client.ConnectionId);
             Console.WriteLine($"[PlayerManager] Player #{client.ConnectionId} left");
         }
 
-        public IReadOnlyCollection<ClientConnection> GetAllPlayers() => _players.Values;
+        public IReadOnlyCollection<ClientConnection> GetAllPlayers()
+        {
+            lock (_playersLock)
+                return _players.Values.ToArray();
+        }
     }
 }

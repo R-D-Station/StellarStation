@@ -19,32 +19,23 @@ namespace ServerTests.Server.Network
 
         private readonly SVars _config;
         private GameServer? _server;
-        private readonly int _testPort;
-        private static int _portCounter = 8600;
-        private static readonly object _portLock = new object();
+        private int _testPort;
 
         public PullTests()
         {
-            lock (_portLock)
-            {
-                _testPort = _portCounter++;
-                if (_testPort > 8800) _portCounter = 8600;
-            }
-
             _config = new SVars
             {
                 Ip = "127.0.0.1",
-                Port = _testPort,
+                Port = 0,
                 MaxPlayers = 10,
                 TickRate = 30,
-                ConnectionKey = $"PullTest_{_testPort}"
+                ConnectionKey = "PullTest"
             };
         }
 
         public void Dispose()
         {
             _server?.Stop();
-            Thread.Sleep(50);
         }
 
         private GameServer StartServer()
@@ -52,7 +43,7 @@ namespace ServerTests.Server.Network
             _config.MapPath = "";
             _server = new GameServer(_config);
             _server.Start();
-            Thread.Sleep(50);
+            _testPort = _server.BoundPort;
             _server.ProtoLookup = defId => defId == PullDef
                 ? new ItemProto(PullDef, SlotCategory.None, false, 1, 1, false, 0, pullable: true)
                 : new ItemProto(defId, SlotCategory.None, false, 1, 1, false, 0);
@@ -70,9 +61,11 @@ namespace ServerTests.Server.Network
             clientListener.PeerConnectedEvent += peer => { connectedPeer = peer; connected = true; };
 
             clientManager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
-            for (int i = 0; i < 100 && !connected; i++) { clientManager.PollEvents(); Thread.Sleep(10); }
-
-            if (connectedPeer == null)
+            try
+            {
+                TestWait.Until(() => connectedPeer != null, () => clientManager.PollEvents(), what: "peer connected");
+            }
+            catch (TimeoutException)
             {
                 clientManager.Stop();
                 throw new Exception($"Failed to connect to server on port {_testPort}");
@@ -96,8 +89,7 @@ namespace ServerTests.Server.Network
                 catch (Exception e) { error = e; }
                 finally { Volatile.Write(ref completed, true); }
             });
-            for (int i = 0; i < 500 && !Volatile.Read(ref completed); i++) Thread.Sleep(10);
-            if (!Volatile.Read(ref completed)) throw new TimeoutException("GameLoop did not run the queued action");
+            TestWait.Until(() => Volatile.Read(ref completed), TestWait.DefaultTimeoutMs, "GameLoop ran queued action");
             if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
         }
 
@@ -147,7 +139,7 @@ namespace ServerTests.Server.Network
             };
 
             manager.Connect("127.0.0.1", _testPort, _config.ConnectionKey);
-            for (int i = 0; i < 200 && serverClient == null; i++) { manager.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => serverClient != null, () => manager.PollEvents(), what: "server accepted client");
             Assert.NotNull(serverClient);
             for (int i = 0; i < 80; i++) { manager.PollEvents(); Thread.Sleep(10); }
 
@@ -162,13 +154,13 @@ namespace ServerTests.Server.Network
                 InvokePull(server, serverClient, netId);
             });
             Assert.Equal(netId, serverClient!.PulledNetId);
-            for (int i = 0; i < 100 && !syncs.Exists(s => s.PulledNetId == netId); i++) { manager.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => syncs.Exists(s => s.PulledNetId == netId), () => manager.PollEvents(), what: "PullSync (grab) received");
 
             Assert.Contains(syncs, s => s.PulledNetId == netId && s.ItemDefId == PullDef);
 
             syncs.Clear();
             OnGameLoop(server, () => InvokePull(server, serverClient!, netId));
-            for (int i = 0; i < 100 && !syncs.Exists(s => s.PulledNetId == 0); i++) { manager.PollEvents(); Thread.Sleep(10); }
+            TestWait.Until(() => syncs.Exists(s => s.PulledNetId == 0), () => manager.PollEvents(), what: "PullSync (release) received");
 
             Assert.Contains(syncs, s => s.PulledNetId == 0 && s.ItemDefId == 0);
 
@@ -369,8 +361,7 @@ namespace ServerTests.Server.Network
                 catch (Exception e) { error = e; }
                 finally { Volatile.Write(ref completed, true); }
             });
-            for (int i = 0; i < 500 && !Volatile.Read(ref completed); i++) Thread.Sleep(10);
-            if (!Volatile.Read(ref completed)) throw new TimeoutException("GameLoop did not run the queued action");
+            TestWait.Until(() => Volatile.Read(ref completed), TestWait.DefaultTimeoutMs, "GameLoop ran queued func");
             if (error != null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error).Throw();
             return result;
         }
